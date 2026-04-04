@@ -30,6 +30,8 @@ BASE_PACKAGES = [
     "numpy",
     "scikit-learn",
     "plotly",
+    "jupyter",
+    "ipywidgets",
 ]
 
 # Packages for data serialization and I/O
