@@ -32,6 +32,7 @@ BASE_PACKAGES = [
     "plotly",
     "jupyter",
     "ipywidgets",
+    "pysbd",
 ]
 
 # Packages for data serialization and I/O
@@ -47,6 +48,7 @@ CLASSIFICATION_PACKAGES = [
     "evaluate",
     "datasets",
     'sentence_transformers',
+    "seqeval"
 ]
 
 # For the old "install all" option, kept for compatibility if needed
