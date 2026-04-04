@@ -5,17 +5,18 @@
 
 # %%
 # --- Environment Setup ---
-# pip install transformers datasets tokenizers evaluate pysbd torch accelerate
-
+# pip install evaluate pysbd faker seqeval
+# %%
 import random
 import re
 import json
 from collections import defaultdict
-
+import string
+from faker import Faker
 import torch
 import numpy as np
 import evaluate
-from datasets import load_dataset, Dataset
+from datasets import load_dataset, Dataset, concatenate_datasets
 from transformers import (
     AutoTokenizer,
     AutoModelForTokenClassification,
@@ -51,6 +52,7 @@ LANGUAGE_GROUPS = {
 }
 
 ALL_LANGS = [lang for langs in LANGUAGE_GROUPS.values() for lang in langs]
+LANG_TO_GROUP = {lang: group for group, langs in LANGUAGE_GROUPS.items() for lang in langs}
 
 # Build BIO label map  (O=0, B-XX=odd, I-XX=even starting at 2)
 label2id = {"O": 0}
@@ -279,32 +281,29 @@ print(f"math_gen:    {len(synth_math_pool):>6} expressions")
 # ── 3. Symbol / emoji noise ────────────────────────────────────────────────────
 # Random streams of unicode block symbols, emoji, punctuation, and arrows.
 # Mimics garbled text, copy-paste artifacts, and non-linguistic tokens.
-_SYMBOL_POOL = list(
-    "☀☁☂☃☄★☆☇☈☉"   # misc symbols
-    "☔☕☖☗☘☙☚☛☜☝"
-    "♠♡♢♣♤♥♦♧"               # card suits
-    "✓✔✕✖✗✘✙✚"               # check/cross
-    "←↑→↓↔↕⇐⇒⇔"         # arrows
-    "■□▲△◆◇○●"               # shapes
-    "😀😁😂😃😄"             # emoji
-    "😉😊😍😡😢"
-    "🚀🚁🚂🚃🚄"             # transport
-    "🌀🌁🌂🌃🌄"             # nature
-    "!@#$%^&*()_+-=[]{}|;:,.<>?/~`"                                  # ASCII punct
-    "°±·×÷•…‰′″"  # misc punct
-)
+
+fake = Faker()
 
 def generate_symbol_noise(min_len: int = 3, max_len: int = 20) -> str:
-    """Return a random string of symbols/emoji with optional spacing."""
+    """Return a random string of symbols/emoji with optional spacing using Faker."""
     n = random.randint(min_len, max_len)
-    parts = [random.choice(_SYMBOL_POOL) for _ in range(n)]
-    # Randomly insert spaces to vary tokenisation
+
+    # We mix emojis and standard punctuation
+    parts = []
+    for _ in range(n):
+        # 50/50 chance to pick an emoji or a symbol
+        if random.random() < 0.5:
+            parts.append(fake.emoji())
+        else:
+            parts.append(random.choice(string.punctuation))
     spaced = []
     for i, ch in enumerate(parts):
         spaced.append(ch)
         if i < len(parts) - 1 and random.random() < 0.3:
             spaced.append(" ")
+
     return "".join(spaced)
+
 
 # Pre-generate a noise pool as well
 NOISE_N = 30_000
@@ -358,18 +357,19 @@ def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 
 def create_synthetic_doc(
     pool: dict[str, list[str]],
     latex_pool: list[str] | None = None,
+    required_langs: list[str] | None = None,
     o_inject_prob: float = 0.4,   # P(inserting at least one O-label span)
     n_segments: int = 4,
     strip_punct_prob: float = 0.5,
     swap_prob: float = 0.3,
 ) -> dict:
-    """"
+    """
     Sampling strategy:
       - Groups are weighted by their "global footprint" so major languages
         (Latin, EastAsian) appear more often than tail groups (MajorEconomies).
       - Within each selected group, one language is chosen uniformly.
-      - This lets English/Spanish/Chinese dominate naturally while still
-        giving every language coverage.
+      - `required_langs` can force coverage so every language appears at least
+        once in the overall synthetic corpus.
     """
     # Weight per group — tuned to reflect real-world multilingual text distribution.
     GROUP_WEIGHTS = {
@@ -386,13 +386,24 @@ def create_synthetic_doc(
     total_weight = sum(weights)
     norm_weights = [w / total_weight for w in weights]
 
-    # Sample n_segments groups (with replacement so a group can appear twice).
-    selected_groups = random.choices(group_names, weights=norm_weights, k=n_segments)
-    # Pick one language uniformly within each selected group.
-    chosen_langs = [random.choice(LANGUAGE_GROUPS[g]) for g in selected_groups]
-    # Deduplicate while preserving order (avoid two identical-lang segments).
+    chosen_langs: list[str] = []
     seen_langs: set[str] = set()
-    chosen_langs = [l for l in chosen_langs if not (l in seen_langs or seen_langs.add(l))]
+
+    # Always keep any requested languages. This is the coverage guarantee.
+    for lang in required_langs or []:
+        if pool.get(lang) and lang not in seen_langs:
+            chosen_langs.append(lang)
+            seen_langs.add(lang)
+
+    # Sample remaining segments from groups, with replacement so a group can repeat.
+    n_remaining_segments = max(0, n_segments - len(chosen_langs))
+    selected_groups = random.choices(group_names, weights=norm_weights, k=n_remaining_segments)
+    # Pick one language uniformly within each selected group.
+    for group in selected_groups:
+        lang = random.choice(LANGUAGE_GROUPS[group])
+        if lang not in seen_langs:
+            chosen_langs.append(lang)
+            seen_langs.add(lang)
 
     all_tokens, all_labels = [], []
     total_tokens = 0
@@ -447,13 +458,82 @@ def create_synthetic_doc(
 
 
 print("Generating synthetic mixed-language documents …")
-raw_examples = [
-    create_synthetic_doc(lang_sentences)
-    for _ in range(EXAMPLES_TARGET)
+
+# Guarantee representation: one coverage example per language, then fill the rest
+# with probabilistic group-sampled documents.
+missing_coverage_langs = [lang for lang in ALL_LANGS if not lang_sentences.get(lang)]
+if missing_coverage_langs:
+    print("WARNING: no extracted sentences for:", ", ".join(missing_coverage_langs))
+
+coverage_examples = [
+    create_synthetic_doc(lang_sentences, required_langs=[lang])
+    for lang in ALL_LANGS
+    if lang_sentences.get(lang)
 ]
+random_examples = [
+    create_synthetic_doc(lang_sentences)
+    for _ in range(max(0, EXAMPLES_TARGET - len(coverage_examples)))
+]
+raw_examples = coverage_examples + random_examples
+
 print(f"Generated {len(raw_examples)} examples")
 print("Sample tokens:", raw_examples[0]["tokens"][:12])
 print("Sample labels:", [id2label[l] for l in raw_examples[0]["ner_tags"][:12]])
+
+
+def print_sampling_stats(examples: list[dict], top_n: int = 12) -> None:
+    """Print per-language and per-group coverage stats for the synthetic corpus."""
+    example_lang_counts = defaultdict(int)
+    token_lang_counts = defaultdict(int)
+    group_example_counts = defaultdict(int)
+    group_token_counts = defaultdict(int)
+
+    for example in examples:
+        langs_in_example: set[str] = set()
+        for tag_id in example["ner_tags"]:
+            if tag_id == 0:
+                continue
+            lang = id2label[tag_id][2:].lower()
+            token_lang_counts[lang] += 1
+            group = LANG_TO_GROUP.get(lang, "Unknown")
+            group_token_counts[group] += 1
+            langs_in_example.add(lang)
+
+        for lang in langs_in_example:
+            example_lang_counts[lang] += 1
+            group = LANG_TO_GROUP.get(lang, "Unknown")
+            group_example_counts[group] += 1
+
+    missing_langs = [lang for lang in ALL_LANGS if example_lang_counts[lang] == 0]
+
+    print("\nSampling stats")
+    print("-" * 72)
+    print(f"Examples: {len(examples)}")
+    print(f"Languages covered: {len(ALL_LANGS) - len(missing_langs)}/{len(ALL_LANGS)}")
+    if missing_langs:
+        print("Missing languages:", ", ".join(missing_langs))
+    else:
+        print("Missing languages: none")
+
+    print("\nPer-language coverage (examples containing the language):")
+    for lang, count in sorted(example_lang_counts.items(), key=lambda x: (-x[1], x[0]))[:top_n]:
+        print(f"  {lang:<3}  {count:>5}")
+
+    print("\nPer-group coverage (examples / tokens):")
+    for group in LANGUAGE_GROUPS:
+        print(
+            f"  {group:<12} "
+            f"{group_example_counts[group]:>5} examples | "
+            f"{group_token_counts[group]:>7} tokens"
+        )
+
+    top_tokens = sorted(token_lang_counts.items(), key=lambda x: (-x[1], x[0]))[:top_n]
+    print("\nTop token languages:")
+    for lang, count in top_tokens:
+        print(f"  {lang:<3}  {count:>7}")
+
+
+print_sampling_stats(raw_examples)
 
 # %%
 # --- Label Alignment (sub-token → word-level) ---
@@ -496,13 +576,25 @@ def tokenize_and_align(example: dict) -> dict:
     return encoding
 
 
-hf_dataset = Dataset.from_list(raw_examples)
-hf_dataset = hf_dataset.map(tokenize_and_align, batched=False, remove_columns=["tokens", "ner_tags"])
+coverage_dataset = Dataset.from_list(coverage_examples)
+random_dataset = Dataset.from_list(random_examples)
 
-# Train / validation split (90 / 10)
-split = hf_dataset.train_test_split(test_size=0.1, seed=SEED)
-train_dataset = split["train"]
-eval_dataset  = split["test"]
+coverage_dataset = coverage_dataset.map(
+    tokenize_and_align,
+    batched=False,
+    remove_columns=["tokens", "ner_tags"],
+)
+random_dataset = random_dataset.map(
+    tokenize_and_align,
+    batched=False,
+    remove_columns=["tokens", "ner_tags"],
+)
+
+# Train / validation split (90 / 10).
+# Keep the coverage set in train so every language is guaranteed to appear there.
+split = random_dataset.train_test_split(test_size=0.1, seed=SEED)
+train_dataset = concatenate_datasets([coverage_dataset, split["train"]])
+eval_dataset = split["test"]
 print(f"Train: {len(train_dataset)} | Eval: {len(eval_dataset)}")
 
 # %%
