@@ -16,7 +16,7 @@ from faker import Faker
 import torch
 import numpy as np
 import evaluate
-from datasets import load_dataset, Dataset, concatenate_datasets
+from datasets import load_dataset, Dataset, DatasetDict, concatenate_datasets, load_from_disk
 from transformers import (
     AutoTokenizer,
     AutoModelForTokenClassification,
@@ -49,7 +49,10 @@ MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
 SYNTHETIC_CACHE = "./sentences_cache/synthetic_examples.parquet"
 SYNTHETIC_CACHE_META = "./sentences_cache/synthetic_examples.meta.json"
+CACHE_DIR = "./sentences_cache/tokenized_dataset"
+CACHE_META = "./sentences_cache/tokenized_dataset.meta.json"
 CACHE_VERSION = 1
+TOKENIZED_CACHE_VERSION = 1
 
 # %%
 # --- Language Configuration ---
@@ -553,6 +556,54 @@ def load_synthetic_examples_cache() -> tuple[list[dict], list[dict]] | None:
     return coverage_examples, random_examples
 
 
+def save_tokenized_dataset_cache(train_dataset, eval_dataset) -> None:
+    """Persist the tokenized train/eval split to disk."""
+    synthetic_meta = None
+    if os.path.exists(SYNTHETIC_CACHE_META):
+        with open(SYNTHETIC_CACHE_META) as f:
+            synthetic_meta = json.load(f)
+
+    DatasetDict({"train": train_dataset, "eval": eval_dataset}).save_to_disk(CACHE_DIR)
+    with open(CACHE_META, "w") as f:
+        json.dump(
+            {
+                "cache_version": TOKENIZED_CACHE_VERSION,
+                "model_checkpoint": MODEL_CHECKPOINT,
+                "max_length": MAX_LENGTH,
+                "seed": SEED,
+                "synthetic_cache_meta": synthetic_meta,
+            },
+            f,
+            indent=2,
+        )
+
+
+def load_tokenized_dataset_cache():
+    """Load tokenized train/eval split if the metadata matches the current config."""
+    if not (os.path.exists(CACHE_DIR) and os.path.exists(CACHE_META)):
+        return None
+
+    with open(CACHE_META) as f:
+        meta = json.load(f)
+
+    synthetic_meta = None
+    if os.path.exists(SYNTHETIC_CACHE_META):
+        with open(SYNTHETIC_CACHE_META) as f:
+            synthetic_meta = json.load(f)
+
+    expected_meta = {
+        "cache_version": TOKENIZED_CACHE_VERSION,
+        "model_checkpoint": MODEL_CHECKPOINT,
+        "max_length": MAX_LENGTH,
+        "seed": SEED,
+        "synthetic_cache_meta": synthetic_meta,
+    }
+    if meta != expected_meta:
+        return None
+
+    return load_from_disk(CACHE_DIR)
+
+
 def create_synthetic_doc(
     primary_pool: dict[str, deque[str]],
     fallback_pool: dict[str, deque[str]] | None = None,
@@ -863,23 +914,30 @@ def tokenize_and_align(example: dict) -> dict:
 
 coverage_dataset = Dataset.from_list(coverage_examples) # type: ignore
 random_dataset = Dataset.from_list(random_examples) # type: ignore
+cached_tokenized = load_tokenized_dataset_cache()
+if cached_tokenized is not None:
+    train_dataset = cached_tokenized["train"]
+    eval_dataset = cached_tokenized["eval"]
+    print(f"Loaded tokenized dataset cache from {CACHE_DIR}")
+else:
+    coverage_dataset = coverage_dataset.map(
+        tokenize_and_align,
+        batched=False,
+        remove_columns=["tokens", "ner_tags"],
+    )
+    random_dataset = random_dataset.map(
+        tokenize_and_align,
+        batched=False,
+        remove_columns=["tokens", "ner_tags"],
+    )
 
-coverage_dataset = coverage_dataset.map(
-    tokenize_and_align,
-    batched=False,
-    remove_columns=["tokens", "ner_tags"],
-)
-random_dataset = random_dataset.map(
-    tokenize_and_align,
-    batched=False,
-    remove_columns=["tokens", "ner_tags"],
-)
+    # Train / validation split (90 / 10).
+    # Keep the coverage set in train so every language is guaranteed to appear there.
+    split = random_dataset.train_test_split(test_size=0.1, seed=SEED)
+    train_dataset = concatenate_datasets([coverage_dataset, split["train"]])
+    eval_dataset = split["test"]
+    save_tokenized_dataset_cache(train_dataset, eval_dataset)
 
-# Train / validation split (90 / 10).
-# Keep the coverage set in train so every language is guaranteed to appear there.
-split = random_dataset.train_test_split(test_size=0.1, seed=SEED)
-train_dataset = concatenate_datasets([coverage_dataset, split["train"]])
-eval_dataset = split["test"]
 print(f"Train: {len(train_dataset)} | Eval: {len(eval_dataset)}")
 
 # %%
