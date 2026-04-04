@@ -451,7 +451,8 @@ def generate_synthetic_examples_chunk(
     np.random.seed(seed % (2**32 - 1))
 
     examples: list[dict] = []
-    for kind, lang in jobs:
+    worker_desc = f"Worker {worker_idx}"
+    for kind, lang in tqdm(jobs, desc=worker_desc, position=worker_idx, leave=False):
         if kind == "coverage":
             examples.append(
                 create_synthetic_doc(
@@ -611,7 +612,6 @@ generation_jobs.extend([("random", None)] * random_job_count)
 generation_workers = min(
     multiprocessing.cpu_count(),
     max(1, len(generation_jobs)),
-    8,
 )
 generation_workers = min(generation_workers, len(generation_jobs) or 1)
 
