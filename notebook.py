@@ -920,15 +920,19 @@ if cached_tokenized is not None:
     eval_dataset = cached_tokenized["eval"]
     print(f"Loaded tokenized dataset cache from {CACHE_DIR}")
 else:
+    map_workers = max(1, multiprocessing.cpu_count())
+    print(f"Tokenizing dataset with num_proc={map_workers}")
     coverage_dataset = coverage_dataset.map(
         tokenize_and_align,
         batched=False,
         remove_columns=["tokens", "ner_tags"],
+        num_proc=map_workers,
     )
     random_dataset = random_dataset.map(
         tokenize_and_align,
         batched=False,
         remove_columns=["tokens", "ner_tags"],
+        num_proc=map_workers,
     )
 
     # Train / validation split (90 / 10).
@@ -989,6 +993,7 @@ training_args = TrainingArguments(
     metric_for_best_model="f1",
     fp16=torch.cuda.is_available(),
     logging_steps=50,
+    save_total_limit=3,
     report_to="tensorboard",
     seed=SEED,
 )
