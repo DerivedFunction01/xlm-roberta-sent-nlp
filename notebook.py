@@ -42,6 +42,7 @@ ARTICLES_PER_LANG = 500   # increase for a larger dataset
 EXAMPLES_TARGET = 500_000  # synthetic mixed-language training examples to generate
 RESERVE_FRACTION = 0.15   # fraction of each language's sentences kept for guaranteed coverage
 MIN_RESERVED_SENTENCES = 4
+MAX_RESERVED_SENTENCES = 1000
 MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
 
@@ -376,9 +377,13 @@ def build_sentence_pools(
             continue
         shuffled = sentences[:]
         random.shuffle(shuffled)
+        reserve_target = int(round(len(shuffled) * RESERVE_FRACTION))
         reserve_n = min(
             len(shuffled),
-            max(MIN_RESERVED_SENTENCES, int(round(len(shuffled) * RESERVE_FRACTION))),
+            max(
+                MIN_RESERVED_SENTENCES,
+                min(reserve_target, MAX_RESERVED_SENTENCES),
+            ),
         )
         reserved[lang] = deque(shuffled[:reserve_n])
         main[lang] = deque(shuffled[reserve_n:])
