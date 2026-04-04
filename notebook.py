@@ -28,6 +28,8 @@ from transformers import (
 
 import os
 import pandas as pd
+from pathlib import Path
+from huggingface_hub import login
 from tqdm.auto import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -78,7 +80,12 @@ for idx, lang in enumerate(ALL_LANGS):
 NUM_LABELS = len(label2id)
 print(f"Total labels: {NUM_LABELS}")
 print("Sample:", dict(list(id2label.items())[:7]))
-
+# %%
+if Path("hf_token").exists():
+    with open("hf_token") as f:
+        token = f.read().strip()
+    login(token=token)
+    print("Logged in to Hugging Face Hub")
 # %%
 # --- Tokenizer ---
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
@@ -839,9 +846,9 @@ training_args = TrainingArguments(
     per_device_eval_batch_size=32,
     learning_rate=2e-5,
     weight_decay=0.01,
-    warmup_ratio=0.1,
-    eval_strategy="epoch",
-    save_strategy="epoch",
+    eval_strategy="steps",       # Evaluate every X steps
+    save_strategy="steps",       # Save every X steps
+    save_steps=500,              # Number of update steps between two evaluations/saves
     load_best_model_at_end=True,
     metric_for_best_model="f1",
     fp16=torch.cuda.is_available(),
@@ -849,7 +856,6 @@ training_args = TrainingArguments(
     report_to="tensorboard",
     seed=SEED,
 )
-
 trainer = Trainer(
     model=model,
     args=training_args,
@@ -863,6 +869,7 @@ print("Starting fine-tuning …")
 trainer.train()
 trainer.save_model("./lang-ner-xlmr-final")
 tokenizer.save_pretrained("./lang-ner-xlmr-final")
+trainer.push_to_hub()
 print("Model saved to ./lang-ner-xlmr-final")
 
 # %%
