@@ -922,18 +922,15 @@ if cached_tokenized is not None:
     print(f"Loaded tokenized dataset cache from {CACHE_DIR}")
 else:
     map_workers = max(1, mp.cpu_count() // 2)
-    print(f"Tokenizing dataset with num_proc={map_workers}")
     coverage_dataset = coverage_dataset.map(
         tokenize_and_align,
         batched=False,
         remove_columns=["tokens", "ner_tags"],
-        num_proc=map_workers,
     )
     random_dataset = random_dataset.map(
         tokenize_and_align,
         batched=False,
         remove_columns=["tokens", "ner_tags"],
-        num_proc=map_workers,
     )
 
     # Train / validation split (90 / 10).
