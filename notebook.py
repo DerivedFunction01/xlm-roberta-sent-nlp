@@ -269,7 +269,9 @@ def load_latex_formulas() -> list[str]:
     ds = load_dataset("yuntian-deng/im2latex-100k", split="train")
     formulas = []
     for row in ds:
-        f = _clean_formula(row["formula"])
+        _f = row["formula"] if isinstance(row, dict) else ""
+        assert isinstance(_f, str)
+        f = _clean_formula(_f)
         if LATEX_MIN_CHARS <= len(f) <= LATEX_MAX_CHARS:
             formulas.append(f)
     pd.DataFrame({"formula": formulas}).to_parquet(LATEX_CACHE, index=False)
@@ -284,8 +286,8 @@ print(f"im2latex:    {len(latex_formulas):>6} formulas")
 import importlib.util as _ilu, pathlib as _pl
 _mg_path = _pl.Path(__file__).parent / "math_gen.py"
 _spec    = _ilu.spec_from_file_location("math_gen", _mg_path)
-_mg      = _ilu.module_from_spec(_spec)
-_spec.loader.exec_module(_mg)
+_mg      = _ilu.module_from_spec(_spec) # type: ignore
+_spec.loader.exec_module(_mg) # type: ignore
 generate_synthetic_math = _mg.generate_synthetic_math
 
 SYNTH_MATH_N = 50_000   # pre-generate a pool; cheap and avoids per-doc overhead
@@ -541,8 +543,8 @@ def load_synthetic_examples_cache() -> tuple[list[dict], list[dict]] | None:
     random_examples: list[dict] = []
     for row in df.itertuples(index=False):
         example = {
-            "tokens": json.loads(row.tokens),
-            "ner_tags": json.loads(row.ner_tags),
+            "tokens": json.loads(row.tokens), # type: ignore
+            "ner_tags": json.loads(row.ner_tags), # type: ignore
         }
         if row.kind == "coverage":
             coverage_examples.append(example)
@@ -755,7 +757,7 @@ else:
         coverage_examples = [ex for ex in coverage_examples if ex is not None]
         random_examples = [ex for ex in random_examples if ex is not None]
 
-    save_synthetic_examples_cache(coverage_examples, random_examples)
+    save_synthetic_examples_cache(coverage_examples, random_examples) # type: ignore
 
 raw_examples = coverage_examples + random_examples
 
@@ -816,7 +818,7 @@ def print_sampling_stats(examples: list[dict], top_n: int = 12) -> None:
         print(f"  {lang:<3}  {count:>7}")
 
 
-print_sampling_stats(raw_examples)
+print_sampling_stats(raw_examples) # type: ignore
 
 # %%
 # --- Label Alignment (sub-token → word-level) ---
@@ -859,8 +861,8 @@ def tokenize_and_align(example: dict) -> dict:
     return encoding
 
 
-coverage_dataset = Dataset.from_list(coverage_examples)
-random_dataset = Dataset.from_list(random_examples)
+coverage_dataset = Dataset.from_list(coverage_examples) # type: ignore
+random_dataset = Dataset.from_list(random_examples) # type: ignore
 
 coverage_dataset = coverage_dataset.map(
     tokenize_and_align,
@@ -906,10 +908,10 @@ def compute_metrics(p):
     ]
     results = seqeval.compute(predictions=true_preds, references=true_labels)
     return {
-        "precision": results["overall_precision"],
-        "recall":    results["overall_recall"],
-        "f1":        results["overall_f1"],
-        "accuracy":  results["overall_accuracy"],
+        "precision": results["overall_precision"], # type: ignore
+        "recall":    results["overall_recall"], # type: ignore
+        "f1":        results["overall_f1"], # type: ignore
+        "accuracy":  results["overall_accuracy"], # type: ignore
     }
 
 
