@@ -872,6 +872,32 @@ def print_sampling_stats(examples: list[dict], top_n: int = 12) -> None:
 
 print_sampling_stats(raw_examples) # type: ignore
 
+
+def release_wikipedia_generation_memory() -> None:
+    """Drop the Wikipedia extraction and sentence-pool artifacts early."""
+    for name in [
+        "reserved_sentence_pools",
+        "main_sentence_pools",
+        "lang_sentences",
+        "coverage_plan",
+        "generation_jobs",
+        "job_chunks",
+        "reserved_worker_pools",
+        "main_worker_pools",
+        "latex_formulas",
+        "synth_math_pool",
+        "noise_pool",
+        "_O_SOURCES",
+    ]:
+        globals()[name] = None
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+release_wikipedia_generation_memory()
+
 # %%
 # --- Label Alignment (sub-token → word-level) ---
 # XLM-R uses SentencePiece; the tokenizer produces sub-tokens.
@@ -944,25 +970,13 @@ print(f"Train: {len(train_dataset)} | Eval: {len(eval_dataset)}")
 
 
 def release_generation_memory() -> None:
-    """Drop large one-off generation artifacts after the dataset is ready."""
+    """Drop synthetic-example artifacts that are no longer needed after tokenization."""
     for name in [
         "coverage_examples",
         "random_examples",
         "raw_examples",
         "coverage_dataset",
         "random_dataset",
-        "reserved_sentence_pools",
-        "main_sentence_pools",
-        "lang_sentences",
-        "coverage_plan",
-        "generation_jobs",
-        "job_chunks",
-        "reserved_worker_pools",
-        "main_worker_pools",
-        "latex_formulas",
-        "synth_math_pool",
-        "noise_pool",
-        "_O_SOURCES",
     ]:
         globals()[name] = None
 
