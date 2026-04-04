@@ -410,6 +410,68 @@ def draw_sentence(
     return None
 
 
+def chunk_list(items: list, n_chunks: int) -> list[list]:
+    """Split a list into roughly equal contiguous chunks."""
+    if n_chunks <= 1:
+        return [items]
+    chunk_size = (len(items) + n_chunks - 1) // n_chunks
+    return [items[i : i + chunk_size] for i in range(0, len(items), chunk_size)]
+
+
+def partition_sentence_pools(
+    pools: dict[str, deque[str]],
+    n_workers: int,
+) -> list[dict[str, deque[str]]]:
+    """Round-robin partition each language pool across workers."""
+    worker_pools: list[dict[str, deque[str]]] = [dict() for _ in range(n_workers)]
+    for lang, dq in pools.items():
+        items = list(dq)
+        for worker_idx in range(n_workers):
+            shard = items[worker_idx::n_workers]
+            if shard:
+                worker_pools[worker_idx][lang] = deque(shard)
+    return worker_pools
+
+
+def generate_synthetic_examples_chunk(
+    worker_idx: int,
+    jobs: list[tuple[str, str | None]],
+    primary_pool: dict[str, deque[str]],
+    fallback_pool: dict[str, deque[str]] | None,
+    source_pool: dict[str, list[str]],
+) -> list[dict]:
+    """
+    Generate a chunk of synthetic examples in one worker.
+
+    Each worker gets a deterministic seed offset and its own pool shard so that
+    sentence reuse stays low until the local shard is exhausted.
+    """
+    seed = SEED + (worker_idx * 10_000)
+    random.seed(seed)
+    np.random.seed(seed % (2**32 - 1))
+
+    examples: list[dict] = []
+    for kind, lang in jobs:
+        if kind == "coverage":
+            examples.append(
+                create_synthetic_doc(
+                    primary_pool,
+                    fallback_pool=fallback_pool,
+                    source_pool=source_pool,
+                    required_langs=[lang] if lang else None,
+                )
+            )
+        else:
+            examples.append(
+                create_synthetic_doc(
+                    primary_pool,
+                    fallback_pool=fallback_pool,
+                    source_pool=source_pool,
+                )
+            )
+    return examples
+
+
 def create_synthetic_doc(
     primary_pool: dict[str, deque[str]],
     fallback_pool: dict[str, deque[str]] | None = None,
@@ -542,25 +604,76 @@ for lang in ALL_LANGS:
     )
     coverage_plan.extend([lang] * coverage_docs_for_lang)
 
-for lang in tqdm(coverage_plan, desc="Coverage docs"):
-    coverage_examples.append(
-        create_synthetic_doc(
-            reserved_sentence_pools,
-            fallback_pool=main_sentence_pools,
-            source_pool=lang_sentences,
-            required_langs=[lang],
-        )
-    )
+random_job_count = max(0, EXAMPLES_TARGET - len(coverage_plan))
+generation_jobs: list[tuple[str, str | None]] = [("coverage", lang) for lang in coverage_plan]
+generation_jobs.extend([("random", None)] * random_job_count)
 
+generation_workers = min(
+    multiprocessing.cpu_count(),
+    max(1, len(generation_jobs)),
+    8,
+)
+generation_workers = min(generation_workers, len(generation_jobs) or 1)
+
+coverage_examples = []
 random_examples = []
-for _ in tqdm(range(max(0, EXAMPLES_TARGET - len(coverage_examples))), desc="Random docs"):
-    random_examples.append(
-        create_synthetic_doc(
-            main_sentence_pools,
-            fallback_pool=reserved_sentence_pools,
-            source_pool=lang_sentences,
-        )
-    )
+
+if generation_workers == 1:
+    for kind, lang in tqdm(generation_jobs, desc="Synthetic docs"):
+        if kind == "coverage":
+            coverage_examples.append(
+                create_synthetic_doc(
+                    reserved_sentence_pools,
+                    fallback_pool=main_sentence_pools,
+                    source_pool=lang_sentences,
+                    required_langs=[lang] if lang else None,
+                )
+            )
+        else:
+            random_examples.append(
+                create_synthetic_doc(
+                    main_sentence_pools,
+                    fallback_pool=reserved_sentence_pools,
+                    source_pool=lang_sentences,
+                )
+            )
+else:
+    job_chunks = chunk_list(generation_jobs, generation_workers)
+    reserved_worker_pools = partition_sentence_pools(reserved_sentence_pools, generation_workers)
+    main_worker_pools = partition_sentence_pools(main_sentence_pools, generation_workers)
+    coverage_examples = [None] * len(coverage_plan)
+    random_examples = [None] * random_job_count
+
+    with ProcessPoolExecutor(max_workers=generation_workers) as pool:
+        future_to_jobs = {}
+        job_start = 0
+        for worker_idx, jobs in enumerate(job_chunks):
+            if not jobs:
+                continue
+            future = pool.submit(
+                generate_synthetic_examples_chunk,
+                worker_idx,
+                jobs,
+                reserved_worker_pools[worker_idx],
+                main_worker_pools[worker_idx],
+                lang_sentences,
+            )
+            future_to_jobs[future] = (job_start, jobs)
+            job_start += len(jobs)
+
+        for future in tqdm(as_completed(future_to_jobs), total=len(future_to_jobs), desc="Synthetic docs"):
+            chunk_examples = future.result()
+            job_start, jobs = future_to_jobs[future]
+            for offset, (example, job) in enumerate(zip(chunk_examples, jobs)):
+                kind, _ = job
+                if kind == "coverage":
+                    coverage_examples[job_start + offset] = example
+                else:
+                    random_examples[job_start + offset - len(coverage_plan)] = example
+
+    coverage_examples = [ex for ex in coverage_examples if ex is not None]
+    random_examples = [ex for ex in random_examples if ex is not None]
+
 raw_examples = coverage_examples + random_examples
 
 print(f"Generated {len(raw_examples)} examples")
