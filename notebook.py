@@ -10,7 +10,7 @@
 import random
 import re
 import json
-from collections import defaultdict
+from collections import defaultdict, deque
 import string
 from faker import Faker
 import torch
@@ -26,6 +26,11 @@ from transformers import (
     pipeline,
 )
 
+import os
+import pandas as pd
+from tqdm.auto import tqdm
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
@@ -34,7 +39,11 @@ torch.manual_seed(SEED)
 MODEL_CHECKPOINT = "xlm-roberta-base"
 MAX_LENGTH = 512
 ARTICLES_PER_LANG = 500   # increase for a larger dataset
-EXAMPLES_TARGET = 10_000  # synthetic mixed-language training examples to generate
+EXAMPLES_TARGET = 500_000  # synthetic mixed-language training examples to generate
+RESERVE_FRACTION = 0.15   # fraction of each language's sentences kept for guaranteed coverage
+MIN_RESERVED_SENTENCES = 4
+MIN_COVERAGE_DOCS_PER_LANG = 2
+MAX_COVERAGE_DOCS_PER_LANG = 5
 
 # %%
 # --- Language Configuration ---
@@ -75,11 +84,6 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Data Extraction ---
 # Pull ~ARTICLES_PER_LANG sentences per language from the Wikipedia streaming dataset.
-
-import os
-import pandas as pd
-from tqdm.auto import tqdm
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 SENTENCES_DIR = "./sentences_cache"
 os.makedirs(SENTENCES_DIR, exist_ok=True)
@@ -208,7 +212,6 @@ def load_or_extract(lang: str) -> tuple[str, list[str]]:
     sentences = extract_sentences_from_wiki(lang)
     pd.DataFrame({"sentence": sentences}).to_parquet(path, index=False)
     return lang, sentences
-
 
 # ProcessPoolExecutor saturates CPU cores for segmentation work.
 # Workers == min(cpu_count, n_langs) — no point exceeding either.
@@ -346,6 +349,8 @@ def augment_boundary(tokens: list[str], strip_punct: bool) -> list[str]:
 def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 0.02):
     """Randomly swap tokens between positions to simulate within-sentence code-switching."""
     n = len(tokens)
+    if n < 2:
+        return tokens, labels
     n_swaps = max(1, int(n * swap_rate))
     for _ in range(n_swaps):
         i, j = random.sample(range(n), 2)
@@ -354,8 +359,56 @@ def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 
     return tokens, labels
 
 
+def build_sentence_pools(
+    sentence_map: dict[str, list[str]],
+) -> tuple[dict[str, deque[str]], dict[str, deque[str]]]:
+    """
+    Split each language into a reserved coverage pool and a main sampling pool.
+
+    Both pools are shuffled first, then consumed without replacement. Once a pool
+    is empty, callers can fall back to the original sentence list.
+    """
+    reserved: dict[str, deque[str]] = {}
+    main: dict[str, deque[str]] = {}
+
+    for lang, sentences in sentence_map.items():
+        if not sentences:
+            continue
+        shuffled = sentences[:]
+        random.shuffle(shuffled)
+        reserve_n = min(
+            len(shuffled),
+            max(MIN_RESERVED_SENTENCES, int(round(len(shuffled) * RESERVE_FRACTION))),
+        )
+        reserved[lang] = deque(shuffled[:reserve_n])
+        main[lang] = deque(shuffled[reserve_n:])
+
+    return reserved, main
+
+
+def draw_sentence(
+    lang: str,
+    primary_pool: dict[str, deque[str]],
+    fallback_pool: dict[str, deque[str]] | None = None,
+    source_pool: dict[str, list[str]] | None = None,
+) -> str | None:
+    """
+    Draw a sentence without replacement from the preferred pool, then fallback
+    pool, then finally the original list if we have exhausted our bags.
+    """
+    if primary_pool.get(lang):
+        return primary_pool[lang].popleft()
+    if fallback_pool and fallback_pool.get(lang):
+        return fallback_pool[lang].popleft()
+    if source_pool and source_pool.get(lang):
+        return random.choice(source_pool[lang])
+    return None
+
+
 def create_synthetic_doc(
-    pool: dict[str, list[str]],
+    primary_pool: dict[str, deque[str]],
+    fallback_pool: dict[str, deque[str]] | None = None,
+    source_pool: dict[str, list[str]] | None = None,
     latex_pool: list[str] | None = None,
     required_langs: list[str] | None = None,
     o_inject_prob: float = 0.4,   # P(inserting at least one O-label span)
@@ -391,7 +444,7 @@ def create_synthetic_doc(
 
     # Always keep any requested languages. This is the coverage guarantee.
     for lang in required_langs or []:
-        if pool.get(lang) and lang not in seen_langs:
+        if (primary_pool.get(lang) or (fallback_pool and fallback_pool.get(lang)) or (source_pool and source_pool.get(lang))) and lang not in seen_langs:
             chosen_langs.append(lang)
             seen_langs.add(lang)
 
@@ -411,10 +464,9 @@ def create_synthetic_doc(
     for lang in chosen_langs:
         if total_tokens >= MAX_LENGTH - 20:
             break
-        sents = pool.get(lang, [])
-        if not sents:
+        sent = draw_sentence(lang, primary_pool, fallback_pool, source_pool)
+        if sent is None:
             continue
-        sent = random.choice(sents)
         tokens = tokenizer.tokenize(sent)
         if not tokens:
             continue
@@ -459,21 +511,51 @@ def create_synthetic_doc(
 
 print("Generating synthetic mixed-language documents …")
 
-# Guarantee representation: one coverage example per language, then fill the rest
-# with probabilistic group-sampled documents.
+# Guarantee representation by reserving a fraction of each language's sentences,
+# then building several guaranteed documents from that reserved pool.
+reserved_sentence_pools, main_sentence_pools = build_sentence_pools(lang_sentences)
+reserved_total = sum(len(pool) for pool in reserved_sentence_pools.values())
+main_total = sum(len(pool) for pool in main_sentence_pools.values())
+print(
+    f"Reserved sentence bags: {reserved_total} total | "
+    f"Main sentence bags: {main_total} total"
+)
+
 missing_coverage_langs = [lang for lang in ALL_LANGS if not lang_sentences.get(lang)]
 if missing_coverage_langs:
     print("WARNING: no extracted sentences for:", ", ".join(missing_coverage_langs))
 
-coverage_examples = [
-    create_synthetic_doc(lang_sentences, required_langs=[lang])
-    for lang in ALL_LANGS
-    if lang_sentences.get(lang)
-]
-random_examples = [
-    create_synthetic_doc(lang_sentences)
-    for _ in range(max(0, EXAMPLES_TARGET - len(coverage_examples)))
-]
+coverage_examples = []
+coverage_plan = []
+for lang in ALL_LANGS:
+    if not lang_sentences.get(lang):
+        continue
+    reserved_n = len(reserved_sentence_pools.get(lang, []))
+    coverage_docs_for_lang = max(
+        1,
+        min(MAX_COVERAGE_DOCS_PER_LANG, max(MIN_COVERAGE_DOCS_PER_LANG, (reserved_n + 3) // 4)),
+    )
+    coverage_plan.extend([lang] * coverage_docs_for_lang)
+
+for lang in tqdm(coverage_plan, desc="Coverage docs"):
+    coverage_examples.append(
+        create_synthetic_doc(
+            reserved_sentence_pools,
+            fallback_pool=main_sentence_pools,
+            source_pool=lang_sentences,
+            required_langs=[lang],
+        )
+    )
+
+random_examples = []
+for _ in tqdm(range(max(0, EXAMPLES_TARGET - len(coverage_examples))), desc="Random docs"):
+    random_examples.append(
+        create_synthetic_doc(
+            main_sentence_pools,
+            fallback_pool=reserved_sentence_pools,
+            source_pool=lang_sentences,
+        )
+    )
 raw_examples = coverage_examples + random_examples
 
 print(f"Generated {len(raw_examples)} examples")
