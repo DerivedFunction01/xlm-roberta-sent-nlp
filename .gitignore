@@ -210,4 +210,4 @@ __marimo__/
 *.codex
 *.parquet
 hf_token
-sentence_cache
+sentences_cache/*

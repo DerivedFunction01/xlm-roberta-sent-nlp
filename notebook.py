@@ -10,6 +10,8 @@
 import random
 import re
 import json
+import gc
+import multiprocessing as mp
 from collections import defaultdict, deque
 import string
 from faker import Faker
@@ -229,8 +231,7 @@ def load_or_extract(lang: str) -> tuple[str, list[str]]:
 
 # ProcessPoolExecutor saturates CPU cores for segmentation work.
 # Workers == min(cpu_count, n_langs) — no point exceeding either.
-import multiprocessing
-MAX_WORKERS = min(multiprocessing.cpu_count(), len(ALL_LANGS))
+MAX_WORKERS = min(mp.cpu_count(), len(ALL_LANGS))
 
 print(f"Extracting sentences \u2192 cached under \'{SENTENCES_DIR}/'")
 print(f"(Workers: {MAX_WORKERS} processes | cached languages skip extraction)\n")
@@ -744,7 +745,7 @@ else:
     generation_jobs.extend([("random", None)] * random_job_count)
 
     generation_workers = min(
-        multiprocessing.cpu_count(),
+        mp.cpu_count(),
         max(1, len(generation_jobs)),
     )
     generation_workers = min(generation_workers, len(generation_jobs) or 1)
@@ -920,7 +921,7 @@ if cached_tokenized is not None:
     eval_dataset = cached_tokenized["eval"]
     print(f"Loaded tokenized dataset cache from {CACHE_DIR}")
 else:
-    map_workers = max(1, multiprocessing.cpu_count())
+    map_workers = max(1, mp.cpu_count() // 2)
     print(f"Tokenizing dataset with num_proc={map_workers}")
     coverage_dataset = coverage_dataset.map(
         tokenize_and_align,
@@ -943,6 +944,37 @@ else:
     save_tokenized_dataset_cache(train_dataset, eval_dataset)
 
 print(f"Train: {len(train_dataset)} | Eval: {len(eval_dataset)}")
+
+
+def release_generation_memory() -> None:
+    """Drop large one-off generation artifacts after the dataset is ready."""
+    for name in [
+        "coverage_examples",
+        "random_examples",
+        "raw_examples",
+        "coverage_dataset",
+        "random_dataset",
+        "reserved_sentence_pools",
+        "main_sentence_pools",
+        "lang_sentences",
+        "coverage_plan",
+        "generation_jobs",
+        "job_chunks",
+        "reserved_worker_pools",
+        "main_worker_pools",
+        "latex_formulas",
+        "synth_math_pool",
+        "noise_pool",
+        "_O_SOURCES",
+    ]:
+        globals()[name] = None
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+release_generation_memory()
 
 # %%
 # --- Model ---
