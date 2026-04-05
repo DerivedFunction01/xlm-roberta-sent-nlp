@@ -412,6 +412,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
     next_article_idx = 0
     accepted_articles = 0
     miss_streak = 0
+    completed_cleanly = False
     if os.path.exists(temp_path) and os.path.exists(meta_path):
         try:
             committed_sentences = pd.read_parquet(temp_path)["sentence"].tolist()
@@ -537,11 +538,13 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                     break
 
         _write_sentence_parquet(final_path, committed_sentences)
+        completed_cleanly = True
     finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        if os.path.exists(meta_path):
-            os.remove(meta_path)
+        if completed_cleanly:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            if os.path.exists(meta_path):
+                os.remove(meta_path)
 
     return final_path
 
