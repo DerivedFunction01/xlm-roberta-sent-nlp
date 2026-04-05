@@ -176,6 +176,9 @@ _DEFAULT_BOUNDS = (30, 600)
 WIKI_NON_CONTENT = re.compile(r"[\W_]+", flags=re.UNICODE)
 WIKI_DIGITS = re.compile(r"\d")
 MAX_DIGIT_RATIO = 0.10
+WIKI_WORDS = re.compile(r"\b\w+\b", flags=re.UNICODE)
+LATIN_GROUPS = {"English", "LatinCore", "LatinTier2"}
+MIN_LATIN_WORDS = 4
 
 
 def _non_punct_char_count(s: str) -> int:
@@ -188,10 +191,17 @@ def _digit_count(s: str) -> int:
     return len(WIKI_DIGITS.findall(s))
 
 
+def _word_count(s: str) -> int:
+    """Count Unicode word-like tokens in a sentence."""
+    return len(WIKI_WORDS.findall(s))
+
+
 def _is_valid_sentence(s: str, lang: str) -> bool:
     mn, mx = _SENT_BOUNDS.get(lang, _DEFAULT_BOUNDS)
     visible = _non_punct_char_count(s)
     if not (mn < visible < mx):
+        return False
+    if LANG_TO_GROUP.get(lang) in LATIN_GROUPS and _word_count(s) < MIN_LATIN_WORDS:
         return False
     digits = _digit_count(s)
     return digits <= visible * MAX_DIGIT_RATIO
@@ -218,7 +228,7 @@ def prepare_wiki_paragraphs(text: str) -> list[str] | None:
 
 def _strip_ascii_for_lang(lang: str) -> bool:
     """Return True when we should scrub ASCII words from a language's text."""
-    return LANG_TO_GROUP.get(lang) not in {"English", "LatinCore", "LatinTier2"}
+    return LANG_TO_GROUP.get(lang) not in LATIN_GROUPS
 
 
 def clean_wiki_sentence(sentence: str, lang: str) -> str:
