@@ -133,6 +133,7 @@ WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WIKI_PARENS = re.compile(r"\s*[\(\（][^()\(\)（）》】\[\]\{\}]*?[\)\）]\s*")
 WIKI_NUMBERS = re.compile(r"\d+")
+WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
 WIKI_SPACES = re.compile(r"\s{2,}")
 
 # Languages natively supported by pysbd (da and el added from MajorEconomies).
@@ -187,10 +188,17 @@ def clean_and_halve(text: str):
     return text[: len(text) // 2].strip()
 
 
-def clean_wiki_sentence(sentence: str) -> str:
+def _strip_ascii_for_lang(lang: str) -> bool:
+    """Return True when we should scrub ASCII words from a language's text."""
+    return LANG_TO_GROUP.get(lang) != "Latin"
+
+
+def clean_wiki_sentence(sentence: str, lang: str) -> str:
     """Remove parenthetical text, digits, and extra whitespace from a sentence."""
     sentence = WIKI_PARENS.sub(" ", sentence)
     sentence = WIKI_NUMBERS.sub("", sentence)
+    if _strip_ascii_for_lang(lang):
+        sentence = WIKI_ASCII_WORDS.sub("", sentence)
     sentence = WIKI_SPACES.sub(" ", sentence)
     return sentence.strip()
 
@@ -239,7 +247,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
 
         sents = segmenter.segment(text) if segmenter else SENT_SPLIT.split(text) # type: ignore
         for s in sents:
-            s = clean_wiki_sentence(s)
+            s = clean_wiki_sentence(s, lang)
             if _is_valid_sentence(s, lang):
                 sentences.append(s)
 
@@ -255,7 +263,7 @@ def load_or_extract(lang: str) -> tuple[str, list[str]]:
     path = parquet_path(lang)
     if os.path.exists(path):
         cached = pd.read_parquet(path)["sentence"].tolist()
-        cleaned = [clean_wiki_sentence(s) for s in cached]
+        cleaned = [clean_wiki_sentence(s, lang) for s in cached]
         cleaned = [s for s in cleaned if _is_valid_sentence(s, lang)]
         if cleaned != cached:
             pd.DataFrame({"sentence": cleaned}).to_parquet(path, index=False)
