@@ -51,7 +51,8 @@ def _ident() -> str:
         "calc",
         "find",
         "run",
-        "temp"
+        "temp",
+        "_"
     ])
     base = fake.word().replace("-", "_").lower().strip("_") or "value"
     if common_prefix:
