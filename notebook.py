@@ -939,7 +939,19 @@ SYNTH_MATH_N = 50_000   # pre-generate a pool; cheap and avoids per-doc overhead
 synth_math_pool: list[str] = [generate_synthetic_math() for _ in range(SYNTH_MATH_N)]
 print(f"math_gen:    {len(synth_math_pool):>6} expressions")
 
-# ── 3. Symbol / emoji noise ────────────────────────────────────────────────────
+# ── 3. html_noise ──────────────────────────────────────────────────────────────
+# HTML tags and boilerplate kept intact, while text content is stripped away.
+_html_path = _pl.Path(__file__).parent / "html_noise.py"
+_html_spec = _ilu.spec_from_file_location("html_noise", _html_path)
+_html = _ilu.module_from_spec(_html_spec) # type: ignore
+_html_spec.loader.exec_module(_html) # type: ignore
+generate_html_artifact = _html.generate_html_artifact
+
+HTML_NOISE_N = 30_000
+html_noise_pool: list[str] = [generate_html_artifact() for _ in range(HTML_NOISE_N)]
+print(f"html noise:  {len(html_noise_pool):>6} snippets")
+
+# ── 4. Symbol / emoji noise ────────────────────────────────────────────────────
 # Random streams of unicode block symbols, emoji, punctuation, and arrows.
 # Mimics garbled text, copy-paste artifacts, and non-linguistic tokens.
 
@@ -989,10 +1001,10 @@ gibberish_pool: list[str] = [generate_gibberish_text() for _ in range(GIBBERISH_
 print(f"gibberish:  {len(gibberish_pool):>6} strings")
 
 # ── Combined O-label pool ──────────────────────────────────────────────────────
-# Weighted so real LaTeX and synthetic math dominate, while gibberish stays a
-# smaller but visible corruption/noise signal.
-_O_SOURCES  = [latex_formulas, synth_math_pool, noise_pool, gibberish_pool]
-_O_WEIGHTS  = [0.40,           0.35,            0.10,       0.15]
+# Weighted so real LaTeX and synthetic math dominate, while gibberish and HTML
+# artifacts stay visible but secondary.
+_O_SOURCES  = [latex_formulas, synth_math_pool, html_noise_pool, noise_pool, gibberish_pool]
+_O_WEIGHTS  = [0.35,           0.30,            0.15,           0.10,       0.10]
 
 def sample_o_span() -> str:
     """Draw one O-label span from the combined pool."""
@@ -1601,6 +1613,7 @@ def release_wikipedia_generation_memory() -> None:
         "main_worker_pools",
         "latex_formulas",
         "synth_math_pool",
+        "html_noise_pool",
         "noise_pool",
         "gibberish_pool",
         "_O_SOURCES",
