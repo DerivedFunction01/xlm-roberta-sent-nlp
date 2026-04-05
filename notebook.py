@@ -1096,6 +1096,37 @@ lang_sentences = finalize_wiki_sentence_cache(lang_sentences)
 # Together they teach the model that equations, markup, noise, and gibberish
 # do not belong to any language.
 
+# Keep the cache helpers local to this cell so the noise pools can be rebuilt
+# without needing to execute the wiki extraction cell first.
+def _write_text_parquet(path: str, column_name: str, values: list[str]) -> None:
+    """Write a text list to parquet under a named column."""
+    if not values:
+        pd.DataFrame({column_name: []}).to_parquet(path, index=False)
+        return
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError:
+        pd.DataFrame({column_name: values}).to_parquet(path, index=False)
+        return
+    table = pa.table({column_name: pa.array(values, type=pa.string())})
+    pq.write_table(table, path)
+
+
+def _load_or_build_text_pool(
+    path: str,
+    column_name: str,
+    builder,
+    label: str,
+) -> list[str]:
+    """Load a cached text pool from parquet or build and cache it."""
+    if os.path.exists(path):
+        return pd.read_parquet(path)[column_name].tolist()
+    values = builder()
+    _write_text_parquet(path, column_name, values)
+    print(f"  Cached {len(values)} {label} → {path}")
+    return values
+
 # ── 1. im2latex ────────────────────────────────────────────────────────────────
 LATEX_CACHE     = f"{SENTENCES_DIR}/latex_formulas.parquet"
 LATEX_MIN_CHARS = 8
@@ -1137,7 +1168,13 @@ _spec.loader.exec_module(_mg) # type: ignore
 generate_synthetic_math = _mg.generate_synthetic_math
 
 SYNTH_MATH_N = 50_000   # pre-generate a pool; cheap and avoids per-doc overhead
-synth_math_pool: list[str] = [generate_synthetic_math() for _ in range(SYNTH_MATH_N)]
+SYNTH_MATH_CACHE = f"{SENTENCES_DIR}/synth_math_pool.parquet"
+synth_math_pool: list[str] = _load_or_build_text_pool(
+    SYNTH_MATH_CACHE,
+    "expression",
+    lambda: [generate_synthetic_math() for _ in range(SYNTH_MATH_N)],
+    "synthetic math expressions",
+)
 print(f"math_gen:    {len(synth_math_pool):>6} expressions")
 
 # ── 3. code_noise ──────────────────────────────────────────────────────────────
@@ -1151,15 +1188,33 @@ generate_css_artifact = _code.generate_css_artifact
 generate_code_artifact = _code.generate_code_artifact
 
 HTML_NOISE_N = 30_000
-html_noise_pool: list[str] = [generate_html_artifact() for _ in range(HTML_NOISE_N)]
+HTML_NOISE_CACHE = f"{SENTENCES_DIR}/html_noise_pool.parquet"
+html_noise_pool: list[str] = _load_or_build_text_pool(
+    HTML_NOISE_CACHE,
+    "snippet",
+    lambda: [generate_html_artifact() for _ in range(HTML_NOISE_N)],
+    "HTML noise snippets",
+)
 print(f"html noise:  {len(html_noise_pool):>6} snippets")
 
 CSS_NOISE_N = 30_000
-css_noise_pool: list[str] = [generate_css_artifact() for _ in range(CSS_NOISE_N)]
+CSS_NOISE_CACHE = f"{SENTENCES_DIR}/css_noise_pool.parquet"
+css_noise_pool: list[str] = _load_or_build_text_pool(
+    CSS_NOISE_CACHE,
+    "snippet",
+    lambda: [generate_css_artifact() for _ in range(CSS_NOISE_N)],
+    "CSS noise snippets",
+)
 print(f"css noise:   {len(css_noise_pool):>6} snippets")
 
 CODE_NOISE_N = 30_000
-code_noise_pool: list[str] = [generate_code_artifact() for _ in range(CODE_NOISE_N)]
+CODE_NOISE_CACHE = f"{SENTENCES_DIR}/code_noise_pool.parquet"
+code_noise_pool: list[str] = _load_or_build_text_pool(
+    CODE_NOISE_CACHE,
+    "snippet",
+    lambda: [generate_code_artifact() for _ in range(CODE_NOISE_N)],
+    "code noise snippets",
+)
 print(f"code noise:  {len(code_noise_pool):>6} snippets")
 
 # ── 4. Symbol / emoji noise ────────────────────────────────────────────────────
@@ -1191,7 +1246,13 @@ def generate_symbol_noise(min_len: int = 3, max_len: int = 20) -> str:
 
 # Pre-generate a noise pool as well
 NOISE_N = 30_000
-noise_pool: list[str] = [generate_symbol_noise() for _ in range(NOISE_N)]
+NOISE_CACHE = f"{SENTENCES_DIR}/symbol_noise_pool.parquet"
+noise_pool: list[str] = _load_or_build_text_pool(
+    NOISE_CACHE,
+    "snippet",
+    lambda: [generate_symbol_noise() for _ in range(NOISE_N)],
+    "symbol noise strings",
+)
 print(f"symbol noise:{len(noise_pool):>6} strings")
 
 english_seed_sentences = (lang_sentences or {}).get("en", [])
@@ -1208,7 +1269,13 @@ def generate_gibberish_text() -> str:
 
 
 GIBBERISH_N = 30_000
-gibberish_pool: list[str] = [generate_gibberish_text() for _ in range(GIBBERISH_N)]
+GIBBERISH_CACHE = f"{SENTENCES_DIR}/gibberish_pool.parquet"
+gibberish_pool: list[str] = _load_or_build_text_pool(
+    GIBBERISH_CACHE,
+    "snippet",
+    lambda: [generate_gibberish_text() for _ in range(GIBBERISH_N)],
+    "gibberish strings",
+)
 print(f"gibberish:  {len(gibberish_pool):>6} strings")
 
 # ── Combined O-label pool ──────────────────────────────────────────────────────
