@@ -46,6 +46,13 @@ from huggingface_hub import login
 from tqdm.auto import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+try:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+except ImportError:
+    pa = None
+    pq = None
+
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
@@ -72,8 +79,9 @@ WIKI_TEMP_DIR = os.path.join(SENTENCES_DIR, "_wiki_tmp")
 os.makedirs(WIKI_TEMP_DIR, exist_ok=True)
 WIKI_SEGMENTATION_DEBUG_DIR = os.path.join(WIKI_TEMP_DIR, "segmentation_debug")
 os.makedirs(WIKI_SEGMENTATION_DEBUG_DIR, exist_ok=True)
-SYNTHETIC_CACHE = f"{SENTENCES_DIR}/synthetic_examples.parquet"
-SYNTHETIC_CACHE_META = f"{SENTENCES_DIR}/synthetic_examples.meta.json"
+SYNTHETIC_CACHE = os.path.join(SENTENCES_DIR, "synthetic_examples")
+os.makedirs(SYNTHETIC_CACHE, exist_ok=True)
+SYNTHETIC_CACHE_META = os.path.join(SYNTHETIC_CACHE, "synthetic_examples.meta.json")
 SYNTHETIC_TEMP_DIR = os.path.join(SENTENCES_DIR, "_synthetic_tmp")
 os.makedirs(SYNTHETIC_TEMP_DIR, exist_ok=True)
 CACHE_DIR = f"{SENTENCES_DIR}/tokenized_dataset"
@@ -87,7 +95,7 @@ USE_SYNTHETIC_CACHE = True
 FORCE_REBUILD_SYNTHETIC_CACHE = False
 USE_TOKENIZED_CACHE = True
 FORCE_REBUILD_TOKENIZED_CACHE = False
-GENERATION_WORKERS = mp.cpu_count() // 2
+GENERATION_WORKERS = mp.cpu_count() // 4
 
 # Optional notebook-state placeholders.
 # These let later cells run even if the generation cell was skipped.
@@ -96,14 +104,8 @@ smol_sentences: dict[str, list[str]] | None = None
 reserved_sentence_pools: dict[str, deque[str]] | None = None
 main_sentence_pools: dict[str, deque[str]] | None = None
 coverage_plan: list[str] | None = None
-generation_jobs: list[tuple[str, str | None]] | None = None
-job_chunks: list[list[tuple[str, str | None]]] | None = None
 reserved_worker_pools: list[dict[str, deque[str]]] | None = None
 main_worker_pools: list[dict[str, deque[str]]] | None = None
-coverage_examples: list[dict] | None = None
-random_examples: list[dict] | None = None
-raw_examples: list[dict] | None = None
-
 # %%
 # --- Language Configuration ---
 # Script groups and their ISO codes.
@@ -647,10 +649,7 @@ def _write_sentence_parquet(path: str, sentences: list[str]) -> None:
     if not sentences:
         pd.DataFrame({"sentence": []}).to_parquet(path, index=False)
         return
-    try:
-        import pyarrow as pa
-        import pyarrow.parquet as pq
-    except ImportError:
+    if pa is None or pq is None:
         pd.DataFrame({"sentence": sentences}).to_parquet(path, index=False)
         return
     table = pa.table({"sentence": pa.array(sentences, type=pa.string())})
@@ -678,40 +677,92 @@ def _synthetic_worker_temp_path(worker_idx: int) -> str:
     return os.path.join(SYNTHETIC_TEMP_DIR, f"worker_{worker_idx}.parquet")
 
 
-def _write_synthetic_examples_parquet(path: str, coverage_examples: list[dict], random_examples: list[dict]) -> None:
-    """Write synthetic examples to parquet with kind/original_text/tokens/ner_tags columns."""
-    rows = []
-    for kind, examples in (("coverage", coverage_examples), ("random", random_examples)):
-        for example in examples:
-            rows.append(
-                {
-                    "kind": kind,
-                    "original_text": example.get("original_text", ""),
-                    "tokens": json.dumps(example["tokens"]),
-                    "ner_tags": json.dumps(example["ner_tags"]),
-                }
-            )
-    pd.DataFrame(rows).to_parquet(path, index=False)
+def _synthetic_shard_path(worker_idx: int) -> str:
+    """Return the final parquet shard path for a synthetic-doc worker."""
+    return os.path.join(SYNTHETIC_CACHE, f"part-{worker_idx:05d}.parquet")
 
 
-def _read_synthetic_examples_parquet(path: str) -> tuple[list[dict], list[dict]]:
-    """Read a synthetic-example parquet shard back into coverage/random lists."""
-    df = pd.read_parquet(path)
-    coverage_examples: list[dict] = []
-    random_examples: list[dict] = []
-    for row in df.itertuples(index=False):
-        example = {
-            "original_text": getattr(row, "original_text", ""),
-            "tokens": json.loads(row.tokens), # type: ignore
-            "ner_tags": json.loads(row.ner_tags), # type: ignore
-        }
-        if not example["original_text"]:
-            example["original_text"] = " ".join(example["tokens"])
-        if row.kind == "coverage":
-            coverage_examples.append(example)
-        else:
-            random_examples.append(example)
-    return coverage_examples, random_examples
+def _synthetic_rows_to_table(rows: list[dict]):
+    """Convert a list of row dicts into an Arrow table."""
+    if pa is None:
+        raise RuntimeError("pyarrow is required for synthetic parquet shards")
+
+    schema = pa.schema(
+        [
+            ("kind", pa.string()),
+            ("original_text", pa.string()),
+            ("tokens", pa.string()),
+            ("ner_tags", pa.string()),
+        ]
+    )
+    return pa.Table.from_pylist(rows, schema=schema)
+
+
+def _append_synthetic_rows(writer, rows: list[dict]) -> None:
+    """Append a small batch of synthetic rows to an open Parquet writer."""
+    if not rows:
+        return
+    writer.write_table(_synthetic_rows_to_table(rows))
+
+
+def _synthetic_example_to_row(kind: str, example: dict) -> dict:
+    """Convert one generated example into a parquet row."""
+    return {
+        "kind": kind,
+        "original_text": example.get("original_text", ""),
+        "tokens": json.dumps(example["tokens"]),
+        "ner_tags": json.dumps(example["ner_tags"]),
+    }
+
+
+def _synthetic_row_to_example(row) -> dict:
+    """Convert a parquet row back into an in-memory example dict."""
+    example = {
+        "original_text": getattr(row, "original_text", ""),
+        "tokens": json.loads(getattr(row, "tokens")),
+        "ner_tags": json.loads(getattr(row, "ner_tags")),
+    }
+    if not example["original_text"]:
+        example["original_text"] = " ".join(example["tokens"])
+    return example
+
+
+def _move_synthetic_shard(temp_path: str, worker_idx: int) -> str:
+    """Move a worker temp shard into the final synthetic cache directory."""
+    final_path = _synthetic_shard_path(worker_idx)
+    os.replace(temp_path, final_path)
+    meta_temp = temp_path.replace(".parquet", ".meta.json")
+    meta_final = final_path.replace(".parquet", ".meta.json")
+    if os.path.exists(meta_temp):
+        os.replace(meta_temp, meta_final)
+    return final_path
+
+
+def _clear_synthetic_cache_dir() -> None:
+    """Remove old synthetic shard files before rebuilding the cache."""
+    if not os.path.exists(SYNTHETIC_CACHE):
+        os.makedirs(SYNTHETIC_CACHE, exist_ok=True)
+        return
+    for path in glob.glob(os.path.join(SYNTHETIC_CACHE, "*.parquet")):
+        os.remove(path)
+    for path in glob.glob(os.path.join(SYNTHETIC_CACHE, "*.meta.json")):
+        os.remove(path)
+
+
+def _synthetic_cache_shards() -> list[str]:
+    """Return all parquet shards currently stored for synthetic examples."""
+    return sorted(glob.glob(os.path.join(SYNTHETIC_CACHE, "*.parquet")))
+
+
+def _load_synthetic_examples_dataset():
+    """Load the synthetic cache as a Hugging Face dataset backed by parquet shards."""
+    shard_paths = _synthetic_cache_shards()
+    if not shard_paths:
+        return None
+    try:
+        return load_dataset("parquet", data_files=shard_paths, split="train")
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -1196,10 +1247,7 @@ def _write_text_parquet(path: str, column_name: str, values: list[str]) -> None:
     if not values:
         pd.DataFrame({column_name: []}).to_parquet(path, index=False)
         return
-    try:
-        import pyarrow as pa
-        import pyarrow.parquet as pq
-    except ImportError:
+    if pa is None or pq is None:
         pd.DataFrame({column_name: values}).to_parquet(path, index=False)
         return
     table = pa.table({column_name: pa.array(values, type=pa.string())})
@@ -1461,20 +1509,15 @@ def draw_sentence(
     lang: str,
     primary_pool: dict[str, deque[str]],
     fallback_pool: dict[str, deque[str]] | None = None,
-    source_pool: dict[str, list[str]] | None = None,
-    allow_source_reuse: bool = False,
 ) -> str | None:
     """
     Draw a sentence without replacement from the preferred pool, then fallback
-    pool. Source reuse is optional and disabled by default so depleted languages
-    stop being oversampled.
+    pool.
     """
     if primary_pool.get(lang):
         return primary_pool[lang].popleft()
     if fallback_pool and fallback_pool.get(lang):
         return fallback_pool[lang].popleft()
-    if allow_source_reuse and source_pool and source_pool.get(lang):
-        return random.choice(source_pool[lang])
     return None
 
 
@@ -1515,7 +1558,8 @@ def partition_sentence_pools(
 
 def generate_synthetic_examples_chunk(
     worker_idx: int,
-    jobs: list[tuple[str, str | None]],
+    coverage_langs: list[str],
+    random_count: int,
     primary_pool: dict[str, deque[str]],
     fallback_pool: dict[str, deque[str]] | None,
 ) -> str:
@@ -1529,47 +1573,82 @@ def generate_synthetic_examples_chunk(
     random.seed(seed)
     np.random.seed(seed % (2**32 - 1))
 
-    examples: list[dict] = []
     worker_desc = f"Worker {worker_idx}"
-    for kind, lang in tqdm(jobs, desc=worker_desc, position=worker_idx, leave=False):
-        if kind == "coverage":
-            examples.append(
-                create_synthetic_doc(
-                    primary_pool,
-                    fallback_pool=fallback_pool,
-                    required_langs=[lang] if lang else None,
-                )
-            )
-        else:
-            examples.append(
-                create_synthetic_doc(
-                    primary_pool,
-                    fallback_pool=fallback_pool,
-                )
-            )
-    coverage_examples = [ex for idx, ex in enumerate(examples) if jobs[idx][0] == "coverage"]
-    random_examples = [ex for idx, ex in enumerate(examples) if jobs[idx][0] == "random"]
     temp_path = _synthetic_worker_temp_path(worker_idx)
-    _write_synthetic_examples_parquet(temp_path, coverage_examples, random_examples)
+    batch_rows: list[dict] = []
+    coverage_count = 0
+    random_written = 0
+
+    if pq is None:
+        raise RuntimeError("pyarrow is required for streaming synthetic shard writes")
+
+    writer = pq.ParquetWriter(
+        temp_path,
+        _synthetic_rows_to_table(
+            [
+                {
+                    "kind": "coverage",
+                    "original_text": "",
+                    "tokens": "",
+                    "ner_tags": "",
+                }
+            ]
+        ).schema,
+    )
+    try:
+        total_jobs = len(coverage_langs) + random_count
+        with tqdm(total=total_jobs, desc=worker_desc, position=worker_idx, leave=False) as pbar:
+            for lang in coverage_langs:
+                example = build_synthetic_doc_with_retry(
+                    primary_pool,
+                    fallback_pool=fallback_pool,
+                    required_langs=[lang],
+                    worker_idx=worker_idx,
+                )
+                batch_rows.append(_synthetic_example_to_row("coverage", example))
+                coverage_count += 1
+                pbar.update(1)
+                pbar.set_postfix_str(f"coverage={coverage_count} random={random_written}")
+                if len(batch_rows) >= 64:
+                    _append_synthetic_rows(writer, batch_rows)
+                    batch_rows.clear()
+
+            for _ in range(random_count):
+                example = build_synthetic_doc_with_retry(
+                    primary_pool,
+                    fallback_pool=fallback_pool,
+                    worker_idx=worker_idx,
+                )
+                batch_rows.append(_synthetic_example_to_row("random", example))
+                random_written += 1
+                pbar.update(1)
+                pbar.set_postfix_str(f"coverage={coverage_count} random={random_written}")
+                if len(batch_rows) >= 64:
+                    _append_synthetic_rows(writer, batch_rows)
+                    batch_rows.clear()
+
+        _append_synthetic_rows(writer, batch_rows)
+    finally:
+        writer.close()
+
     _write_json_atomic(
         temp_path.replace(".parquet", ".meta.json"),
         {
             "worker_idx": worker_idx,
             "seed": seed,
-            "job_count": len(jobs),
-            "coverage_count": len(coverage_examples),
-            "random_count": len(random_examples),
+            "job_count": len(coverage_langs) + random_count,
+            "coverage_count": coverage_count,
+            "random_count": random_written,
         },
     )
     return temp_path
 
 
 def save_synthetic_examples_cache(
-    coverage_examples: list[dict],
-    random_examples: list[dict],
+    shard_paths: list[str],
+    total_examples: int,
 ) -> None:
-    """Persist synthetic examples to Parquet plus a small metadata sidecar."""
-    _write_synthetic_examples_parquet(SYNTHETIC_CACHE, coverage_examples, random_examples)
+    """Persist synthetic shard metadata after the worker parquet files are published."""
     with open(SYNTHETIC_CACHE_META, "w") as f:
         json.dump(
             {
@@ -1580,6 +1659,8 @@ def save_synthetic_examples_cache(
                 "max_reserved_sentences": MAX_RESERVED_SENTENCES,
                 "min_coverage_docs_per_lang": MIN_COVERAGE_DOCS_PER_LANG,
                 "max_coverage_docs_per_lang": MAX_COVERAGE_DOCS_PER_LANG,
+                "total_examples": total_examples,
+                "shards": [os.path.basename(p) for p in shard_paths],
             },
             f,
             indent=2,
@@ -1622,16 +1703,29 @@ def ensure_token_debug_cache() -> None:
     """Rebuild the token debug cache from synthetic examples if it is missing."""
     if os.path.exists(CACHE_DEBUG_PARQUET) and os.path.exists(CACHE_DEBUG_META):
         return
-    cached_examples = load_synthetic_examples_cache() if (USE_SYNTHETIC_CACHE and not FORCE_REBUILD_SYNTHETIC_CACHE) else None
-    if cached_examples is None:
+    synthetic_dataset = _load_synthetic_examples_dataset() if (USE_SYNTHETIC_CACHE and not FORCE_REBUILD_SYNTHETIC_CACHE) else None
+    if synthetic_dataset is None:
         return
-    coverage_examples, random_examples = cached_examples
+    sample_n = min(len(synthetic_dataset), 10_000)
+    sample_dataset = synthetic_dataset.select(range(sample_n))
+    coverage_examples = []
+    random_examples = []
+    for row in sample_dataset:
+        example = {
+            "original_text": row.get("original_text", ""),
+            "tokens": json.loads(row["tokens"]),
+            "ner_tags": json.loads(row["ner_tags"]),
+        }
+        if row["kind"] == "coverage":
+            coverage_examples.append(example)
+        else:
+            random_examples.append(example)
     save_token_debug_cache(coverage_examples, random_examples)
 
 
-def load_synthetic_examples_cache() -> tuple[list[dict], list[dict]] | None:
-    """Load cached synthetic examples if the cache metadata matches the current config."""
-    if not (os.path.exists(SYNTHETIC_CACHE) and os.path.exists(SYNTHETIC_CACHE_META)):
+def load_synthetic_examples_cache():
+    """Load cached synthetic examples as a parquet-backed dataset if metadata matches."""
+    if not os.path.exists(SYNTHETIC_CACHE_META):
         return None
 
     with open(SYNTHETIC_CACHE_META) as f:
@@ -1649,8 +1743,7 @@ def load_synthetic_examples_cache() -> tuple[list[dict], list[dict]] | None:
     if meta != expected_meta:
         return None
 
-    coverage_examples, random_examples = _read_synthetic_examples_parquet(SYNTHETIC_CACHE)
-    return coverage_examples, random_examples
+    return _load_synthetic_examples_dataset()
 
 
 def create_synthetic_doc(
@@ -1728,7 +1821,7 @@ def create_synthetic_doc(
     for lang in chosen_langs:
         if total_tokens >= MAX_LENGTH - 20:
             break
-        sent = draw_sentence(lang, primary_pool, fallback_pool, allow_source_reuse=False)
+        sent = draw_sentence(lang, primary_pool, fallback_pool)
         if sent is None:
             continue
         original_text_parts.append(sent)
@@ -1787,10 +1880,48 @@ def create_synthetic_doc(
     return {"original_text": " ".join(original_text_parts).strip(), "tokens": all_tokens, "ner_tags": all_labels}
 
 
+SYNTHETIC_DOC_RETRY_LIMIT = 8
+
+def build_synthetic_doc_with_retry(
+    primary_pool: dict[str, deque[str]],
+    fallback_pool: dict[str, deque[str]] | None = None,
+    required_langs: list[str] | None = None,
+    worker_idx: int = 0,
+    max_retries: int = SYNTHETIC_DOC_RETRY_LIMIT,
+) -> dict:
+    """Build a synthetic doc and retry if it is malformed or too long for the model."""
+    for attempt in range(1, max_retries + 1):
+        example = create_synthetic_doc(
+            primary_pool,
+            fallback_pool=fallback_pool,
+            required_langs=required_langs,
+        )
+        if len(example.get("tokens", ())) != len(example.get("ner_tags", ())):
+            continue
+        try:
+            encoded = tokenizer(
+                example["tokens"],
+                is_split_into_words=True,
+                truncation=True,
+                max_length=MAX_LENGTH,
+                padding=False,
+                return_overflowing_tokens=True,
+            )
+        except Exception:
+            continue
+        if encoded.get("overflowing_tokens"):
+            continue
+        return example
+
+    raise RuntimeError(
+        f"Worker {worker_idx}: failed to build a valid synthetic doc after "
+        f"{max_retries} attempts"
+    )
+
+
 print("Generating synthetic mixed-language documents …")
-cached_examples = load_synthetic_examples_cache() if (USE_SYNTHETIC_CACHE and not FORCE_REBUILD_SYNTHETIC_CACHE) else None
-if cached_examples is not None:
-    coverage_examples, random_examples = cached_examples
+synthetic_dataset = load_synthetic_examples_cache() if (USE_SYNTHETIC_CACHE and not FORCE_REBUILD_SYNTHETIC_CACHE) else None
+if synthetic_dataset is not None:
     print(f"Loaded cached synthetic examples from {SYNTHETIC_CACHE}")
 else:
     # Guarantee representation by reserving a fraction of each language's sentences,
@@ -1843,69 +1974,69 @@ else:
     lang_sentences = None
     smol_sentences = None
 
+    _clear_synthetic_cache_dir()
     random_job_count = max(0, EXAMPLES_TARGET - len(coverage_plan))
-    generation_jobs = [("coverage", lang) for lang in coverage_plan]
-    generation_jobs.extend([("random", None)] * random_job_count)
-
-    generation_workers = min(
-        GENERATION_WORKERS,
-        max(1, len(generation_jobs)),
-    )
-    generation_workers = min(generation_workers, len(generation_jobs) or 1)
-
-    coverage_examples = []
-    random_examples = []
+    generation_workers = min(GENERATION_WORKERS, max(1, EXAMPLES_TARGET))
+    shard_paths: list[str] = []
+    synthetic_total_examples = 0
+    coverage_chunks = chunk_list(coverage_plan, generation_workers)
+    random_counts = [
+        random_job_count // generation_workers + (1 if i < (random_job_count % generation_workers) else 0)
+        for i in range(generation_workers)
+    ]
 
     if generation_workers == 1:
         temp_path = generate_synthetic_examples_chunk(
             0,
-            generation_jobs,
+            coverage_plan,
+            random_job_count,
             reserved_sentence_pools,
             main_sentence_pools,
-            lang_sentences,
         )
-        coverage_examples, random_examples = _read_synthetic_examples_parquet(temp_path)
-        for path in (temp_path, temp_path.replace(".parquet", ".meta.json")):
-            if os.path.exists(path):
-                os.remove(path)
+        final_path = _move_synthetic_shard(temp_path, 0)
+        shard_paths.append(final_path)
+        with open(final_path.replace(".parquet", ".meta.json"), encoding="utf-8") as f:
+            meta = json.load(f)
+        synthetic_total_examples += int(meta.get("coverage_count", 0)) + int(meta.get("random_count", 0))
     else:
-        job_chunks = chunk_list(generation_jobs, generation_workers)
         reserved_worker_pools = partition_sentence_pools(reserved_sentence_pools, generation_workers)
         main_worker_pools = partition_sentence_pools(main_sentence_pools, generation_workers)
-        coverage_examples = []
-        random_examples = []
 
         with ProcessPoolExecutor(max_workers=generation_workers) as pool:
-            future_to_jobs = {}
-            for worker_idx, jobs in enumerate(job_chunks):
-                if not jobs:
-                    continue
+            future_to_worker = {}
+            for worker_idx in range(generation_workers):
+                coverage_langs = coverage_chunks[worker_idx] if worker_idx < len(coverage_chunks) else []
                 future = pool.submit(
                     generate_synthetic_examples_chunk,
                     worker_idx,
-                    jobs,
+                    coverage_langs,
+                    random_counts[worker_idx],
                     reserved_worker_pools[worker_idx],
                     main_worker_pools[worker_idx],
                 )
-                future_to_jobs[future] = worker_idx
+                future_to_worker[future] = worker_idx
 
-            for future in tqdm(as_completed(future_to_jobs), total=len(future_to_jobs), desc="Synthetic docs"):
+            for future in tqdm(as_completed(future_to_worker), total=len(future_to_worker), desc="Synthetic docs"):
                 temp_path = future.result()
-                chunk_coverage, chunk_random = _read_synthetic_examples_parquet(temp_path)
-                coverage_examples.extend(chunk_coverage)
-                random_examples.extend(chunk_random)
-                for path in (temp_path, temp_path.replace(".parquet", ".meta.json")):
-                    if os.path.exists(path):
-                        os.remove(path)
+                worker_idx = future_to_worker[future]
+                final_path = _move_synthetic_shard(temp_path, worker_idx)
+                shard_paths.append(final_path)
+                with open(final_path.replace(".parquet", ".meta.json"), encoding="utf-8") as f:
+                    meta = json.load(f)
+                synthetic_total_examples += int(meta.get("coverage_count", 0)) + int(meta.get("random_count", 0))
 
     if USE_SYNTHETIC_CACHE:
-        save_synthetic_examples_cache(coverage_examples, random_examples) # type: ignore
+        save_synthetic_examples_cache(shard_paths, synthetic_total_examples)
 
-raw_examples = (coverage_examples or []) + (random_examples or [])
+    synthetic_dataset = _load_synthetic_examples_dataset()
 
-print(f"Generated {len(raw_examples)} examples")
-print("Sample tokens:", raw_examples[0]["tokens"][:12])
-print("Sample labels:", [id2label[l] for l in raw_examples[0]["ner_tags"][:12]])
+if synthetic_dataset is None:
+    raise RuntimeError("Synthetic dataset cache could not be loaded.")
+
+print(f"Generated {len(synthetic_dataset)} examples")
+sample_example = _synthetic_row_to_example(synthetic_dataset[0])
+print("Sample tokens:", sample_example["tokens"][:12])
+print("Sample labels:", [id2label[l] for l in sample_example["ner_tags"][:12]])
 
 
 def print_sampling_stats(examples: list[dict], top_n: int = 12) -> None:
@@ -1960,7 +2091,10 @@ def print_sampling_stats(examples: list[dict], top_n: int = 12) -> None:
         print(f"  {lang:<3}  {count:>7}")
 
 
-print_sampling_stats(raw_examples) # type: ignore
+preview_n = min(2_000, len(synthetic_dataset))
+preview_examples = [_synthetic_row_to_example(row) for row in synthetic_dataset.select(range(preview_n))]
+if preview_examples:
+    print_sampling_stats(preview_examples)
 
 
 def release_wikipedia_generation_memory() -> None:
@@ -1970,8 +2104,6 @@ def release_wikipedia_generation_memory() -> None:
         "main_sentence_pools",
         "lang_sentences",
         "coverage_plan",
-        "generation_jobs",
-        "job_chunks",
         "reserved_worker_pools",
         "main_worker_pools",
         "latex_formulas",
@@ -2105,10 +2237,9 @@ if cached_tokenized is not None:
     print(f"Loaded tokenized dataset cache from {CACHE_DIR}")
     ensure_token_debug_cache()
 else:
-    if coverage_examples is None or random_examples is None:
-        cached_examples = load_synthetic_examples_cache() if (USE_SYNTHETIC_CACHE and not FORCE_REBUILD_SYNTHETIC_CACHE) else None
-        if cached_examples is not None:
-            coverage_examples, random_examples = cached_examples
+    if synthetic_dataset is None:
+        synthetic_dataset = load_synthetic_examples_cache() if (USE_SYNTHETIC_CACHE and not FORCE_REBUILD_SYNTHETIC_CACHE) else None
+        if synthetic_dataset is not None:
             print(f"Loaded cached synthetic examples from {SYNTHETIC_CACHE}")
         else:
             raise RuntimeError(
@@ -2116,10 +2247,35 @@ else:
                 "Run the generation cell first, or enable USE_SYNTHETIC_CACHE."
             )
 
-    coverage_dataset = Dataset.from_list(coverage_examples) # type: ignore
-    random_dataset = Dataset.from_list(random_examples) # type: ignore
+    def _decode_synthetic_example(example: dict) -> dict:
+        return {
+            "original_text": example.get("original_text", ""),
+            "tokens": json.loads(example["tokens"]),
+            "ner_tags": json.loads(example["ner_tags"]),
+        }
 
-    save_token_debug_cache(coverage_examples, random_examples)  # type: ignore
+    coverage_dataset = synthetic_dataset.filter(lambda ex: ex["kind"] == "coverage").map(  # type: ignore
+        _decode_synthetic_example,
+        batched=False,
+        remove_columns=["kind"],
+    )
+    random_dataset = synthetic_dataset.filter(lambda ex: ex["kind"] == "random").map(  # type: ignore
+        _decode_synthetic_example,
+        batched=False,
+        remove_columns=["kind"],
+    )
+
+    raw_coverage_dataset = synthetic_dataset.filter(lambda ex: ex["kind"] == "coverage")  # type: ignore
+    raw_random_dataset = synthetic_dataset.filter(lambda ex: ex["kind"] == "random")  # type: ignore
+    debug_coverage_sample = [
+        _synthetic_row_to_example(row)
+        for row in raw_coverage_dataset.select(range(min(len(raw_coverage_dataset), 1000)))
+    ]
+    debug_random_sample = [
+        _synthetic_row_to_example(row)
+        for row in raw_random_dataset.select(range(min(len(raw_random_dataset), 1000)))
+    ]
+    save_token_debug_cache(debug_coverage_sample, debug_random_sample)
 
     coverage_dataset = coverage_dataset.map(
         tokenize_and_align,
@@ -2146,9 +2302,8 @@ print(f"Train: {len(train_dataset)} | Eval: {len(eval_dataset)}")
 def release_generation_memory() -> None:
     """Drop synthetic-example artifacts that are no longer needed after tokenization."""
     for name in [
-        "coverage_examples",
-        "random_examples",
-        "raw_examples",
+        "synthetic_dataset",
+        "preview_examples",
         "coverage_dataset",
         "random_dataset",
     ]:
