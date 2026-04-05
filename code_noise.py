@@ -12,10 +12,20 @@ fake = Faker()
 
 def _ident() -> str:
     """Return a plausible variable/function identifier."""
-    parts = [fake.word().replace("-", "_") for _ in range(random.randint(1, 3))]
+    base = fake.word().replace("-", "_").lower().strip("_") or "value"
+    mode = random.random()
+    if mode < 0.25:
+        return base
+    if mode < 0.50:
+        return f"{base}{random.randint(0, 999)}"
+    if mode < 0.70:
+        return f"{base}_{random.randint(0, 999)}"
+    if mode < 0.85:
+        return f"{base}{random.randint(1, 9)}_{fake.word().replace('-', '_').lower().strip('_')}"
+    parts = [fake.word().replace("-", "_") for _ in range(random.randint(1, 2))]
     ident = "_".join(p.lower() for p in parts if p)
     ident = ident.strip("_")
-    return ident or "value"
+    return ident or base
 
 
 def _camel() -> str:
