@@ -87,8 +87,7 @@ USE_SYNTHETIC_CACHE = True
 FORCE_REBUILD_SYNTHETIC_CACHE = False
 USE_TOKENIZED_CACHE = True
 FORCE_REBUILD_TOKENIZED_CACHE = False
-GENERATION_WORKERS = mp.cpu_count() - 1
-TOKENIZE_NUM_PROC = max(1, mp.cpu_count() // 2)
+GENERATION_WORKERS = mp.cpu_count() // 2
 
 # Optional notebook-state placeholders.
 # These let later cells run even if the generation cell was skipped.
@@ -2126,13 +2125,11 @@ else:
         tokenize_and_align,
         batched=False,
         remove_columns=["tokens", "ner_tags"],
-        num_proc=TOKENIZE_NUM_PROC,
     )
     random_dataset = random_dataset.map(
         tokenize_and_align,
         batched=False,
         remove_columns=["tokens", "ner_tags"],
-        num_proc=TOKENIZE_NUM_PROC,
     )
 
     # Train / validation split (90 / 10).
