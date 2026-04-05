@@ -177,6 +177,8 @@ WIKI_LEADING_ORPHAN_LETTER = re.compile(r"^[\"'“”‘’«»‹›\s,.;:!?…
 WIKI_BLOCKED_MARKERS = ("http",)
 WIKI_BLOCKED_CHARS = {"=", "<", ">", "|"}
 WIKI_OPENING_QUOTES = {"\"", "'", "“", "”", "‘", "’", "«", "»", "‹", "›"}
+LENGTH_PRIORITY_LANGS = {"vi", "sv", "lo", "sd", "am", "km", "ug", "my"}
+LENGTH_PRIORITY_SCAN_LIMIT = 50_000
 
 # Languages natively supported by pysbd (da and el added from MajorEconomies).
 # Native support in pysbd as of 2026
@@ -433,6 +435,55 @@ def _sanitize_paragraph_for_pysbd(paragraph: str) -> str:
     return paragraph.replace("\\", " ")
 
 
+def _extract_article_sentences(
+    article_text: str,
+    lang: str,
+    segmenter,
+    article_idx: int,
+    article_title: str = "",
+) -> list[str]:
+    """Extract cleaned sentences from one article text."""
+    paragraphs = prepare_wiki_paragraphs(article_text, lang)
+    if paragraphs is None:
+        return []
+
+    article_batch: list[str] = []
+    for paragraph_idx, paragraph in enumerate(paragraphs):
+        safe_paragraph = _sanitize_paragraph_for_pysbd(paragraph)
+        try:
+            sents = segmenter.segment(safe_paragraph) if segmenter else SENT_SPLIT.split(safe_paragraph) # type: ignore
+        except re.error as exc:
+            _log_segmentation_failure(
+                lang,
+                article_idx,
+                paragraph_idx,
+                paragraph,
+                exc,
+                article_title=article_title,
+            )
+            sents = SENT_SPLIT.split(safe_paragraph)
+        for s in sents:
+            s = clean_wiki_sentence(s, lang)
+            if _is_valid_sentence(s, lang):
+                article_batch.append(s)
+
+    return article_batch
+
+
+def _collect_priority_articles(dataset, lang: str, scan_limit: int) -> list[tuple[int, int, dict]]:
+    """Collect a bounded pool of long articles and sort them by length descending."""
+    min_chars = _article_min_chars(lang)
+    candidates: list[tuple[int, int, dict]] = []
+    for article_idx, article in enumerate(dataset.take(scan_limit)):
+        article_text = article.get("text", "")
+        if len(article_text) < min_chars:
+            continue
+        candidates.append((len(article_text), article_idx, article))
+
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return candidates
+
+
 def _strip_ascii_for_lang(lang: str) -> bool:
     """Return True when we should scrub ASCII words from a language's text."""
     return LANG_TO_GROUP.get(lang) not in LATIN_GROUPS
@@ -556,6 +607,73 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
     temp_path = temp_parquet_path(lang)
     meta_path = temp_meta_path(lang)
 
+    if lang in LENGTH_PRIORITY_LANGS:
+        scan_limit = min(fetch_target, LENGTH_PRIORITY_SCAN_LIMIT)
+        print(
+            f"  Length-priority mode enabled for {lang} "
+            f"(scan_limit={scan_limit}, min_chars={_article_min_chars(lang)})"
+        )
+        dataset = load_dataset(
+            "wikimedia/wikipedia",
+            f"20231101.{lang}",
+            split="train",
+            streaming=True,
+        )
+        dataset = dataset.shuffle(buffer_size=1000, seed=SEED)
+        priority_articles = _collect_priority_articles(dataset, lang, scan_limit)
+
+        committed_sentences: list[str] = []
+        sentence_cap = max_wiki_sentences_for_lang(lang)
+        sentence_lengths_window: deque[int] = deque(maxlen=WIKI_ROLLING_STATS_WINDOW)
+        article_lengths_window: deque[int] = deque(maxlen=WIKI_ROLLING_STATS_WINDOW)
+        accepted_articles = 0
+
+        with tqdm(
+            total=sentence_cap,
+            desc=f"{lang} sentences",
+            unit="sentence",
+            leave=False,
+            dynamic_ncols=True,
+        ) as bar:
+            for article_len, article_idx, article in priority_articles:
+                if len(committed_sentences) >= sentence_cap or accepted_articles >= n_articles:
+                    break
+
+                article_text = article.get("text", "")
+                article_title = article.get("title", "")
+                article_lengths_window.append(article_len)
+
+                article_batch = _extract_article_sentences(
+                    article_text,
+                    lang,
+                    segmenter,
+                    article_idx,
+                    article_title=article_title,
+                )
+                if not article_batch:
+                    continue
+
+                remaining_sentences = sentence_cap - len(committed_sentences)
+                if remaining_sentences <= 0:
+                    break
+                if len(article_batch) > remaining_sentences:
+                    article_batch = article_batch[:remaining_sentences]
+
+                committed_sentences.extend(article_batch)
+                sentence_lengths_window.extend(len(s) for s in article_batch)
+                accepted_articles += 1
+                bar.update(len(article_batch))
+                bar.set_postfix_str(
+                    f"acc {accepted_articles}/{n_articles} | "
+                    f"sent {len(committed_sentences)} | "
+                    f"avgA {_rolling_avg(article_lengths_window):.0f} | "
+                    f"avgS {_rolling_avg(sentence_lengths_window):.0f}"
+                )
+
+        committed_sentences = post_clean_wiki_sentences(committed_sentences, lang)
+        _write_sentence_parquet(final_path, committed_sentences)
+        return final_path
+
     committed_sentences: list[str] = []
     sentence_cap = max_wiki_sentences_for_lang(lang)
     sentence_lengths_window: deque[int] = deque(
@@ -641,8 +759,14 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                 article_title = article.get("title", "")
                 article_lengths_window.append(len(article_text))
 
-                paragraphs = prepare_wiki_paragraphs(article_text, lang)
-                if paragraphs is None:
+                article_batch = _extract_article_sentences(
+                    article_text,
+                    lang,
+                    segmenter,
+                    article_idx,
+                    article_title=article_title,
+                )
+                if not article_batch:
                     next_article_idx = article_idx + 1
                     miss_streak += 1
                     _write_sentence_parquet(temp_path, committed_sentences)
@@ -661,26 +785,6 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                     )
                     _update_progress(bar, article_idx + 1)
                     continue
-
-                article_batch: list[str] = []
-                for paragraph_idx, paragraph in enumerate(paragraphs):
-                    safe_paragraph = _sanitize_paragraph_for_pysbd(paragraph)
-                    try:
-                        sents = segmenter.segment(safe_paragraph) if segmenter else SENT_SPLIT.split(safe_paragraph) # type: ignore
-                    except re.error as exc:
-                        _log_segmentation_failure(
-                            lang,
-                            article_idx,
-                            paragraph_idx,
-                            paragraph,
-                            exc,
-                            article_title=article_title,
-                        )
-                        sents = SENT_SPLIT.split(safe_paragraph)
-                    for s in sents:
-                        s = clean_wiki_sentence(s, lang)
-                        if _is_valid_sentence(s, lang):
-                            article_batch.append(s)
 
                 remaining_sentences = sentence_cap - len(committed_sentences)
                 if remaining_sentences <= 0:
