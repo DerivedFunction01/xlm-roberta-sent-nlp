@@ -169,6 +169,8 @@ WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
 WIKI_SPACES = re.compile(r"\s{2,}")
 WIKI_WRITE_BATCH_SIZE = 2048
 WIKI_PUNCT_REPEAT = re.compile(r"([,.;:!?…،。！？])\1+")
+WIKI_TRAILING_ORPHAN_LETTER = re.compile(r"[\s,.;:!?…،。！？]+([^\W\d_])$")
+WIKI_LEADING_ORPHAN_LETTER = re.compile(r"^[\"'“”‘’«»‹›\s,.;:!?…،。！？]+([^\W\d_])\s+")
 WIKI_BLOCKED_MARKERS = ("http",)
 WIKI_BLOCKED_CHARS = {"=", "<", ">", "|"}
 WIKI_OPENING_QUOTES = {"\"", "'", "“", "”", "‘", "’", "«", "»", "‹", "›"}
@@ -267,6 +269,19 @@ def _collapse_repeated_punct(sentence: str) -> str:
     return WIKI_PUNCT_REPEAT.sub(r"\1", sentence)
 
 
+def _strip_trailing_orphan_letter(sentence: str, lang: str) -> str:
+    """Drop a trailing orphan letter after punctuation for non-Latin scripts."""
+    if LANG_TO_GROUP.get(lang) in LATIN_GROUPS:
+        return sentence
+    sentence = WIKI_TRAILING_ORPHAN_LETTER.sub("", sentence)
+    return sentence.rstrip()
+
+
+def _strip_leading_orphan_letter(sentence: str, lang: str) -> str:
+    """Drop a leading orphan letter after quote/punctuation."""
+    return WIKI_LEADING_ORPHAN_LETTER.sub("", sentence).lstrip()
+
+
 def _has_blocked_artifact(sentence: str) -> bool:
     """Return True for obvious markup / URL artifacts that should be dropped."""
     lower = sentence.lower()
@@ -279,7 +294,9 @@ def _post_clean_wiki_sentence(sentence: str, lang: str) -> str:
     """Normalize a wiki sentence after extraction and before synthetic sampling."""
     sentence = clean_wiki_sentence(sentence, lang)
     sentence = _strip_leading_punct(sentence)
+    sentence = _strip_leading_orphan_letter(sentence, lang)
     sentence = _collapse_repeated_punct(sentence)
+    sentence = _strip_trailing_orphan_letter(sentence, lang)
     sentence = _collapse_spaces(sentence)
     return sentence.strip()
 
