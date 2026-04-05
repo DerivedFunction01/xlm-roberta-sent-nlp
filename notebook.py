@@ -1519,7 +1519,6 @@ def generate_synthetic_examples_chunk(
     jobs: list[tuple[str, str | None]],
     primary_pool: dict[str, deque[str]],
     fallback_pool: dict[str, deque[str]] | None,
-    source_pool: dict[str, list[str]],
 ) -> str:
     """
     Generate a chunk of synthetic examples in one worker.
@@ -1539,7 +1538,6 @@ def generate_synthetic_examples_chunk(
                 create_synthetic_doc(
                     primary_pool,
                     fallback_pool=fallback_pool,
-                    source_pool=source_pool,
                     required_langs=[lang] if lang else None,
                 )
             )
@@ -1548,7 +1546,6 @@ def generate_synthetic_examples_chunk(
                 create_synthetic_doc(
                     primary_pool,
                     fallback_pool=fallback_pool,
-                    source_pool=source_pool,
                 )
             )
     coverage_examples = [ex for idx, ex in enumerate(examples) if jobs[idx][0] == "coverage"]
@@ -1660,7 +1657,6 @@ def load_synthetic_examples_cache() -> tuple[list[dict], list[dict]] | None:
 def create_synthetic_doc(
     primary_pool: dict[str, deque[str]],
     fallback_pool: dict[str, deque[str]] | None = None,
-    source_pool: dict[str, list[str]] | None = None,
     latex_pool: list[str] | None = None,
     required_langs: list[str] | None = None,
     o_inject_prob: float = 0.4,   # P(inserting at least one O-label span)
@@ -1733,7 +1729,7 @@ def create_synthetic_doc(
     for lang in chosen_langs:
         if total_tokens >= MAX_LENGTH - 20:
             break
-        sent = draw_sentence(lang, primary_pool, fallback_pool, source_pool, allow_source_reuse=False)
+        sent = draw_sentence(lang, primary_pool, fallback_pool, allow_source_reuse=False)
         if sent is None:
             continue
         original_text_parts.append(sent)
@@ -1843,6 +1839,11 @@ else:
         )
         coverage_plan.extend([lang] * coverage_docs_for_lang)
 
+    # The raw sentence maps are no longer needed once the pools and coverage
+    # plan are built, so drop them before the worker fan-out.
+    lang_sentences = None
+    smol_sentences = None
+
     random_job_count = max(0, EXAMPLES_TARGET - len(coverage_plan))
     generation_jobs = [("coverage", lang) for lang in coverage_plan]
     generation_jobs.extend([("random", None)] * random_job_count)
@@ -1886,7 +1887,6 @@ else:
                     jobs,
                     reserved_worker_pools[worker_idx],
                     main_worker_pools[worker_idx],
-                    lang_sentences,
                 )
                 future_to_jobs[future] = worker_idx
 
