@@ -216,17 +216,6 @@ def _collapse_spaces(text: str) -> str:
     return WIKI_SPACES.sub(" ", text)
 
 
-def _is_sentence_text_valid(text: str, min_chars: int, max_chars: int, min_alpha_ratio: float = 0.0) -> bool:
-    """Generic text-length gate for sentence-like fragments."""
-    n = len(text)
-    if not (min_chars <= n <= max_chars):
-        return False
-    if min_alpha_ratio > 0.0:
-        alpha = sum(c.isalpha() for c in text)
-        return alpha >= n * min_alpha_ratio
-    return True
-
-
 def _is_valid_sentence(s: str, lang: str) -> bool:
     mn, mx = _SENT_BOUNDS.get(lang, _DEFAULT_BOUNDS)
     visible = _non_punct_char_count(s)
@@ -361,8 +350,6 @@ SMOL_CODE_MAP: dict[str, str] = {
 
 MAX_SENTENCES_PER_LANG = 5_000
 UNCAPPED_LANGS: set[str] = set()
-SMOL_MIN_SENTENCE_CHARS = 20
-SMOL_MAX_SENTENCE_CHARS = 800
 
 SMOL_CACHE_DIR = SENTENCES_DIR
 SMOL_CACHE_FILE = os.path.join(SMOL_CACHE_DIR, "smol_sentences.json")
@@ -377,7 +364,7 @@ def _smol_parse_config(config: str) -> tuple[str, str] | None:
         return None
 
 
-def _smol_add_sentences(bucket: list[str], raw_sentences: object) -> None:
+def _smol_add_sentences(bucket: list[str], raw_sentences: object, lang: str) -> None:
     """Normalize and append a sequence of SMOL sentences into a bucket."""
     if isinstance(raw_sentences, str):
         raw_sentences = [raw_sentences]
@@ -389,7 +376,7 @@ def _smol_add_sentences(bucket: list[str], raw_sentences: object) -> None:
             continue
         sent = _strip_bracket_notes(sent)
         sent = _collapse_spaces(sent)
-        if _is_sentence_text_valid(sent, SMOL_MIN_SENTENCE_CHARS, SMOL_MAX_SENTENCE_CHARS, min_alpha_ratio=0.4):
+        if _is_valid_sentence(sent, lang):
             bucket.append(sent)
 
 
@@ -412,11 +399,11 @@ def _load_smoldoc(accumulator: dict[str, list[str]]) -> tuple[set[str], set[str]
         if sl in LANG_TO_GROUP and sl not in source_langs_seen:
             source_bucket = accumulator.setdefault(sl, [])
             for row in ds:
-                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"))
+                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl)
             source_langs_seen.add(sl)
 
         for row in ds:
-            _smol_add_sentences(target_bucket, row.get("trgs"))
+            _smol_add_sentences(target_bucket, row.get("trgs"), mapped)
 
     return source_langs_seen, target_langs_seen
 
@@ -440,7 +427,7 @@ def _load_smolsent(accumulator: dict[str, list[str]]) -> tuple[set[str], set[str
         if sl in LANG_TO_GROUP and sl not in source_langs_seen:
             source_bucket = accumulator.setdefault(sl, [])
             for row in ds:
-                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"))
+                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl)
             source_langs_seen.add(sl)
 
         seg = _get_segmenter(mapped)
@@ -450,7 +437,7 @@ def _load_smolsent(accumulator: dict[str, list[str]]) -> tuple[set[str], set[str
             if not isinstance(trg, str):
                 continue
             sents = seg.segment(trg) if seg else [trg]
-            _smol_add_sentences(target_bucket, sents)
+            _smol_add_sentences(target_bucket, sents, mapped)
 
     return source_langs_seen, target_langs_seen
 
