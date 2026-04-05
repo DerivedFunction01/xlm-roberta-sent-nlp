@@ -63,6 +63,7 @@ MAX_WIKI_SENTENCES = 200_000
 MAX_WIKI_SENTENCES_BY_LANG = {
     "en": 300_000,
 }
+WIKI_ROLLING_STATS_WINDOW = 250
 SENTENCES_DIR = "./sentences_cache"
 os.makedirs(SENTENCES_DIR, exist_ok=True)
 WIKI_TEMP_DIR = os.path.join(SENTENCES_DIR, "_wiki_tmp")
@@ -149,14 +150,14 @@ def parquet_path(lang: str) -> str:
 
 
 MIN_ARTICLE_CHARS_BY_GROUP: dict[str, int] = {
-    "English": 3_000,
-    "LatinCore": 3_000,
-    "LatinTier2": 3_000,
-    "Cyrillic": 3_000,
+    "English": 2_000,
+    "LatinCore": 2_000,
+    "LatinTier2": 2_000,
+    "Cyrillic": 2_000,
     "EastAsian": 1_200,
-    "Indic": 3_000,
-    "ArabicScript": 3_000,
-    "OtherScripts": 3_000,
+    "Indic": 2_000,
+    "ArabicScript": 2_000,
+    "OtherScripts": 2_000,
 }
 MIN_ARTICLE_CHARS_DEFAULT = 3_000
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
@@ -309,6 +310,36 @@ def max_wiki_sentences_for_lang(lang: str) -> int:
     return MAX_WIKI_SENTENCES_BY_LANG.get(lang, MAX_WIKI_SENTENCES)
 
 
+def _rolling_avg(values: deque[int]) -> float:
+    """Return the mean of the values in a rolling window."""
+    return round(sum(values) / len(values), 1) if values else 0.0
+
+
+def _wiki_checkpoint_payload(
+    lang: str,
+    next_article_idx: int,
+    accepted_articles: int,
+    miss_streak: int,
+    n_articles: int,
+    committed_sentences: list[str],
+    article_lengths_window: deque[int],
+    sentence_lengths_window: deque[int],
+) -> dict:
+    """Build the temp meta payload with checkpoint and tuning stats."""
+    return {
+        "lang": lang,
+        "next_article_idx": next_article_idx,
+        "accepted_articles": accepted_articles,
+        "miss_streak": miss_streak,
+        "final_target_articles": n_articles,
+        "committed_sentence_count": len(committed_sentences),
+        "rolling_avg_article_chars": _rolling_avg(article_lengths_window),
+        "rolling_avg_sentence_chars": _rolling_avg(sentence_lengths_window),
+        "rolling_article_lengths": list(article_lengths_window),
+        "seed": SEED,
+    }
+
+
 def _write_sentence_parquet(path: str, sentences: list[str]) -> None:
     """Write a sentence list to parquet, preferring pyarrow for compact output."""
     if not sentences:
@@ -373,6 +404,11 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
 
     committed_sentences: list[str] = []
     sentence_cap = max_wiki_sentences_for_lang(lang)
+    sentence_lengths_window: deque[int] = deque(
+        (len(s) for s in committed_sentences[-WIKI_ROLLING_STATS_WINDOW:]),
+        maxlen=WIKI_ROLLING_STATS_WINDOW,
+    )
+    article_lengths_window: deque[int] = deque(maxlen=WIKI_ROLLING_STATS_WINDOW)
     next_article_idx = 0
     accepted_articles = 0
     miss_streak = 0
@@ -386,6 +422,10 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
             next_article_idx = int(meta["next_article_idx"])
             accepted_articles = int(meta["accepted_articles"])
             miss_streak = int(meta.get("miss_streak", 0))
+            sentence_lengths_window.extend(
+                len(s) for s in committed_sentences[-WIKI_ROLLING_STATS_WINDOW:]
+            )
+            article_lengths_window.extend(int(v) for v in meta.get("rolling_article_lengths", []))
             print(
                 f"  Resuming {lang} from stream article {next_article_idx} "
                 f"with {accepted_articles} accepted articles"
@@ -424,20 +464,27 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                     )
                     break
 
-                paragraphs = prepare_wiki_paragraphs(article.get("text", ""), lang)
+                article_text = article.get("text", "")
+                article_lengths_window.append(len(article_text))
+
+                paragraphs = prepare_wiki_paragraphs(article_text, lang)
                 if paragraphs is None:
                     next_article_idx = article_idx + 1
                     miss_streak += 1
                     _write_sentence_parquet(temp_path, committed_sentences)
-                    _write_json_atomic(meta_path, {
-                        "lang": lang,
-                        "next_article_idx": next_article_idx,
-                        "accepted_articles": accepted_articles,
-                        "miss_streak": miss_streak,
-                        "final_target_articles": n_articles,
-                        "committed_sentence_count": len(committed_sentences),
-                        "seed": SEED,
-                    })
+                    _write_json_atomic(
+                        meta_path,
+                        _wiki_checkpoint_payload(
+                            lang,
+                            next_article_idx,
+                            accepted_articles,
+                            miss_streak,
+                            n_articles,
+                            committed_sentences,
+                            article_lengths_window,
+                            sentence_lengths_window,
+                        ),
+                    )
                     bar.update(1)
                     continue
 
@@ -461,18 +508,23 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                     article_batch = article_batch[:remaining_sentences]
 
                 committed_sentences.extend(article_batch)
+                sentence_lengths_window.extend(len(s) for s in article_batch)
                 accepted_articles += 1
                 miss_streak = 0
                 _write_sentence_parquet(temp_path, committed_sentences)
-                _write_json_atomic(meta_path, {
-                    "lang": lang,
-                    "next_article_idx": article_idx + 1,
-                    "accepted_articles": accepted_articles,
-                    "miss_streak": miss_streak,
-                    "final_target_articles": n_articles,
-                    "committed_sentence_count": len(committed_sentences),
-                    "seed": SEED,
-                })
+                _write_json_atomic(
+                    meta_path,
+                    _wiki_checkpoint_payload(
+                        lang,
+                        article_idx + 1,
+                        accepted_articles,
+                        miss_streak,
+                        n_articles,
+                        committed_sentences,
+                        article_lengths_window,
+                        sentence_lengths_window,
+                    ),
+                )
                 next_article_idx = article_idx + 1
                 bar.update(1)
                 if len(committed_sentences) >= sentence_cap:
