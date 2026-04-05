@@ -82,11 +82,11 @@ raw_examples: list[dict] | None = None
 # %%
 # --- Language Configuration ---
 # Script groups and their ISO codes.
+# English gets its own tier so it does not have to compete with the rest of the Latin bucket.
 LANGUAGE_GROUPS = {
-    "Latin": [
-        "en", "es", "fr", "de", "it", "pt", "nl", "vi", "tr", "la",
-        "id", "ms", "af", "sq", "is", "no", "sv", "da", "fi", "hu", "pl", "cs", "ro",
-    ],
+    "English":      ["en"],
+    "LatinCore":    ["es", "fr", "de", "it", "pt", "nl"],
+    "LatinTier2":   ["vi", "tr", "la", "id", "ms", "af", "sq", "is", "no", "sv", "da", "fi", "hu", "pl", "cs", "ro"],
     "Cyrillic":     ["ru", "bg", "uk", "sr", "be", "kk", "mk", "mn"],
     "EastAsian":    ["zh", "ja", "ko"],
     "Indic":        ["hi", "ur", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "as", "or"],
@@ -190,7 +190,7 @@ def clean_and_halve(text: str):
 
 def _strip_ascii_for_lang(lang: str) -> bool:
     """Return True when we should scrub ASCII words from a language's text."""
-    return LANG_TO_GROUP.get(lang) != "Latin"
+    return LANG_TO_GROUP.get(lang) not in {"English", "LatinCore", "LatinTier2"}
 
 
 def clean_wiki_sentence(sentence: str, lang: str) -> str:
@@ -613,16 +613,18 @@ def create_synthetic_doc(
 ) -> dict:
     """
     Sampling strategy:
-      - Groups are weighted by their "global footprint" so major languages
-        (Latin, EastAsian) appear more often than tail groups (MajorEconomies).
+      - Groups are weighted by their "global footprint" so major language buckets
+        appear more often than tail groups.
       - Within each selected group, one language is chosen uniformly.
       - `required_langs` can force coverage so every language appears at least
         once in the overall synthetic corpus.
     """
     # Weight per group — tuned to reflect real-world multilingual text distribution.
     GROUP_WEIGHTS = {
-        # Latin is large (23 langs) but many are minor — keep dominant feel
-        "Latin":        4.0,
+        # Give English a dedicated lane so it is not diluted by the broader Latin set.
+        "English":      3.0,
+        "LatinCore":    3.0,
+        "LatinTier2":   1.5,
         "EastAsian":    2.5,
         "Cyrillic":     1.5,
         "Indic":        1.5,
