@@ -66,8 +66,10 @@ SYNTHETIC_CACHE_META = f"{SENTENCES_DIR}/synthetic_examples.meta.json"
 CACHE_DIR = f"{SENTENCES_DIR}/tokenized_dataset"
 os.makedirs(CACHE_DIR, exist_ok=True)
 CACHE_META = f"{CACHE_DIR}/tokenized_dataset.meta.json"
-CACHE_VERSION = 1
-TOKENIZED_CACHE_VERSION = 1
+CACHE_DEBUG_PARQUET = f"{CACHE_DIR}/tokenized_debug.parquet"
+CACHE_DEBUG_META = f"{CACHE_DIR}/tokenized_debug.meta.json"
+CACHE_VERSION = 2
+TOKENIZED_CACHE_VERSION = 2
 USE_SYNTHETIC_CACHE = True
 FORCE_REBUILD_SYNTHETIC_CACHE = False
 USE_TOKENIZED_CACHE = True
@@ -905,6 +907,7 @@ def save_synthetic_examples_cache(
             rows.append(
                 {
                     "kind": kind,
+                    "original_text": example.get("original_text", ""),
                     "tokens": json.dumps(example["tokens"]),
                     "ner_tags": json.dumps(example["ner_tags"]),
                 }
@@ -925,6 +928,49 @@ def save_synthetic_examples_cache(
             f,
             indent=2,
         )
+
+
+def save_token_debug_cache(coverage_examples: list[dict], random_examples: list[dict]) -> None:
+    """Persist a flattened token-level debug parquet with original text and token ids."""
+    rows = []
+    for examples in (coverage_examples, random_examples):
+        for example in examples:
+            original_text = example.get("original_text", "")
+            tokens = example["tokens"]
+            ids = example["ner_tags"]
+            for token, tag_id in zip(tokens, ids):
+                rows.append(
+                    {
+                        "original_text": original_text,
+                        "token": token,
+                        "id": tag_id,
+                    }
+                )
+
+    pd.DataFrame(rows).to_parquet(CACHE_DEBUG_PARQUET, index=False)
+    with open(CACHE_DEBUG_META, "w") as f:
+        json.dump(
+            {
+                "cache_version": TOKENIZED_CACHE_VERSION,
+                "model_checkpoint": MODEL_CHECKPOINT,
+                "max_length": MAX_LENGTH,
+                "seed": SEED,
+                "row_count": len(rows),
+            },
+            f,
+            indent=2,
+        )
+
+
+def ensure_token_debug_cache() -> None:
+    """Rebuild the token debug cache from synthetic examples if it is missing."""
+    if os.path.exists(CACHE_DEBUG_PARQUET) and os.path.exists(CACHE_DEBUG_META):
+        return
+    cached_examples = load_synthetic_examples_cache() if (USE_SYNTHETIC_CACHE and not FORCE_REBUILD_SYNTHETIC_CACHE) else None
+    if cached_examples is None:
+        return
+    coverage_examples, random_examples = cached_examples
+    save_token_debug_cache(coverage_examples, random_examples)
 
 
 def load_synthetic_examples_cache() -> tuple[list[dict], list[dict]] | None:
@@ -952,9 +998,12 @@ def load_synthetic_examples_cache() -> tuple[list[dict], list[dict]] | None:
     random_examples: list[dict] = []
     for row in df.itertuples(index=False):
         example = {
+            "original_text": getattr(row, "original_text", ""),
             "tokens": json.loads(row.tokens), # type: ignore
             "ner_tags": json.loads(row.ner_tags), # type: ignore
         }
+        if not example["original_text"]:
+            example["original_text"] = " ".join(example["tokens"])
         if row.kind == "coverage":
             coverage_examples.append(example)
         else:
@@ -1032,6 +1081,7 @@ def create_synthetic_doc(
             seen_langs.add(lang)
 
     all_tokens, all_labels = [], []
+    original_text_parts: list[str] = []
     total_tokens = 0
 
     for lang in chosen_langs:
@@ -1040,6 +1090,7 @@ def create_synthetic_doc(
         sent = draw_sentence(lang, primary_pool, fallback_pool, source_pool, allow_source_reuse=False)
         if sent is None:
             continue
+        original_text_parts.append(sent)
         tokens = tokenizer.tokenize(sent)
         if not tokens:
             continue
@@ -1070,6 +1121,7 @@ def create_synthetic_doc(
             if total_tokens >= MAX_LENGTH - 10:
                 break
             span = sample_o_span()
+            original_text_parts.append(span)
             o_tokens = tokenizer.tokenize(span)
             remaining = MAX_LENGTH - 2 - len(all_tokens)
             o_tokens = o_tokens[:min(remaining, 40)]  # cap single span at 40 tokens
@@ -1079,7 +1131,7 @@ def create_synthetic_doc(
                 all_labels = all_labels[:insert_pos] + [0] * len(o_tokens) + all_labels[insert_pos:]
                 total_tokens += len(o_tokens)
 
-    return {"tokens": all_tokens, "ner_tags": all_labels}
+    return {"original_text": " ".join(original_text_parts).strip(), "tokens": all_tokens, "ner_tags": all_labels}
 
 
 print("Generating synthetic mixed-language documents …")
@@ -1330,6 +1382,7 @@ def tokenize_and_align(example: dict) -> dict:
         prev_word_id = word_id
 
     encoding["labels"] = labels
+    encoding["original_text"] = example.get("original_text", " ".join(example["tokens"]))
     return encoding
 
 
@@ -1402,6 +1455,7 @@ if cached_tokenized is not None:
     train_dataset = cached_tokenized["train"]
     eval_dataset = cached_tokenized["eval"]
     print(f"Loaded tokenized dataset cache from {CACHE_DIR}")
+    ensure_token_debug_cache()
 else:
     if coverage_examples is None or random_examples is None:
         cached_examples = load_synthetic_examples_cache() if (USE_SYNTHETIC_CACHE and not FORCE_REBUILD_SYNTHETIC_CACHE) else None
@@ -1416,6 +1470,8 @@ else:
 
     coverage_dataset = Dataset.from_list(coverage_examples) # type: ignore
     random_dataset = Dataset.from_list(random_examples) # type: ignore
+
+    save_token_debug_cache(coverage_examples, random_examples)
 
     coverage_dataset = coverage_dataset.map(
         tokenize_and_align,
