@@ -287,7 +287,7 @@ def _chance(prob: float, mult: float = 1.0) -> bool:
 
 
 def _snippet_mult() -> float:
-    return random.choices([0.3, 0.55, 0.8, 1.0], weights=[3, 3, 2, 1], k=1)[0]
+    return random.choices([0.2, 0.4, 0.65, 0.9], weights=[4, 3, 2, 1], k=1)[0]
 
 
 def _module_path(min_parts: int = 2, max_parts: int = 4) -> str:
@@ -2494,7 +2494,7 @@ def _short_code_artifact() -> str:
     if choice == "sql":
         return random.choice([
             f"SELECT {_ident()} FROM {_ident()} WHERE {_ident()} {_comparison_op('sql')} {random.randint(0, 9)};",
-            f"UPDATE {_ident()} SET {_ident()} = {_random.choice([0,1])};",
+            f"UPDATE {_ident()} SET {_ident()} = {random.choice([0, 1])};",
             f"INSERT INTO {_ident()} ({_ident()}) VALUES ({random.randint(0, 9)});",
         ])
     if choice == "bash":
@@ -2518,10 +2518,22 @@ def _short_code_artifact() -> str:
 
 def generate_code_artifact() -> str:
     """Generate a plausible-but-loose generic code artifact snippet."""
-    size = random.choices(["short", "medium", "long"], weights=[0.35, 0.4, 0.25], k=1)[0]
+    size = random.choices(["short", "medium", "long"], weights=[0.5, 0.33, 0.17], k=1)[0]
     if size == "short":
         return _short_code_artifact()
 
+    family_weights = {
+        _python_snippet: 5,
+        _js_snippet: 5,
+        _sql_snippet: 4,
+        _bash_snippet: 4,
+        _go_snippet: 3,
+        _java_snippet: 3,
+        _c_cpp_snippet: 2,
+        _rust_snippet: 2,
+        _yaml_snippet: 1,
+        _log_snippet: 1,
+    }
     templates = [
         _python_snippet,
         _js_snippet,
@@ -2535,6 +2547,8 @@ def generate_code_artifact() -> str:
         _log_snippet,
     ]
     if size == "medium":
-        return random.choice(templates)()
+        return random.choices(templates, weights=[family_weights[t] for t in templates], k=1)[0]()
 
-    return random.choice(templates + [_python_snippet, _js_snippet, _c_cpp_snippet, _rust_snippet, _bash_snippet, _go_snippet, _java_snippet])()
+    long_templates = templates + [_python_snippet, _js_snippet, _bash_snippet, _sql_snippet, _go_snippet, _java_snippet, _c_cpp_snippet, _rust_snippet]
+    long_weights = [family_weights[t] for t in templates] + [4, 4, 4, 4, 3, 3, 2, 2]
+    return random.choices(long_templates, weights=long_weights, k=1)[0]()
