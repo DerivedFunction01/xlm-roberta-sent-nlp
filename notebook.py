@@ -76,6 +76,7 @@ TOKENIZE_NUM_PROC = max(1, mp.cpu_count() // 2)
 # Optional notebook-state placeholders.
 # These let later cells run even if the generation cell was skipped.
 lang_sentences: dict[str, list[str]] | None = None
+smol_sentences: dict[str, list[str]] | None = None
 reserved_sentence_pools: dict[str, deque[str]] | None = None
 main_sentence_pools: dict[str, deque[str]] | None = None
 coverage_plan: list[str] | None = None
@@ -519,20 +520,10 @@ SMOL_FORCE_REBUILD = False
 if USE_SMOL_AUGMENTATION:
     try:
         smol_sentences = load_smol_sentences(force_rebuild=SMOL_FORCE_REBUILD)
-        merged_langs = 0
-        merged_unique_sentences = 0
-        for lang, sents in smol_sentences.items():
-            if not sents:
-                continue
-            before = len(lang_sentences.get(lang, []))
-            lang_sentences.setdefault(lang, []).extend(sents)
-            lang_sentences[lang] = list(dict.fromkeys(lang_sentences[lang]))
-            after = len(lang_sentences[lang])
-            merged_langs += 1
-            merged_unique_sentences += max(0, after - before)
+        total_smol_sentences = sum(len(v) for v in smol_sentences.values())
         print(
-            f"\nSMOL merged into lang_sentences: {merged_langs} languages touched | "
-            f"{merged_unique_sentences} new unique sentences"
+            f"\nSMOL kept separate for pool split: "
+            f"{len(smol_sentences)} languages | {total_smol_sentences} sentences"
         )
     except Exception as exc:
         print(f"\nSMOL augmentation skipped: {exc}")
@@ -671,6 +662,9 @@ def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 
 
 def build_sentence_pools(
     sentence_map: dict[str, list[str]],
+    reserve_fraction: float = RESERVE_FRACTION,
+    min_reserved: int = MIN_RESERVED_SENTENCES,
+    max_reserved: int = MAX_RESERVED_SENTENCES,
 ) -> tuple[dict[str, deque[str]], dict[str, deque[str]]]:
     """
     Split each language into a reserved coverage pool and a main sampling pool.
@@ -686,12 +680,12 @@ def build_sentence_pools(
             continue
         shuffled = sentences[:]
         random.shuffle(shuffled)
-        reserve_target = int(round(len(shuffled) * RESERVE_FRACTION))
+        reserve_target = int(round(len(shuffled) * reserve_fraction))
         reserve_n = min(
             len(shuffled),
             max(
-                MIN_RESERVED_SENTENCES,
-                min(reserve_target, MAX_RESERVED_SENTENCES),
+                min_reserved,
+                min(reserve_target, max_reserved),
             ),
         )
         reserved[lang] = deque(shuffled[:reserve_n])
@@ -993,6 +987,26 @@ else:
     # Guarantee representation by reserving a fraction of each language's sentences,
     # then building several guaranteed documents from that reserved pool.
     reserved_sentence_pools, main_sentence_pools = build_sentence_pools(lang_sentences)
+    reserved_total = sum(len(pool) for pool in reserved_sentence_pools.values())
+    main_total = sum(len(pool) for pool in main_sentence_pools.values())
+
+    if smol_sentences:
+        smol_reserved_sentence_pools, smol_main_sentence_pools = build_sentence_pools(
+            smol_sentences,
+            reserve_fraction=0.5,
+            min_reserved=1,
+            max_reserved=MAX_RESERVED_SENTENCES,
+        )
+        for lang, pool in smol_reserved_sentence_pools.items():
+            reserved_sentence_pools.setdefault(lang, deque()).extend(pool)
+        for lang, pool in smol_main_sentence_pools.items():
+            main_sentence_pools.setdefault(lang, deque()).extend(pool)
+        smol_reserved_total = sum(len(pool) for pool in smol_reserved_sentence_pools.values())
+        smol_main_total = sum(len(pool) for pool in smol_main_sentence_pools.values())
+        print(
+            f"SMOL split 50/50 -> reserved: {smol_reserved_total} | main: {smol_main_total}"
+        )
+
     reserved_total = sum(len(pool) for pool in reserved_sentence_pools.values())
     main_total = sum(len(pool) for pool in main_sentence_pools.values())
     print(
