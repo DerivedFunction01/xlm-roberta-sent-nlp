@@ -230,8 +230,8 @@ def _is_valid_sentence(s: str, lang: str) -> bool:
     return digits <= visible * MAX_DIGIT_RATIO
 
 
-def prepare_wiki_paragraphs(text: str) -> list[str] | None:
-    """Return the longest-first first half of an article's paragraphs, or None if too short."""
+def _split_wiki_paragraphs(text: str) -> list[str] | None:
+    """Split an article into cleaned paragraphs, or None if too short."""
     if len(text) < MIN_ARTICLE_CHARS:
         return None
     text = WIKI_MARKUP.sub("", text)
@@ -240,10 +240,17 @@ def prepare_wiki_paragraphs(text: str) -> list[str] | None:
         for p in WIKI_PARAGRAPH_SPLIT.split(text)
         if p.strip()
     ]
-    if not paragraphs:
+    return paragraphs or None
+
+
+def prepare_wiki_paragraphs(text: str, lang: str) -> list[str] | None:
+    """Return a language-aware paragraph slice, or None if the article is too short."""
+    paragraphs = _split_wiki_paragraphs(text)
+    if paragraphs is None:
         return None
 
-    cutoff = max(1, len(paragraphs) // 2)
+    fraction = 0.75 if lang == "en" else 0.50
+    cutoff = max(1, int(len(paragraphs) * fraction))
     selected = paragraphs[:cutoff]
     selected.sort(key=len, reverse=True)
     return selected
@@ -346,7 +353,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
 
         with tqdm(total=fetch_target, desc=lang, unit="article", leave=False, dynamic_ncols=True) as bar:
             for article in dataset.take(fetch_target):
-                paragraphs = prepare_wiki_paragraphs(article.get("text", ""))
+                paragraphs = prepare_wiki_paragraphs(article.get("text", ""), lang)
                 if paragraphs is None:
                     bar.update(1)
                     continue
