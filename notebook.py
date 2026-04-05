@@ -148,7 +148,17 @@ def parquet_path(lang: str) -> str:
     return os.path.join(SENTENCES_DIR, f"{lang}.parquet")
 
 
-MIN_ARTICLE_CHARS = 3_000  # skip stubs
+MIN_ARTICLE_CHARS_BY_GROUP: dict[str, int] = {
+    "English": 3_000,
+    "LatinCore": 3_000,
+    "LatinTier2": 3_000,
+    "Cyrillic": 3_000,
+    "EastAsian": 1_200,
+    "Indic": 3_000,
+    "ArabicScript": 3_000,
+    "OtherScripts": 3_000,
+}
+MIN_ARTICLE_CHARS_DEFAULT = 3_000
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
@@ -238,9 +248,15 @@ def _is_valid_sentence(s: str, lang: str) -> bool:
     return digits <= visible * MAX_DIGIT_RATIO
 
 
-def _split_wiki_paragraphs(text: str) -> list[str] | None:
+def _article_min_chars(lang: str) -> int:
+    """Return the minimum article length for a language."""
+    group = LANG_TO_GROUP.get(lang)
+    return MIN_ARTICLE_CHARS_BY_GROUP.get(group, MIN_ARTICLE_CHARS_DEFAULT)
+
+
+def _split_wiki_paragraphs(text: str, lang: str) -> list[str] | None:
     """Split an article into cleaned paragraphs, or None if too short."""
-    if len(text) < MIN_ARTICLE_CHARS:
+    if len(text) < _article_min_chars(lang):
         return None
     text = WIKI_MARKUP.sub("", text)
     paragraphs = [
@@ -253,7 +269,7 @@ def _split_wiki_paragraphs(text: str) -> list[str] | None:
 
 def prepare_wiki_paragraphs(text: str, lang: str) -> list[str] | None:
     """Return a language-aware paragraph slice, or None if the article is too short."""
-    paragraphs = _split_wiki_paragraphs(text)
+    paragraphs = _split_wiki_paragraphs(text, lang)
     if paragraphs is None:
         return None
 
