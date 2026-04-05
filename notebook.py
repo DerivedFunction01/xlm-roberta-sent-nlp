@@ -131,6 +131,9 @@ def parquet_path(lang: str) -> str:
 MIN_ARTICLE_CHARS = 3_000  # skip stubs
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+WIKI_PARENS = re.compile(r"\s*[\(\（][^()\(\)（）》】\[\]\{\}]*?[\)\）]\s*")
+WIKI_NUMBERS = re.compile(r"\d+")
+WIKI_SPACES = re.compile(r"\s{2,}")
 
 # Languages natively supported by pysbd (da and el added from MajorEconomies).
 # Native support in pysbd as of 2026
@@ -184,6 +187,14 @@ def clean_and_halve(text: str):
     return text[: len(text) // 2].strip()
 
 
+def clean_wiki_sentence(sentence: str) -> str:
+    """Remove parenthetical text, digits, and extra whitespace from a sentence."""
+    sentence = WIKI_PARENS.sub(" ", sentence)
+    sentence = WIKI_NUMBERS.sub("", sentence)
+    sentence = WIKI_SPACES.sub(" ", sentence)
+    return sentence.strip()
+
+
 # ---------------------------------------------------------------------------
 # Per-process segmenter cache.
 # ProcessPoolExecutor forks a fresh Python interpreter per worker — pysbd
@@ -228,7 +239,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
 
         sents = segmenter.segment(text) if segmenter else SENT_SPLIT.split(text) # type: ignore
         for s in sents:
-            s = s.strip()
+            s = clean_wiki_sentence(s)
             if _is_valid_sentence(s, lang):
                 sentences.append(s)
 
@@ -243,7 +254,12 @@ def load_or_extract(lang: str) -> tuple[str, list[str]]:
     """Return cached sentences from parquet if available, otherwise extract and save."""
     path = parquet_path(lang)
     if os.path.exists(path):
-        return lang, pd.read_parquet(path)["sentence"].tolist()
+        cached = pd.read_parquet(path)["sentence"].tolist()
+        cleaned = [clean_wiki_sentence(s) for s in cached]
+        cleaned = [s for s in cleaned if _is_valid_sentence(s, lang)]
+        if cleaned != cached:
+            pd.DataFrame({"sentence": cleaned}).to_parquet(path, index=False)
+        return lang, cleaned
     sentences = extract_sentences_from_wiki(lang)
     pd.DataFrame({"sentence": sentences}).to_parquet(path, index=False)
     return lang, sentences
