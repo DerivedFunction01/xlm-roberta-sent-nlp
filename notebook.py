@@ -8,6 +8,7 @@
 # pip install evaluate pysbd faker seqeval
 # %%
 import random
+import codecs
 import re
 import json
 import gc
@@ -650,12 +651,13 @@ if USE_SMOL_AUGMENTATION:
 
 # %%
 # --- Neutral (O-label) Corpus ---
-# Three complementary O-label sources, all inserted as label-0 spans:
+# Four complementary O-label sources, all inserted as label-0 spans:
 #   1. im2latex-100k     — real LaTeX formulas from arXiv papers
 #   2. math_gen          — procedurally generated math expressions (14 domains)
 #   3. symbol_noise      — random streams of unicode symbols, emoji, punctuation
+#   4. gibberish          — ROT13 English / Faker text that should still be O
 #
-# Together they teach the model that equations, markup, and noise tokens
+# Together they teach the model that equations, markup, noise, and gibberish
 # do not belong to any language.
 
 # ── 1. im2latex ────────────────────────────────────────────────────────────────
@@ -734,10 +736,28 @@ NOISE_N = 30_000
 noise_pool: list[str] = [generate_symbol_noise() for _ in range(NOISE_N)]
 print(f"symbol noise:{len(noise_pool):>6} strings")
 
+english_seed_sentences = (lang_sentences or {}).get("en", [])
+
+
+def generate_gibberish_text() -> str:
+    """Return rot13-transformed English or Faker-based filler text."""
+    if english_seed_sentences and random.random() < 0.7:
+        base = random.choice(english_seed_sentences)
+    else:
+        base = fake.text(max_nb_chars=random.randint(80, 240))
+    gib = codecs.decode(base, "rot_13")
+    return _collapse_spaces(gib).strip()
+
+
+GIBBERISH_N = 30_000
+gibberish_pool: list[str] = [generate_gibberish_text() for _ in range(GIBBERISH_N)]
+print(f"gibberish:  {len(gibberish_pool):>6} strings")
+
 # ── Combined O-label pool ──────────────────────────────────────────────────────
-# Weighted so real LaTeX and synthetic math dominate over pure noise.
-_O_SOURCES  = [latex_formulas, synth_math_pool, noise_pool]
-_O_WEIGHTS  = [0.45,           0.40,            0.15]
+# Weighted so real LaTeX and synthetic math dominate, while gibberish stays a
+# smaller but visible corruption/noise signal.
+_O_SOURCES  = [latex_formulas, synth_math_pool, noise_pool, gibberish_pool]
+_O_WEIGHTS  = [0.40,           0.35,            0.10,       0.15]
 
 def sample_o_span() -> str:
     """Draw one O-label span from the combined pool."""
@@ -1347,6 +1367,7 @@ def release_wikipedia_generation_memory() -> None:
         "latex_formulas",
         "synth_math_pool",
         "noise_pool",
+        "gibberish_pool",
         "_O_SOURCES",
     ]:
         globals()[name] = None
