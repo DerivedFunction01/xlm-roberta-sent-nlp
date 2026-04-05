@@ -281,6 +281,14 @@ def _block(lines: list[str], indent: str = "    ") -> str:
     return "\n".join(indent + line for line in lines)
 
 
+def _chance(prob: float, mult: float = 1.0) -> bool:
+    return random.random() < min(1.0, max(0.0, prob * mult))
+
+
+def _snippet_mult() -> float:
+    return random.choices([0.3, 0.55, 0.8, 1.0], weights=[3, 3, 2, 1], k=1)[0]
+
+
 def _module_path(min_parts: int = 2, max_parts: int = 4) -> str:
     return _module_name(min_parts=min_parts, max_parts=max_parts)
 
@@ -850,6 +858,11 @@ def _format_imports(spec: dict[str, object]) -> list[str]:
     raw_candidates.extend(spec.get("extra_modules", []))
     main_module = str(spec.get("main_module", ""))
     count = random.randint(int(spec.get("min_items", 1)), int(spec.get("max_items", 3)))
+    chance_mult = float(spec.get("chance_mult", 1.0))
+    if chance_mult < 0.7 and count > 1 and random.random() < 0.7:
+        count = 1
+    elif chance_mult < 0.9 and count > 2 and random.random() < 0.5:
+        count = 2
     count = min(count, len(raw_candidates) if raw_candidates else 1)
 
     if raw_candidates:
@@ -879,13 +892,23 @@ def _format_imports(spec: dict[str, object]) -> list[str]:
     return lines + [""]
 
 
-def _format_import_tree(tree: dict[str, object], *, max_main: int = 3) -> list[str]:
+def _format_import_tree(
+    tree: dict[str, object],
+    *,
+    max_main: int = 3,
+    chance_mult: float = 1.0,
+) -> list[str]:
     """Format nested imports like sklearn -> model_selection -> train_test_split."""
     if not tree:
         return [""]
 
     main_items = list(tree.items())
-    chosen_main = random.sample(main_items, k=min(random.randint(1, max_main), len(main_items)))
+    main_count = random.randint(1, max_main)
+    if chance_mult < 0.7 and main_count > 1 and random.random() < 0.7:
+        main_count = 1
+    elif chance_mult < 0.9 and main_count > 2 and random.random() < 0.5:
+        main_count = 2
+    chosen_main = random.sample(main_items, k=min(main_count, len(main_items)))
     lines: list[str] = []
     reserved_keys = {"__alias__", "alias", "__imports__"}
 
@@ -1013,6 +1036,7 @@ def _format_import_tree(tree: dict[str, object], *, max_main: int = 3) -> list[s
 
 
 def _python_import_header() -> list[str]:
+    chance_mult = _snippet_mult()
     tree = {
         "re": None,
         "random": None,
@@ -1059,10 +1083,11 @@ def _python_import_header() -> list[str]:
         _module_path(): None,
         _module_path(): {"tools": [_camel(), _camel()]},
     }
-    return _format_import_tree(tree, max_main=3)
+    return _format_import_tree(tree, max_main=2 if chance_mult < 0.8 else 3, chance_mult=chance_mult)
 
 
 def _js_import_header() -> list[str]:
+    chance_mult = _snippet_mult()
     spec = {
         "main_module": "",
         "sub_modules": [
@@ -1087,12 +1112,14 @@ def _js_import_header() -> list[str]:
             'const {alias_name} = require("node:{sub_module}");',
         ],
         "min_items": 1,
-        "max_items": 3,
+        "max_items": 2 if chance_mult < 0.8 else 3,
+        "chance_mult": chance_mult,
     }
     return _format_imports(spec)
 
 
 def _go_import_header() -> list[str]:
+    chance_mult = _snippet_mult()
     spec = {
         "main_module": "fmt",
         "sub_modules": [
@@ -1110,14 +1137,16 @@ def _go_import_header() -> list[str]:
         "templates": [
             '{alias_prefix}"{sub_module}"',
         ],
-        "min_items": 2,
-        "max_items": 4,
+        "min_items": 1,
+        "max_items": 2 if chance_mult < 0.85 else 3,
+        "chance_mult": chance_mult,
     }
     lines = _format_imports(spec)
     return ["import (", '    "fmt"'] + [f"    {imp}" for imp in lines[:-1]] + [")", ""]
 
 
 def _java_import_header() -> list[str]:
+    chance_mult = _snippet_mult()
     spec = {
         "main_module": "java.util",
         "sub_modules": [
@@ -1147,7 +1176,8 @@ def _java_import_header() -> list[str]:
             "import {sub_module};",
         ],
         "min_items": 1,
-        "max_items": 3,
+        "max_items": 2 if chance_mult < 0.8 else 3,
+        "chance_mult": chance_mult,
     }
     return _format_imports(spec)
 
@@ -1394,14 +1424,19 @@ def generate_css_artifact() -> str:
 def _python_snippet() -> str:
     fn = _ident()
     arg = _ident()
-    kind = random.choice(["function", "class", "async", "script"])
+    chance_mult = _snippet_mult()
+    kind = random.choices(
+        ["function", "class", "async", "script"],
+        weights=[4, 2, 2, 3] if chance_mult > 0.6 else [5, 1, 1, 4],
+        k=1,
+    )[0]
     header = _python_import_header()
     arg_type = _python_type(allow_optional=True)
     return_type = _python_type(allow_optional=True)
 
     if kind == "class":
         cls = _camel()
-        flow = "\n".join(_python_control_flow("        "))
+        flow = "\n".join(_python_control_flow("        ")) if _chance(0.75, chance_mult) else ""
         return "\n".join(header + [
             f"class {cls}:",
             "    def __init__(self, enabled: bool = True):",
@@ -1412,43 +1447,43 @@ def _python_snippet() -> str:
             f'        result = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value("python")}}}',
             f"        if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
             f'            print("[{fake.word()}]", len({arg}))',
-            flow,
+            *([flow] if flow else []),
             f'        print(f"[{fake.word()}] {fn}({{{arg}}}) -> {{result}}")',
             "        return result",
         ])
 
     if kind == "async":
         out = _ident()
-        flow = "\n".join(_python_control_flow("    "))
+        flow = "\n".join(_python_control_flow("    ")) if _chance(0.75, chance_mult) else ""
         return "\n".join(header + [
             f"async def {fn}({arg}: {arg_type}, limit: int = 0) -> {return_type}:",
             "    await asyncio.sleep(0)",
             f'    {out} = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value("python")}}}',
             f"    if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
             f'        print("[{fake.word()}]", len({arg}))',
-            flow,
+            *([flow] if flow else []),
             f'    print(f"[{fake.word()}] {fn}({{{arg}}}) -> {{{out}}}")',
             f"    return {out}",
         ])
 
     if kind == "script":
-        flow = "\n".join(_python_control_flow("    "))
+        flow = "\n".join(_python_control_flow("    ")) if _chance(0.6, chance_mult) else ""
         return "\n".join(header + [
             "if __name__ == \"__main__\":",
             "    import sys",
             f'    print("[{fake.word()}]", sys.argv[1:] if len(sys.argv) > 1 else [])',
-            flow,
+            *([flow] if flow else []),
             f"    raise SystemExit({random.randint(0, 3)})",
         ])
 
     out = _ident()
-    flow = "\n".join(_python_control_flow("    "))
+    flow = "\n".join(_python_control_flow("    ")) if _chance(0.7, chance_mult) else ""
     return "\n".join(header + [
         f"def {fn}({arg}: {arg_type}, limit: int = 0) -> {return_type}:",
         f'    {out} = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value("python")}}}',
         f"    if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
         f'        print("[{fake.word()}]", len({arg}))',
-        flow,
+        *([flow] if flow else []),
         f'    print(f"[{fake.word()}] {fn}({{{arg}}}) -> {{{out}}}")',
         f"    return {out}",
     ])
@@ -1457,14 +1492,19 @@ def _python_snippet() -> str:
 def _js_snippet() -> str:
     fn = _ident()
     arg = _ident()
-    kind = random.choice(["function", "arrow", "class", "async", "module"])
+    chance_mult = _snippet_mult()
+    kind = random.choices(
+        ["function", "arrow", "class", "async", "module"],
+        weights=[4, 4, 2, 2, 2] if chance_mult > 0.6 else [5, 5, 1, 1, 1],
+        k=1,
+    )[0]
     header = _js_import_header()
-    flow = "\n".join(_js_control_flow("    "))
+    flow = "\n".join(_js_control_flow("    ")) if _chance(0.75, chance_mult) else ""
 
     if kind == "arrow":
         return "\n".join(header + [
             f"const {fn} = ({arg}) => {{",
-            flow,
+            *([flow] if flow else []),
             _block([
                 f"const result = {{ ok: true, type: 'event', value: {_value('js')} }};",
                 f"const size = String({arg} ?? '').length;",
@@ -1481,16 +1521,16 @@ def _js_snippet() -> str:
 
     if kind == "class":
         cls = _camel()
-        ctor_flow = "\n".join(_js_control_flow("        "))
-        method_flow = "\n".join(_js_control_flow("        "))
+        ctor_flow = "\n".join(_js_control_flow("        ")) if _chance(0.7, chance_mult) else ""
+        method_flow = "\n".join(_js_control_flow("        ")) if _chance(0.7, chance_mult) else ""
         constructor_body = "\n".join([
             f"        this.{arg} = {arg};",
             f"        this.label = '{fake.word()}';",
-            ctor_flow,
+            *([ctor_flow] if ctor_flow else []),
         ])
         method_body = "\n".join([
             "        const result = { ok: true, value: " + _value("js") + " };",
-            method_flow,
+            *([method_flow] if method_flow else []),
             f'        console.log("[{fake.word()}]", {arg}, result);',
             "        return result;",
         ])
@@ -1509,7 +1549,7 @@ def _js_snippet() -> str:
     if kind == "async":
         return "\n".join(header + [
             f"async function {fn}({arg}) {{",
-            flow,
+            *([flow] if flow else []),
             _block([
                 f"const response = await fetch({repr(f'https://{fake.domain_name()}/api/{fake.word()}')});",
                 f"const size = String({arg} ?? '').length;",
@@ -1527,7 +1567,7 @@ def _js_snippet() -> str:
     if kind == "module":
         return "\n".join(header + [
             f"export const {fn} = ({arg}) => {{",
-            flow,
+            *([flow] if flow else []),
             _block([
                 "try {",
                 _block([
@@ -1551,7 +1591,7 @@ def _js_snippet() -> str:
 
     return "\n".join(header + [
         f"function {fn}({arg}) {{",
-        flow,
+        *([flow] if flow else []),
         _block([
             f"const result = {{ ok: true, type: 'event', value: {_value('js')} }};",
             f"const size = String({arg} ?? '').length;",
@@ -1568,6 +1608,7 @@ def _js_snippet() -> str:
 
 
 def _sql_snippet() -> str:
+    chance_mult = _snippet_mult()
     table_a = _ident()
     table_b = _ident()
     alias_a = fake.word()
@@ -1611,15 +1652,15 @@ def _sql_snippet() -> str:
             else f"{join_type} {table_b} {alias_b}"
         ),
     ]
-    if random.random() < 0.8:
+    if _chance(0.8, chance_mult):
         pieces.append(
             f"WHERE {alias_a}.{metric} IS NOT NULL {joiner} {alias_b}.{col_b} {text_op} {text_rhs}"
         )
-    if random.random() < 0.5:
+    if _chance(0.5, chance_mult):
         pieces.append(
             f"{joiner} {alias_a}.created_at {_comparison_op('sql')} '{random.randint(2020, 2026)}-01-01'"
         )
-    if random.random() < 0.6:
+    if _chance(0.6, chance_mult):
         having_rhs = random.randint(1, 20)
         if agg_kind == "AVG":
             having_rhs = random.randint(1, 100)
@@ -1629,14 +1670,15 @@ def _sql_snippet() -> str:
         ])
     else:
         pieces.append(f"GROUP BY {alias_a}.{col_a}")
-    if random.random() < 0.7:
+    if _chance(0.7, chance_mult):
         pieces.append(f"ORDER BY {agg_alias} {random.choice(['DESC', 'ASC'])}")
-    if random.random() < 0.5:
+    if _chance(0.5, chance_mult):
         pieces.append(f"LIMIT {random.randint(5, 500)}")
     return "\n".join(pieces) + ";"
 
 
 def _bash_snippet() -> str:
+    chance_mult = _snippet_mult()
     var = _ident().upper()
     path = f"/tmp/{_ident()}"
     workdir = f"/var/tmp/{_ident()}"
@@ -1712,7 +1754,7 @@ def _bash_snippet() -> str:
         f'xargs -I{{}} echo {{}} < "{script_path}"',
     ]
     entrypoint = random.choice(entry_candidates)
-    control_flow = "\n".join(_bash_control_flow("    ", path=path, workdir=workdir, var=var))
+    control_flow = "\n".join(_bash_control_flow("    ", path=path, workdir=workdir, var=var)) if _chance(0.75, chance_mult) else ""
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
@@ -1731,7 +1773,8 @@ def _bash_snippet() -> str:
         lines.append(f'mkdir -p "${{{var}}}" "$WORKDIR"')
     else:
         lines.append(f'mkdir -p "${{{var}}}"')
-    lines.append(control_flow)
+    if control_flow:
+        lines.append(control_flow)
     lines.append(entrypoint)
     return "\n".join(lines)
 
@@ -1874,12 +1917,13 @@ def _bash_control_flow(indent: str = "    ", *, path: str, workdir: str, var: st
 
 
 def _go_snippet() -> str:
+    chance_mult = _snippet_mult()
     fn = _camel()
     arg = _ident()
     recv = _ident()
     kind = random.choice(["struct", "interface", "func", "method"])
     ret_type = random.choice(["Config", "string", "int", "bool", "error"])
-    flow = "\n".join(_go_control_flow("    "))
+    flow = "\n".join(_go_control_flow("    ")) if _chance(0.75, chance_mult) else ""
     zero_value = {
         "Config": "Config{}",
         "string": '""',
@@ -1905,7 +1949,7 @@ def _go_snippet() -> str:
         ])
         body = [
             f"func New{fn}() *{fn} {{",
-            flow,
+            *([flow] if flow else []),
             _block([
                 f'return &{fn}{{Enabled: {_value("go", "bool")}, Label: {_value("go", "string")}}}',
             ]),
@@ -1919,7 +1963,7 @@ def _go_snippet() -> str:
         ])
         body = [
             f"func {fn.lower()}({arg} string) {ret_type} {{",
-            flow,
+            *([flow] if flow else []),
             _block([
                 f'fmt.Println("[trace]", {arg})',
                 f"if len({arg}) {_comparison_op('c')} {random.randint(0, 20)} {{",
@@ -1939,7 +1983,7 @@ def _go_snippet() -> str:
         ])
         body = [
             f"func ( {recv} *{fn} ) {arg.title()}({arg} string) ({ret_type}, error) {{",
-            flow,
+            *([flow] if flow else []),
             _block([
                 f'fmt.Printf("[debug] %s=%v\\n", "{arg}", {arg})',
                 f"if {recv} == nil {{ return {zero_value}, nil }}",
@@ -1955,7 +1999,7 @@ def _go_snippet() -> str:
     else:
         body = [
             f"func {fn}({arg} string) ({ret_type}, error) {{",
-            flow,
+            *([flow] if flow else []),
             _block([
                 'fmt.Println("[debug]", ' + arg + ")",
                 f"if len({arg}) {_comparison_op('c')} {random.randint(0, 20)} {{",
@@ -1972,6 +2016,7 @@ def _go_snippet() -> str:
 
 
 def _java_snippet() -> str:
+    chance_mult = _snippet_mult()
     cls = _camel()
     fn = _ident()
     class_kind = random.choice([
@@ -1999,7 +2044,7 @@ def _java_snippet() -> str:
     ])
     maybe_static = "static " if random.random() < 0.7 else ""
     header = _java_import_header()
-    flow = "\n".join(_java_control_flow("        "))
+    flow = "\n".join(_java_control_flow("        ")) if _chance(0.75, chance_mult) else ""
     extra_lines = random.choice([
         ['        System.err.println("[debug] " + input);'],
         [
@@ -2025,7 +2070,7 @@ def _java_snippet() -> str:
         f"{class_kind} {cls} {{",
         f"    public {maybe_static}{return_type} {fn}({param_type} input) {{",
         f'        System.out.println("[trace] " + input);',
-        flow,
+        *([flow] if flow else []),
         *extra_lines,
         *( [f"        return {ret_expr};"] if return_type != "void" else [] ),
         "    }",
@@ -2035,11 +2080,12 @@ def _java_snippet() -> str:
 
 
 def _c_cpp_snippet() -> str:
+    chance_mult = _snippet_mult()
     kind = random.choice(["c", "cpp"])
     fn = _ident()
     var = _ident()
     header_lines: list[str] = []
-    flow = "\n".join(_c_control_flow("    "))
+    flow = "\n".join(_c_control_flow("    ")) if _chance(0.75, chance_mult) else ""
 
     if kind == "c":
         scalar_type = _c_type()
@@ -2070,7 +2116,7 @@ def _c_cpp_snippet() -> str:
         body_lines.extend([
             f'    printf("[debug] {_c_printf_format(scalar_type)}\\n", {var});',
             f"    if ({_comparison_expr(cmp_left, style='c')}) return {zero_value};",
-            flow,
+            *([flow] if flow else []),
             f"    return {zero_value};",
             "}",
         ])
@@ -2134,7 +2180,7 @@ def _c_cpp_snippet() -> str:
         ])
     body = [
         f"{vec_type} {fn}(const {vec_type}& {var}) {{",
-        flow,
+        *([flow] if flow else []),
         _block([
             f"std::cout << \"[trace] size=\" << {var}.size() << std::endl;",
             f"std::string note = {_value('cpp', 'string')};",
@@ -2174,6 +2220,7 @@ def _c_cpp_snippet() -> str:
 
 
 def _rust_snippet() -> str:
+    chance_mult = _snippet_mult()
     kind = random.choice(["fn", "struct", "impl"])
     name = _camel()
     fn = _ident()
@@ -2185,7 +2232,7 @@ def _rust_snippet() -> str:
         "option": "Option<i32>",
         "vec": "Vec<i32>",
     }[return_kind]
-    flow = "\n".join(_rust_control_flow("        " if kind == "impl" else "    "))
+    flow = "\n".join(_rust_control_flow("        " if kind == "impl" else "    ")) if _chance(0.75, chance_mult) else ""
 
     header = []
     if random.random() < 0.6:
@@ -2215,7 +2262,7 @@ def _rust_snippet() -> str:
             "",
             f"impl {name} {{",
             f"    fn {fn}(&self, {arg}: {ty}) -> {ret_ty} {{",
-            flow,
+            *([flow] if flow else []),
             _block([
                 f"if {arg} {_comparison_op('c')} {_numeric_literal('int')} {{",
                 _block([
@@ -2250,7 +2297,7 @@ def _rust_snippet() -> str:
     )
     return "\n".join(header + [
         f"fn {fn}({arg}: {ty}) -> {ret_ty} {{",
-        flow,
+        *([flow] if flow else []),
         _block([
             f"if {arg} {_comparison_op('c')} {_numeric_literal('int')} {{",
             _block([
@@ -2292,8 +2339,76 @@ def _log_snippet() -> str:
     ])
 
 
+def _short_code_artifact() -> str:
+    """Return a shorter code-like fragment."""
+    choice = random.choice(["python", "js", "go", "java", "c", "cpp", "sql", "bash", "log", "yaml"])
+    if choice == "python":
+        return random.choice([
+            f"def {_ident()}({ _ident() }: {_python_type(allow_optional=False)}): return {_value('python', 'number')}",
+            f"{_ident()} = {_value('python', 'collection')}",
+            f"if {_ident()} {_comparison_op('c')} {random.randint(0, 9)}: print({_value('python', 'string')})",
+        ])
+    if choice == "js":
+        return random.choice([
+            f"const {_ident()} = ({_ident()}) => {_value('js', 'number')};",
+            f"if ({_ident()} {_comparison_op('c')} {random.randint(0, 9)}) console.log({_value('js', 'string')});",
+            f"export const {_ident()} = {_value('js', 'object')};",
+        ])
+    if choice == "go":
+        return random.choice([
+            f"func {_camel()}() bool {{ return {_value('go', 'bool')} }}",
+            f"var {_ident()} = {_value('go', 'collection')}",
+            f"if {_ident()} {_comparison_op('c')} {random.randint(0, 9)} {{ fmt.Println({_value('go', 'string')}) }}",
+        ])
+    if choice == "java":
+        return random.choice([
+            f"int {_ident()} = {random.randint(0, 9)};",
+            f"if ({_ident()} {_comparison_op('c')} {random.randint(0, 9)}) System.out.println({_value('java', 'string')});",
+            f"List<String> {_ident()} = List.of({_value('java', 'string')}, {_value('java', 'string')});",
+        ])
+    if choice == "c":
+        return random.choice([
+            f"int {_ident()} = {random.randint(0, 9)};",
+            f"if ({_ident()} {_comparison_op('c')} {random.randint(0, 9)}) printf({_value('c', 'string')});",
+            f"char *{_ident()} = {_value('c', 'string')};",
+        ])
+    if choice == "cpp":
+        return random.choice([
+            f"auto {_ident()} = std::vector<int>{{{random.randint(0, 9)}, {random.randint(0, 9)}}};",
+            f"if ({_ident()} {_comparison_op('c')} {random.randint(0, 9)}) std::cout << {_value('cpp', 'string')};",
+            f"std::string {_ident()} = {_value('cpp', 'string')};",
+        ])
+    if choice == "sql":
+        return random.choice([
+            f"SELECT {_ident()} FROM {_ident()} WHERE {_ident()} {_comparison_op('sql')} {random.randint(0, 9)};",
+            f"UPDATE {_ident()} SET {_ident()} = {_random.choice([0,1])};",
+            f"INSERT INTO {_ident()} ({_ident()}) VALUES ({random.randint(0, 9)});",
+        ])
+    if choice == "bash":
+        return random.choice([
+            f'echo "{fake.word()}"',
+            f'grep -n "{fake.word()}" "{fake.file_name()}" || true',
+            f'find /tmp -type f | head -n {random.randint(1, 5)}',
+        ])
+    if choice == "log":
+        return random.choice([
+            f"INFO {fake.word()} id={fake.uuid4()[:8]}",
+            f"WARN {fake.word()} retry={random.randint(1, 5)}",
+            f"DEBUG {fake.word()} status={random.choice(['ok', 'fail'])}",
+        ])
+    return random.choice([
+        f"name: {fake.word()}",
+        f"enabled: {random.choice(['true', 'false'])}",
+        f"count: {random.randint(0, 99)}",
+    ])
+
+
 def generate_code_artifact() -> str:
     """Generate a plausible-but-loose generic code artifact snippet."""
+    size = random.choices(["short", "medium", "long"], weights=[0.35, 0.4, 0.25], k=1)[0]
+    if size == "short":
+        return _short_code_artifact()
+
     templates = [
         _python_snippet,
         _js_snippet,
@@ -2306,4 +2421,7 @@ def generate_code_artifact() -> str:
         _yaml_snippet,
         _log_snippet,
     ]
-    return random.choice(templates)()
+    if size == "medium":
+        return random.choice(templates)()
+
+    return random.choice(templates + [_python_snippet, _js_snippet, _c_cpp_snippet, _rust_snippet, _bash_snippet, _go_snippet, _java_snippet])()
