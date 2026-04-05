@@ -2531,8 +2531,8 @@ def generate_code_artifact() -> str:
         _java_snippet: 3,
         _c_cpp_snippet: 2,
         _rust_snippet: 2,
-        _yaml_snippet: 1,
-        _log_snippet: 1,
+        _yaml_snippet: 0.1,
+        _log_snippet: 0.1,
     }
     templates = [
         _python_snippet,
