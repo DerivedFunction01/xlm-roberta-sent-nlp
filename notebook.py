@@ -178,7 +178,7 @@ WIKI_BLOCKED_MARKERS = ("http",)
 WIKI_BLOCKED_CHARS = {"=", "<", ">", "|"}
 WIKI_OPENING_QUOTES = {"\"", "'", "“", "”", "‘", "’", "«", "»", "‹", "›"}
 LENGTH_PRIORITY_LANGS = {"vi", "sv", "lo", "sd", "am", "km", "ug", "my"}
-LENGTH_PRIORITY_SCAN_LIMIT = 50_000
+LENGTH_PRIORITY_SCAN_LIMIT = int(MAX_WIKI_INDEX // 1.5)
 
 # Languages natively supported by pysbd (da and el added from MajorEconomies).
 # Native support in pysbd as of 2026
