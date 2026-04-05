@@ -131,6 +131,7 @@ def parquet_path(lang: str) -> str:
 MIN_ARTICLE_CHARS = 3_000  # skip stubs
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
 WIKI_PARENS = re.compile(r"\s*[\(\（][^()\(\)（）》】\[\]\{\}]*?[\)\）]\s*")
 WIKI_NUMBERS = re.compile(r"\d+")
 WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
@@ -180,12 +181,23 @@ def _is_valid_sentence(s: str, lang: str) -> bool:
     return mn < len(s) < mx
 
 
-def clean_and_halve(text: str):
-    """Return the first half of a long article with wiki markup stripped, or None if too short."""
+def prepare_wiki_paragraphs(text: str) -> list[str] | None:
+    """Return the longest-first first half of an article's paragraphs, or None if too short."""
     if len(text) < MIN_ARTICLE_CHARS:
         return None
     text = WIKI_MARKUP.sub("", text)
-    return text[: len(text) // 2].strip()
+    paragraphs = [
+        p.strip()
+        for p in WIKI_PARAGRAPH_SPLIT.split(text)
+        if p.strip()
+    ]
+    if not paragraphs:
+        return None
+
+    cutoff = max(1, len(paragraphs) // 2)
+    selected = paragraphs[:cutoff]
+    selected.sort(key=len, reverse=True)
+    return selected
 
 
 def _strip_ascii_for_lang(lang: str) -> bool:
@@ -227,7 +239,7 @@ def _get_segmenter(lang: str):
 
 
 def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) -> list[str]:
-    """Stream Wikipedia articles, keep long ones, take first half, and split into sentences."""
+    """Stream Wikipedia articles, keep long ones, take the first half of paragraphs, and split into sentences."""
     segmenter = _get_segmenter(lang)
     fetch_target = n_articles * 20
 
@@ -241,15 +253,16 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
     sentences = []
     seen = 0
     for article in dataset.take(fetch_target):
-        text = clean_and_halve(article.get("text", ""))
-        if text is None:
+        paragraphs = prepare_wiki_paragraphs(article.get("text", ""))
+        if paragraphs is None:
             continue
 
-        sents = segmenter.segment(text) if segmenter else SENT_SPLIT.split(text) # type: ignore
-        for s in sents:
-            s = clean_wiki_sentence(s, lang)
-            if _is_valid_sentence(s, lang):
-                sentences.append(s)
+        for paragraph in paragraphs:
+            sents = segmenter.segment(paragraph) if segmenter else SENT_SPLIT.split(paragraph) # type: ignore
+            for s in sents:
+                s = clean_wiki_sentence(s, lang)
+                if _is_valid_sentence(s, lang):
+                    sentences.append(s)
 
         seen += 1
         if seen >= n_articles:
@@ -455,18 +468,32 @@ def draw_sentence(
     primary_pool: dict[str, deque[str]],
     fallback_pool: dict[str, deque[str]] | None = None,
     source_pool: dict[str, list[str]] | None = None,
+    allow_source_reuse: bool = False,
 ) -> str | None:
     """
     Draw a sentence without replacement from the preferred pool, then fallback
-    pool, then finally the original list if we have exhausted our bags.
+    pool. Source reuse is optional and disabled by default so depleted languages
+    stop being oversampled.
     """
     if primary_pool.get(lang):
         return primary_pool[lang].popleft()
     if fallback_pool and fallback_pool.get(lang):
         return fallback_pool[lang].popleft()
-    if source_pool and source_pool.get(lang):
+    if allow_source_reuse and source_pool and source_pool.get(lang):
         return random.choice(source_pool[lang])
     return None
+
+
+def remaining_sentence_count(
+    lang: str,
+    primary_pool: dict[str, deque[str]],
+    fallback_pool: dict[str, deque[str]] | None = None,
+) -> int:
+    """Return how many unused sentences remain for a language in the active pools."""
+    total = len(primary_pool.get(lang, ()))
+    if fallback_pool is not None:
+        total += len(fallback_pool.get(lang, ()))
+    return total
 
 
 def chunk_list(items: list, n_chunks: int) -> list[list]:
@@ -615,7 +642,8 @@ def create_synthetic_doc(
     Sampling strategy:
       - Groups are weighted by their "global footprint" so major language buckets
         appear more often than tail groups.
-      - Within each selected group, one language is chosen uniformly.
+      - Languages are chosen from what is still available in the pools, so
+        depleted languages naturally stop appearing.
       - `required_langs` can force coverage so every language appears at least
         once in the overall synthetic corpus.
     """
@@ -631,26 +659,39 @@ def create_synthetic_doc(
         "ArabicScript": 1.5,
         "OtherScripts": 1.0,
     }
-    group_names  = list(LANGUAGE_GROUPS.keys())
-    weights      = [GROUP_WEIGHTS.get(g, 1.0) for g in group_names]
-    total_weight = sum(weights)
-    norm_weights = [w / total_weight for w in weights]
-
     chosen_langs: list[str] = []
     seen_langs: set[str] = set()
 
+    def _candidate_langs() -> list[str]:
+        candidates = [
+            lang for lang in ALL_LANGS
+            if remaining_sentence_count(lang, primary_pool, fallback_pool) > 0
+            and lang not in seen_langs
+        ]
+        return candidates
+
+    def _sample_language(candidates: list[str]) -> str | None:
+        if not candidates:
+            return None
+        weights = [
+            GROUP_WEIGHTS.get(LANG_TO_GROUP.get(lang, ""), 1.0)
+            * remaining_sentence_count(lang, primary_pool, fallback_pool)
+            for lang in candidates
+        ]
+        return random.choices(candidates, weights=weights, k=1)[0]
+
     # Always keep any requested languages. This is the coverage guarantee.
     for lang in required_langs or []:
-        if (primary_pool.get(lang) or (fallback_pool and fallback_pool.get(lang)) or (source_pool and source_pool.get(lang))) and lang not in seen_langs:
+        if remaining_sentence_count(lang, primary_pool, fallback_pool) > 0 and lang not in seen_langs:
             chosen_langs.append(lang)
             seen_langs.add(lang)
 
-    # Sample remaining segments from groups, with replacement so a group can repeat.
+    # Sample remaining segments from the languages that still have usable sentence supply.
     n_remaining_segments = max(0, n_segments - len(chosen_langs))
-    selected_groups = random.choices(group_names, weights=norm_weights, k=n_remaining_segments)
-    # Pick one language uniformly within each selected group.
-    for group in selected_groups:
-        lang = random.choice(LANGUAGE_GROUPS[group])
+    for _ in range(n_remaining_segments):
+        lang = _sample_language(_candidate_langs())
+        if lang is None:
+            break
         if lang not in seen_langs:
             chosen_langs.append(lang)
             seen_langs.add(lang)
@@ -661,7 +702,7 @@ def create_synthetic_doc(
     for lang in chosen_langs:
         if total_tokens >= MAX_LENGTH - 20:
             break
-        sent = draw_sentence(lang, primary_pool, fallback_pool, source_pool)
+        sent = draw_sentence(lang, primary_pool, fallback_pool, source_pool, allow_source_reuse=False)
         if sent is None:
             continue
         tokens = tokenizer.tokenize(sent)
