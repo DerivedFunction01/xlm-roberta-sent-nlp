@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import random
 from datetime import datetime, timedelta, timezone
 
@@ -1182,77 +1183,186 @@ def _java_import_header() -> list[str]:
     return _format_imports(spec)
 
 
-def _html_attrs() -> dict[str, str]:
-    """Return a small bundle of realistic-looking HTML attributes."""
+def _html_attrs(tag: str, *, chance_mult: float = 1.0) -> dict[str, str]:
+    """Return a realistic-looking attribute bundle for the requested tag."""
     domain = fake.domain_name()
-    return {
-        "class": fake.word(),
-        "id": fake.slug(),
-        "href": f"https://{domain}/",
-        "src": f"https://{domain}/{fake.slug()}.png",
-        "content": fake.word(),
-        "name": fake.word(),
-        "property": random.choice(["og:title", "og:description", "og:image", "og:type"]),
-        "lang": random.choice(["en", "fr", "de", "es", "pl", "pt", "zh", "ja"]),
-    }
+    attrs: dict[str, str] = {}
+    required_tag = tag in _HTML_REQUIRED_TAGS
+    attr_mult = chance_mult if required_tag else chance_mult * 0.35
+    if tag in {"html"} and _chance(0.9, attr_mult):
+        attrs["lang"] = random.choice(["en", "fr", "de", "es", "pl", "pt", "zh", "ja"])
+    if tag in {"div", "header", "main", "section", "article", "footer", "nav", "aside", "table", "ul", "ol", "li", "tr", "td", "th", "span", "p", "a", "h1", "h2"}:
+        if _chance(0.85, attr_mult):
+            attrs["class"] = fake.word()
+        if _chance(0.7, attr_mult):
+            attrs["id"] = fake.slug()
+    if tag in {"a", "link"}:
+        if _chance(0.8, attr_mult):
+            attrs["href"] = f"https://{domain}/"
+    if tag in {"img", "script"}:
+        if _chance(0.7, attr_mult):
+            attrs["src"] = f"https://{domain}/{fake.slug()}.png"
+    if tag in {"td", "th"}:
+        if _chance(0.6, attr_mult):
+            attrs["colspan"] = str(random.choice([1, 1, 1, 2, 3, 4]))
+        if _chance(0.5, attr_mult):
+            attrs["rowspan"] = str(random.choice([1, 1, 1, 2, 2, 3]))
+        if _chance(0.35, attr_mult):
+            attrs["headers"] = fake.slug()
+        if tag == "th" and _chance(0.5, attr_mult):
+            attrs["scope"] = random.choice(["row", "col", "rowgroup", "colgroup"])
+    if tag == "meta":
+        if _chance(0.8, attr_mult):
+            attrs["name"] = fake.word()
+        if _chance(0.8, attr_mult):
+            attrs["content"] = fake.word()
+        if _chance(0.6, attr_mult):
+            attrs["property"] = random.choice(["og:title", "og:description", "og:image", "og:type"])
+    if tag in {"script", "style"}:
+        if _chance(0.6, attr_mult):
+            attrs["type"] = random.choice(["application/ld+json", "text/javascript", "text/css"])
+    if tag in {"tr", "thead", "tbody", "tfoot", "table"} and _chance(0.2, attr_mult):
+        attrs["class"] = fake.word()
+    return attrs
+
+
+_HTML_RULES: dict[str, dict[str, list[str] | bool]] = {
+    "html": {"required": ["head", "body"], "optional": ["script", "style"]},
+    "head": {"required": ["meta", "title"], "optional": ["meta", "meta", "link", "script", "style"]},
+    "body": {"required": ["div"], "optional": ["header", "main", "section", "article", "footer", "nav", "table", "script"]},
+    "header": {"required": ["nav"], "optional": ["div", "span"]},
+    "nav": {"required": ["ul"], "optional": []},
+    "ul": {"required": ["li"], "optional": ["li", "li"]},
+    "ol": {"required": ["li"], "optional": ["li"]},
+    "li": {"required": [], "optional": []},
+    "main": {"required": ["section"], "optional": ["article", "aside", "div"]},
+    "section": {"required": ["h1"], "optional": ["p", "aside", "div", "table"]},
+    "article": {"required": ["section"], "optional": ["p", "aside", "div", "table"]},
+    "aside": {"required": ["div"], "optional": ["p", "span"]},
+    "div": {"required": ["span"], "optional": ["div", "p", "footer", "table"]},
+    "footer": {"required": ["a"], "optional": ["span"]},
+    "table": {"required": ["tbody"], "optional": ["caption", "thead", "tfoot"]},
+    "thead": {"required": ["tr"], "optional": []},
+    "tbody": {"required": ["tr"], "optional": []},
+    "tfoot": {"required": ["tr"], "optional": []},
+    "tr": {"required": ["td"], "optional": ["td", "th"]},
+    "caption": {"required": [], "optional": []},
+    "title": {"required": [], "optional": []},
+    "meta": {"required": [], "optional": []},
+    "link": {"required": [], "optional": []},
+    "script": {"required": [], "optional": []},
+    "style": {"required": [], "optional": []},
+    "noscript": {"required": [], "optional": []},
+    "img": {"required": [], "optional": []},
+    "h1": {"required": [], "optional": []},
+    "h2": {"required": [], "optional": []},
+    "p": {"required": [], "optional": []},
+    "span": {"required": [], "optional": []},
+    "a": {"required": [], "optional": []},
+    "td": {"required": [], "optional": []},
+    "th": {"required": [], "optional": []},
+}
+
+_HTML_REQUIRED_TAGS = {
+    child
+    for rule in _HTML_RULES.values()
+    for child in rule.get("required", [])
+    if isinstance(child, str)
+}
+
+
+def _html_inline_style(chance_mult: float) -> str:
+    if not _chance(0.3, chance_mult):
+        return ""
+    styles = [
+        f'display: {random.choice(["block", "flex", "grid", "inline-block"])}',
+        f'margin: {_css_length()}',
+        f'padding: {_css_length()}',
+        f'color: {_hex_color()}',
+        f'background-color: {random.choice([_hex_color(), "transparent", _rgb_color()])}',
+        f'font-family: {random.choice(["Inter, system-ui, sans-serif", "Roboto, Arial, sans-serif", "Georgia, serif", "Segoe UI, Tahoma, sans-serif"])}',
+    ]
+    if _chance(0.4, chance_mult):
+        styles.append(f'border-radius: {_css_length()}')
+    if _chance(0.3, chance_mult):
+        styles.append(f'width: {random.choice([_css_length(), "100%", "min-content", "fit-content"])}')
+    return "; ".join(styles) + ";"
+
+
+def _html_node(tag: str, *, chance_mult: float, depth: int = 0) -> dict[str, object]:
+    attrs = _html_attrs(tag, chance_mult=chance_mult)
+    if tag in {"div", "header", "article", "section", "footer", "main", "aside", "nav", "table"}:
+        style = _html_inline_style(chance_mult)
+        if style:
+            attrs["style"] = style
+    if tag == "table":
+        attrs["class"] = fake.word()
+    children: list[dict[str, object]] = []
+    required = list(_HTML_RULES.get(tag, {}).get("required", []))
+    optional = list(_HTML_RULES.get(tag, {}).get("optional", []))
+    max_depth = 3 if chance_mult > 0.7 else 2
+    for child_tag in required:
+        child_depth = max_depth - 1 if depth < max_depth else 0
+        children.append(_html_node(child_tag, chance_mult=chance_mult, depth=depth + 1))
+    if depth < max_depth and optional:
+        # Required-child-heavy nodes should stay shallow; scale optional growth down.
+        child_pressure = len(required) + depth
+        optional_prob = max(0.05, 0.7 - 0.12 * child_pressure)
+        optional_count = 0
+        if _chance(optional_prob, chance_mult):
+            optional_count = 1
+        if _chance(optional_prob * 0.45, chance_mult):
+            optional_count += 1
+        for child_tag in random.sample(optional, k=min(optional_count, len(optional))):
+            children.append(_html_node(child_tag, chance_mult=chance_mult, depth=depth + 1))
+    if tag == "body" and _chance(max(0.12, 0.35 - 0.05 * len(required)), chance_mult):
+        children.append(_html_node("table", chance_mult=chance_mult, depth=depth + 1))
+    if tag == "tr" and not children:
+        children.append(_html_node(random.choice(["td", "th"]), chance_mult=chance_mult, depth=depth + 1))
+    return {"tag": tag, "attrs": attrs, "children": children}
+
+
+def _render_html_node(node: dict[str, object]) -> str:
+    tag = str(node["tag"])
+    attrs = node.get("attrs", {})
+    children = node.get("children", [])
+    attr_parts = []
+    if isinstance(attrs, dict):
+        for key, value in attrs.items():
+            if value in ("", None):
+                continue
+            attr_parts.append(f'{key}="{_html.escape(str(value), quote=True)}"')
+    attr_str = (" " + " ".join(attr_parts)) if attr_parts else ""
+    if tag in {"meta", "link", "img", "br", "hr", "input"}:
+        return f"<{tag}{attr_str}>"
+    child_html = "".join(_render_html_node(child) for child in children) if isinstance(children, list) else ""
+    if tag in {"title", "caption", "h1", "h2", "p", "span", "a", "td", "th"}:
+        return f"<{tag}{attr_str}></{tag}>"
+    return f"<{tag}{attr_str}>{child_html}</{tag}>"
 
 
 def generate_html_artifact() -> str:
     """Generate an HTML snippet with tags preserved and text content removed."""
-    a = _html_attrs()
-    inline_styles = [
-        f'style="display: {random.choice(["block", "flex", "grid", "inline-block"])}; '
-        f'margin: {_css_length()}; '
-        f'padding: {_css_length()}; '
-        f'color: {_hex_color()}; '
-        f'background-color: {random.choice([_hex_color(), "transparent", _rgb_color()])}; '
-        f'font-family: {random.choice(["Inter, system-ui, sans-serif", "Roboto, Arial, sans-serif", "Georgia, serif", "Segoe UI, Tahoma, sans-serif"])};"',
-        f'style="width: {random.choice([_css_length(), "100%", "min-content", "fit-content"])}; '
-        f'height: {random.choice([_css_length(), "auto", "min-content", "fit-content"])}; '
-        f'border-radius: {_css_length()}; '
-        f'box-shadow: {random.choice(["0 1px 2px rgba(0,0,0,.1)", "0 4px 12px rgba(0,0,0,.15)", "none"])};"',
-        f'style="font-size: {random.choice(["0.875rem", "1rem", "1.125rem", "16px", "18px"])}; '
-        f'line-height: {random.choice(["1.2", "1.4", "1.6", "2"])}; '
-        f'text-align: {random.choice(["left", "center", "right"])};"',
-    ]
-    inline_style = random.choice(inline_styles)
-
-    templates = [
-        (
-            f'<!DOCTYPE html><html lang="{a["lang"]}"><head>'
-            f'<meta charset="utf-8">'
-            f'<meta name="viewport" content="width=device-width, initial-scale=1">'
-            f'<title></title>'
-            f'<meta name="description" content="">'
-            f'<meta property="{a["property"]}" content="{a["content"]}">'
-            f'<link rel="canonical" href="{a["href"]}">'
-            f'</head><body><div class="{a["class"]}" id="{a["id"]}" {inline_style}><span></span></div></body></html>'
-        ),
-        (
-            f'<header class="{a["class"]}" {inline_style}><nav><ul>'
-            f'<li></li><li></li><li></li>'
-            f'</ul></nav></header>'
-        ),
-        (
-            f'<article id="{a["id"]}"><section class="{a["class"]}" {inline_style}>'
-            f'<h1></h1><p></p><p></p><aside></aside>'
-            f'</section></article>'
-        ),
-        (
-            f'<!-- {fake.slug()} --><script type="application/ld+json">{{}}</script>'
-            f'<style></style><noscript></noscript>'
-        ),
-        (
-            f'<div class="{a["class"]}" {inline_style}><div><span></span><span></span></div>'
-            f'<footer><a href="{a["href"]}"></a></footer></div>'
-        ),
-        (
-            f'<meta charset="utf-8"><meta name="{a["name"]}" content="{a["content"]}">'
-            f'<link rel="preload" as="image" href="{a["src"]}">'
-        ),
-    ]
-
-    return random.choice(templates)
+    chance_mult = _snippet_mult()
+    root_kind = random.choices(
+        ["page", "article", "table", "meta", "fragment"],
+        weights=[1, 2, 1, 1, 3] if chance_mult < 0.7 else [2, 2, 2, 1, 2],
+        k=1,
+    )[0]
+    if root_kind == "page":
+        return _render_html_node(_html_node("html", chance_mult=chance_mult))
+    if root_kind == "article":
+        return _render_html_node(_html_node("article", chance_mult=chance_mult))
+    if root_kind == "table":
+        return _render_html_node(_html_node("table", chance_mult=chance_mult))
+    if root_kind == "meta":
+        pieces = [_render_html_node(_html_node("meta", chance_mult=chance_mult))]
+        if _chance(0.4, chance_mult):
+            pieces.append(_render_html_node(_html_node("link", chance_mult=chance_mult)))
+        if _chance(0.2, chance_mult):
+            pieces.append(f'<!-- {fake.slug()} -->')
+        return "".join(pieces)
+    return _render_html_node(_html_node(random.choice(["div", "header", "section", "footer"]), chance_mult=chance_mult))
 
 
 def _css_selector() -> str:
@@ -1367,7 +1477,9 @@ def _css_value(prop: str) -> str:
 
 def generate_css_artifact() -> str:
     """Generate a plausible CSS snippet with common selectors and properties."""
-    selectors = [_css_selector() for _ in range(random.randint(1, 3))]
+    chance_mult = _snippet_mult()
+    selector_count = 1 if _chance(0.7, chance_mult) else random.randint(1, 2 if chance_mult < 0.8 else 3)
+    selectors = [_css_selector() for _ in range(selector_count)]
     props = [
         "display",
         "margin",
@@ -1390,16 +1502,17 @@ def generate_css_artifact() -> str:
     blocks = []
     for sel in selectors:
         decls = []
-        for prop in random.sample(props, k=random.randint(3, 7)):
+        prop_count = 2 if _chance(0.65, chance_mult) else random.randint(3, 5 if chance_mult < 0.8 else 7)
+        for prop in random.sample(props, k=min(prop_count, len(props))):
             decls.append(f"  {prop}: {_css_value(prop)};")
-        if random.random() < 0.4:
+        if _chance(0.25, chance_mult):
             decls.append(f"  {random.choice(['border', 'outline'])}: {_css_length()} solid {_hex_color()};")
-        if random.random() < 0.3:
+        if _chance(0.15, chance_mult):
             extra_prop = random.choice(['transition', 'box-shadow'])
             decls.append(f"  {extra_prop}: {_css_value(extra_prop)};")
         blocks.append(f"{sel} {{\n" + "\n".join(decls) + "\n}")
 
-    if random.random() < 0.5:
+    if _chance(0.25, chance_mult):
         media_sel = random.choice(["(max-width: 768px)", "(min-width: 1024px)", "(prefers-reduced-motion: reduce)"])
         blocks.append(
             f"@media {media_sel} {{\n"
@@ -1410,7 +1523,7 @@ def generate_css_artifact() -> str:
             f"}}"
         )
 
-    if random.random() < 0.4:
+    if _chance(0.2, chance_mult):
         blocks.append(
             ":root {\n"
             f"  --{_ident()}: {_css_value('background-color')};\n"
