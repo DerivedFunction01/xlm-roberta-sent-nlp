@@ -87,7 +87,7 @@ USE_SYNTHETIC_CACHE = True
 FORCE_REBUILD_SYNTHETIC_CACHE = False
 USE_TOKENIZED_CACHE = True
 FORCE_REBUILD_TOKENIZED_CACHE = False
-GENERATION_WORKERS = mp.cpu_count()
+GENERATION_WORKERS = mp.cpu_count() - 1
 TOKENIZE_NUM_PROC = max(1, mp.cpu_count() // 2)
 
 # Optional notebook-state placeholders.
