@@ -297,7 +297,7 @@ def _value(language: str = "generic", kind: str | None = None) -> str:
         )[0]
     pool_factory = spec.get(kind) or _VALUE_SPECS["generic"].get(kind) or _VALUE_SPECS["generic"]["string"]
     pool = pool_factory() if callable(pool_factory) else pool_factory
-    return random.choice(pool)
+    return random.choice(pool) # type: ignore # type: ignore
 
 
 def _arglist() -> str:
@@ -441,7 +441,7 @@ def _c_printf_format(type_name: str) -> str:
 def _control_flow_block(spec: dict[str, object]) -> list[str]:
     """Generate one small control-flow block using language-specific templates."""
     indent = str(spec.get("indent", "    "))
-    value_types = list(spec.get("value_types", ["int", "long", "float"]))
+    value_types = list(spec.get("value_types", ["int", "long", "float"])) # type: ignore
     value_type = random.choice(value_types)
     probe_name = str(spec.get("probe_name") or _ident())
     state_name = str(spec.get("state_name") or _ident())
@@ -451,7 +451,7 @@ def _control_flow_block(spec: dict[str, object]) -> list[str]:
     loop_limit_value = _numeric_literal("int")
     comparison_op = _comparison_op("c")
     case_values = [0, 1, 2]
-    mode = random.choice(list(spec.get("modes", ["if", "loop", "switch"])))
+    mode = random.choice(list(spec.get("modes", ["if", "loop", "switch"]))) # type: ignore
     pad = lambda level=1: indent * level
 
     def _fmt(key: str, **kwargs: object) -> str:
@@ -474,7 +474,7 @@ def _control_flow_block(spec: dict[str, object]) -> list[str]:
         return str(template).format(**data)
 
     lines: list[str] = []
-    for template in spec.get("init_templates", []):
+    for template in spec.get("init_templates", []): # type: ignore
         lines.append(pad() + str(template).format(
             probe_name=probe_name,
             state_name=state_name,
@@ -504,7 +504,7 @@ def _control_flow_block(spec: dict[str, object]) -> list[str]:
                 comparison_op=comparison_op,
                 value_type=value_type,
             )], indent + indent))
-        if random.random() < float(spec.get("if_else_prob", 0.5)) and spec.get("else_header_template"):
+        if random.random() < float(spec.get("if_else_prob", 0.5)) and spec.get("else_header_template"): # type: ignore
             lines.append(pad() + _fmt("else_header_template"))
             if else_body_template:
                 lines.append(_block([else_body_template.format(
@@ -521,7 +521,7 @@ def _control_flow_block(spec: dict[str, object]) -> list[str]:
         return lines
 
     if mode == "loop":
-        if random.random() < float(spec.get("while_prob", 0.5)) and spec.get("while_header_template"):
+        if random.random() < float(spec.get("while_prob", 0.5)) and spec.get("while_header_template"): # type: ignore
             lines.append(pad() + _fmt("while_header_template"))
         else:
             lines.append(pad() + _fmt("for_header_template"))
@@ -878,15 +878,15 @@ def _format_imports(spec: dict[str, object]) -> list[str]:
             )
         ]
 
-    templates = list(spec.get("templates", []))
+    templates = list(spec.get("templates", [])) # type: ignore
     if not templates:
         return [""]
 
-    raw_candidates = list(spec.get("sub_modules", []))
-    raw_candidates.extend(spec.get("extra_modules", []))
-    main_module = str(spec.get("main_module", ""))
-    count = random.randint(int(spec.get("min_items", 1)), int(spec.get("max_items", 3)))
-    chance_mult = float(spec.get("chance_mult", 1.0))
+    raw_candidates = list(spec.get("sub_modules", [])) # type: ignore
+    raw_candidates.extend(spec.get("extra_modules", [])) # type: ignore
+    main_module = str(spec.get("main_module", "")) # type: ignore
+    count = random.randint(int(spec.get("min_items", 1)), int(spec.get("max_items", 3))) # type: ignore
+    chance_mult = float(spec.get("chance_mult", 1.0)) # type: ignore
     if chance_mult < 0.7 and count > 1 and random.random() < 0.7:
         count = 1
     elif chance_mult < 0.9 and count > 2 and random.random() < 0.5:
@@ -901,7 +901,7 @@ def _format_imports(spec: dict[str, object]) -> list[str]:
     pieces = {
         "main_module": main_module,
         "sub_module": "",
-        "sub_modules_csv": ", ".join(str(s) for s in spec.get("sub_modules_csv", [])),
+        "sub_modules_csv": ", ".join(str(s) for s in spec.get("sub_modules_csv", [])), # type: ignore
         "dotted_module": _module_path(),
         "package_path": _package_path(),
         "ident": _ident(),
@@ -1293,7 +1293,7 @@ _HTML_RULES: dict[str, dict[str, list[str] | bool]] = {
 _HTML_REQUIRED_TAGS = {
     child
     for rule in _HTML_RULES.values()
-    for child in rule.get("required", [])
+    for child in rule.get("required", []) # type: ignore
     if isinstance(child, str)
 }
 
@@ -1325,8 +1325,8 @@ def _html_node(tag: str, *, chance_mult: float, depth: int = 0) -> dict[str, obj
     if tag == "table":
         attrs["class"] = fake.word()
     children: list[dict[str, object]] = []
-    required = list(_HTML_RULES.get(tag, {}).get("required", []))
-    optional = list(_HTML_RULES.get(tag, {}).get("optional", []))
+    required = list(_HTML_RULES.get(tag, {}).get("required", [])) # type: ignore
+    optional = list(_HTML_RULES.get(tag, {}).get("optional", [])) # type: ignore
     max_depth = 3 if chance_mult > 0.7 else 2
     for child_tag in required:
         child_depth = max_depth - 1 if depth < max_depth else 0

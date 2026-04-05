@@ -368,7 +368,7 @@ def _is_valid_sentence(s: str, lang: str) -> bool:
 def _article_min_chars(lang: str) -> int:
     """Return the minimum article length for a language."""
     group = LANG_TO_GROUP.get(lang)
-    return MIN_ARTICLE_CHARS_BY_GROUP.get(group, MIN_ARTICLE_CHARS_DEFAULT)
+    return MIN_ARTICLE_CHARS_BY_GROUP.get(group, MIN_ARTICLE_CHARS_DEFAULT)  # type: ignore
 
 
 def _split_wiki_paragraphs(text: str, lang: str) -> list[str] | None:
@@ -765,11 +765,11 @@ def _load_smoldoc(accumulator: dict[str, list[str]]) -> tuple[set[str], set[str]
         if sl in LANG_TO_GROUP and sl not in source_langs_seen:
             source_bucket = accumulator.setdefault(sl, [])
             for row in ds:
-                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl)
+                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl) # type: ignore
             source_langs_seen.add(sl)
 
         for row in ds:
-            _smol_add_sentences(target_bucket, row.get("trgs"), mapped)
+            _smol_add_sentences(target_bucket, row.get("trgs"), mapped)  # type: ignore
 
     return source_langs_seen, target_langs_seen
 
@@ -793,16 +793,16 @@ def _load_smolsent(accumulator: dict[str, list[str]]) -> tuple[set[str], set[str
         if sl in LANG_TO_GROUP and sl not in source_langs_seen:
             source_bucket = accumulator.setdefault(sl, [])
             for row in ds:
-                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl)
+                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl) # type: ignore
             source_langs_seen.add(sl)
 
         seg = _get_segmenter(mapped)
 
         for row in ds:
-            trg = row.get("trg") or ""
+            trg = row.get("trg") or "" # type: ignore
             if not isinstance(trg, str):
                 continue
-            sents = seg.segment(trg) if seg else [trg]
+            sents = seg.segment(trg) if seg else [trg]  # type: ignore
             _smol_add_sentences(target_bucket, sents, mapped)
 
     return source_langs_seen, target_langs_seen
@@ -1529,8 +1529,8 @@ else:
         job_chunks = chunk_list(generation_jobs, generation_workers)
         reserved_worker_pools = partition_sentence_pools(reserved_sentence_pools, generation_workers)
         main_worker_pools = partition_sentence_pools(main_sentence_pools, generation_workers)
-        coverage_examples = [None] * len(coverage_plan)
-        random_examples = [None] * random_job_count
+        coverage_examples = [None] * len(coverage_plan) # type: ignore
+        random_examples = [None] * random_job_count # type: ignore
 
         with ProcessPoolExecutor(max_workers=generation_workers) as pool:
             future_to_jobs = {}
@@ -1555,12 +1555,12 @@ else:
                 for offset, (example, job) in enumerate(zip(chunk_examples, jobs)):
                     kind, _ = job
                     if kind == "coverage":
-                        coverage_examples[job_start + offset] = example
+                        coverage_examples[job_start + offset] = example # type: ignore
                     else:
-                        random_examples[job_start + offset - len(coverage_plan)] = example
+                        random_examples[job_start + offset - len(coverage_plan)] = example # type: ignore
 
-        coverage_examples = [ex for ex in coverage_examples if ex is not None]
-        random_examples = [ex for ex in random_examples if ex is not None]
+        coverage_examples = [ex for ex in coverage_examples if ex is not None] # type: ignore
+        random_examples = [ex for ex in random_examples if ex is not None] # type: ignore
 
     if USE_SYNTHETIC_CACHE:
         save_synthetic_examples_cache(coverage_examples, random_examples) # type: ignore
@@ -1783,7 +1783,7 @@ else:
     coverage_dataset = Dataset.from_list(coverage_examples) # type: ignore
     random_dataset = Dataset.from_list(random_examples) # type: ignore
 
-    save_token_debug_cache(coverage_examples, random_examples)
+    save_token_debug_cache(coverage_examples, random_examples)  # type: ignore
 
     coverage_dataset = coverage_dataset.map(
         tokenize_and_align,
@@ -1885,8 +1885,8 @@ training_args = TrainingArguments(
 trainer = Trainer(
     model=model,
     args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
+    train_dataset=train_dataset, # type: ignore
+    eval_dataset=eval_dataset,  # type: ignore
     data_collator=data_collator,
     compute_metrics=compute_metrics,
 )
