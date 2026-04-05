@@ -18,7 +18,14 @@ from faker import Faker
 import torch
 import numpy as np
 import evaluate
-from datasets import load_dataset, Dataset, DatasetDict, concatenate_datasets, load_from_disk
+from datasets import (
+    load_dataset,
+    get_dataset_config_names,
+    Dataset,
+    DatasetDict,
+    concatenate_datasets,
+    load_from_disk,
+)
 from transformers import (
     AutoTokenizer,
     AutoModelForTokenClassification,
@@ -134,7 +141,7 @@ MIN_ARTICLE_CHARS = 3_000  # skip stubs
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
-WIKI_PARENS = re.compile(r"\s*[\(\（][^()\(\)（）》】\[\]\{\}]*?[\)\）]\s*")
+BRACKET_NOTES = re.compile(r"\s*[\(\[【（][^\)\]】）]{0,60}[\)\]】）]\s*")
 WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
 WIKI_SPACES = re.compile(r"\s{2,}")
 
@@ -198,6 +205,27 @@ def _word_count(s: str) -> int:
     return len(WIKI_WORDS.findall(s))
 
 
+def _strip_bracket_notes(text: str) -> str:
+    """Remove short parenthetical/bracketed notes that are usually noise."""
+    return BRACKET_NOTES.sub(" ", text)
+
+
+def _collapse_spaces(text: str) -> str:
+    """Collapse repeated whitespace to a single space."""
+    return WIKI_SPACES.sub(" ", text)
+
+
+def _is_sentence_text_valid(text: str, min_chars: int, max_chars: int, min_alpha_ratio: float = 0.0) -> bool:
+    """Generic text-length gate for sentence-like fragments."""
+    n = len(text)
+    if not (min_chars <= n <= max_chars):
+        return False
+    if min_alpha_ratio > 0.0:
+        alpha = sum(c.isalpha() for c in text)
+        return alpha >= n * min_alpha_ratio
+    return True
+
+
 def _is_valid_sentence(s: str, lang: str) -> bool:
     mn, mx = _SENT_BOUNDS.get(lang, _DEFAULT_BOUNDS)
     visible = _non_punct_char_count(s)
@@ -235,10 +263,10 @@ def _strip_ascii_for_lang(lang: str) -> bool:
 
 def clean_wiki_sentence(sentence: str, lang: str) -> str:
     """Remove parenthetical text and extra whitespace from a sentence."""
-    sentence = WIKI_PARENS.sub(" ", sentence)
+    sentence = _strip_bracket_notes(sentence)
     if _strip_ascii_for_lang(lang):
         sentence = WIKI_ASCII_WORDS.sub("", sentence)
-    sentence = WIKI_SPACES.sub(" ", sentence)
+    sentence = _collapse_spaces(sentence)
     return sentence.strip()
 
 
@@ -313,6 +341,163 @@ def load_or_extract(lang: str) -> tuple[str, list[str]]:
     pd.DataFrame({"sentence": sentences}).to_parquet(path, index=False)
     return lang, sentences
 
+
+# ---------------------------------------------------------------------------
+# SMOL augmentation
+# ---------------------------------------------------------------------------
+# The loader lives in this notebook so the full data pipeline is self-contained.
+# Most SMOL config tags already match our pipeline ISO codes, so we only list
+# the aliases that need collapsing.
+SMOL_CODE_MAP: dict[str, str] = {
+    "pt-PT": "pt",
+    "yue": "zh",
+    "ar-MA": "ar",
+    "arz": "ar",
+    "aeb": "ar",
+    "ayl": "ar",
+    "apd": "ar",
+}
+
+MAX_SENTENCES_PER_LANG = 5_000
+UNCAPPED_LANGS: set[str] = set()
+SMOL_MIN_SENTENCE_CHARS = 20
+SMOL_MAX_SENTENCE_CHARS = 800
+
+SMOL_CACHE_DIR = SENTENCES_DIR
+SMOL_CACHE_FILE = os.path.join(SMOL_CACHE_DIR, "smol_sentences.json")
+os.makedirs(SMOL_CACHE_DIR, exist_ok=True)
+
+def _smol_parse_config(config: str) -> tuple[str, str] | None:
+    try:
+        _, pair = config.split("__", 1)
+        sl, tl = pair.split("_", 1)
+        return sl, tl
+    except ValueError:
+        return None
+
+
+def _smol_add_sentences(bucket: list[str], raw_sentences: object) -> None:
+    """Normalize and append a sequence of SMOL sentences into a bucket."""
+    if isinstance(raw_sentences, str):
+        raw_sentences = [raw_sentences]
+    if not isinstance(raw_sentences, list):
+        return
+
+    for sent in raw_sentences:
+        if not isinstance(sent, str):
+            continue
+        sent = _strip_bracket_notes(sent)
+        sent = _collapse_spaces(sent)
+        if _is_sentence_text_valid(sent, SMOL_MIN_SENTENCE_CHARS, SMOL_MAX_SENTENCE_CHARS, min_alpha_ratio=0.4):
+            bucket.append(sent)
+
+
+def _load_smoldoc(accumulator: dict[str, list[str]]) -> tuple[set[str], set[str]]:
+    configs = [c for c in get_dataset_config_names("google/smol") if c.startswith("smoldoc__")]
+    source_langs_seen: set[str] = set()
+    target_langs_seen: set[str] = set()
+    for config in tqdm(configs, desc="SmolDoc subsets"):
+        parsed = _smol_parse_config(config)
+        if parsed is None:
+            continue
+        sl, tl = parsed
+        mapped = SMOL_CODE_MAP.get(tl, tl)
+        if mapped not in LANG_TO_GROUP:
+            continue
+
+        ds = load_dataset("google/smol", config, split="train", trust_remote_code=True)
+        target_bucket = accumulator.setdefault(mapped, [])
+        target_langs_seen.add(mapped)
+        if sl in LANG_TO_GROUP and sl not in source_langs_seen:
+            source_bucket = accumulator.setdefault(sl, [])
+            for row in ds:
+                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"))
+            source_langs_seen.add(sl)
+
+        for row in ds:
+            _smol_add_sentences(target_bucket, row.get("trgs"))
+
+    return source_langs_seen, target_langs_seen
+
+
+def _load_smolsent(accumulator: dict[str, list[str]]) -> tuple[set[str], set[str]]:
+    configs = [c for c in get_dataset_config_names("google/smol") if c.startswith("smolsent__")]
+    source_langs_seen: set[str] = set()
+    target_langs_seen: set[str] = set()
+    for config in tqdm(configs, desc="SmolSent subsets"):
+        parsed = _smol_parse_config(config)
+        if parsed is None:
+            continue
+        sl, tl = parsed
+        mapped = SMOL_CODE_MAP.get(tl, tl)
+        if mapped not in LANG_TO_GROUP:
+            continue
+
+        ds = load_dataset("google/smol", config, split="train", trust_remote_code=True)
+        target_bucket = accumulator.setdefault(mapped, [])
+        target_langs_seen.add(mapped)
+        if sl in LANG_TO_GROUP and sl not in source_langs_seen:
+            source_bucket = accumulator.setdefault(sl, [])
+            for row in ds:
+                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"))
+            source_langs_seen.add(sl)
+
+        seg = _get_segmenter(mapped)
+
+        for row in ds:
+            trg = row.get("trg") or ""
+            if not isinstance(trg, str):
+                continue
+            sents = seg.segment(trg) if seg else [trg]
+            _smol_add_sentences(target_bucket, sents)
+
+    return source_langs_seen, target_langs_seen
+
+
+def load_smol_sentences(force_rebuild: bool = False, seed: int = 42) -> dict[str, list[str]]:
+    """Load, dedupe, shuffle, and cache google/smol sentences by ISO code."""
+    if not force_rebuild and os.path.exists(SMOL_CACHE_FILE):
+        print(f"Loading SMOL cache from {SMOL_CACHE_FILE}")
+        with open(SMOL_CACHE_FILE, encoding="utf-8") as f:
+            cached: dict[str, list[str]] = json.load(f)
+        print(f"  {len(cached)} languages | {sum(len(v) for v in cached.values()):,} sentences total")
+        return cached
+
+    accumulator: dict[str, list[str]] = {}
+
+    print("Loading SmolDoc ...")
+    smoldoc_src_langs, smoldoc_target_langs = _load_smoldoc(accumulator)
+
+    print("Loading SmolSent ...")
+    smolsent_src_langs, smolsent_target_langs = _load_smolsent(accumulator)
+
+    print(f"SMOL src languages loaded once: {len(smoldoc_src_langs | smolsent_src_langs)}")
+    print(f"SMOL target languages loaded: {len(smoldoc_target_langs | smolsent_target_langs)}")
+
+    rng = random.Random(seed)
+    result: dict[str, list[str]] = {}
+    for lang, sents in sorted(accumulator.items()):
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for sent in sents:
+            if sent not in seen:
+                seen.add(sent)
+                deduped.append(sent)
+        rng.shuffle(deduped)
+        cap = None if lang in UNCAPPED_LANGS else MAX_SENTENCES_PER_LANG
+        result[lang] = deduped if cap is None else deduped[:cap]
+
+    with open(SMOL_CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    total = sum(len(v) for v in result.values())
+    print(f"\nSMOL sentences cached -> {SMOL_CACHE_FILE}")
+    print(f"  {len(result)} languages | {total:,} sentences total")
+    for lang in sorted(result):
+        print(f"  {lang:<6}  {len(result[lang]):>5} sentences")
+
+    return result
+
 # ProcessPoolExecutor saturates CPU cores for segmentation work.
 # Workers == min(cpu_count, n_langs) — no point exceeding either.
 MAX_WORKERS = min(mp.cpu_count(), len(ALL_LANGS))
@@ -327,6 +512,30 @@ with ProcessPoolExecutor(max_workers=MAX_WORKERS) as pool:
         lang, sentences = future.result()
         lang_sentences[lang] = sentences
         tqdm.write(f"  {lang}: {len(sentences)} sentences  \u2192  {parquet_path(lang)}")
+
+# Optional SMOL augmentation from google/smol (SmolDoc + SmolSent).
+USE_SMOL_AUGMENTATION = True
+SMOL_FORCE_REBUILD = False
+if USE_SMOL_AUGMENTATION:
+    try:
+        smol_sentences = load_smol_sentences(force_rebuild=SMOL_FORCE_REBUILD)
+        merged_langs = 0
+        merged_unique_sentences = 0
+        for lang, sents in smol_sentences.items():
+            if not sents:
+                continue
+            before = len(lang_sentences.get(lang, []))
+            lang_sentences.setdefault(lang, []).extend(sents)
+            lang_sentences[lang] = list(dict.fromkeys(lang_sentences[lang]))
+            after = len(lang_sentences[lang])
+            merged_langs += 1
+            merged_unique_sentences += max(0, after - before)
+        print(
+            f"\nSMOL merged into lang_sentences: {merged_langs} languages touched | "
+            f"{merged_unique_sentences} new unique sentences"
+        )
+    except Exception as exc:
+        print(f"\nSMOL augmentation skipped: {exc}")
 
 # %%
 # --- Neutral (O-label) Corpus ---
