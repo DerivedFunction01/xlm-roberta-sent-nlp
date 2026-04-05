@@ -110,6 +110,7 @@ for idx, lang in enumerate(ALL_LANGS):
 
 NUM_LABELS = len(label2id)
 print(f"Total labels: {NUM_LABELS}")
+print(f"Total languages: {len(ALL_LANGS)}")
 print("Sample:", dict(list(id2label.items())[:7]))
 # %%
 if Path("hf_token").exists():
