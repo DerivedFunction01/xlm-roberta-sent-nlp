@@ -55,6 +55,7 @@ os.makedirs(SENTENCES_DIR, exist_ok=True)
 SYNTHETIC_CACHE = f"{SENTENCES_DIR}/synthetic_examples.parquet"
 SYNTHETIC_CACHE_META = f"{SENTENCES_DIR}/synthetic_examples.meta.json"
 CACHE_DIR = f"{SENTENCES_DIR}/tokenized_dataset"
+os.makedirs(CACHE_DIR, exist_ok=True)
 CACHE_META = f"{SENTENCES_DIR}/tokenized_dataset.meta.json"
 CACHE_VERSION = 1
 TOKENIZED_CACHE_VERSION = 1
