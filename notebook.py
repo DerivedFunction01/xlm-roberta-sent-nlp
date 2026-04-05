@@ -738,7 +738,7 @@ def load_smol_sentences(force_rebuild: bool = False, seed: int = 42) -> dict[str
 
 # ProcessPoolExecutor saturates CPU cores for segmentation work.
 # Workers == min(cpu_count, n_langs) — no point exceeding either.
-MAX_WORKERS = min(mp.cpu_count() - 1, len(ALL_LANGS))
+MAX_WORKERS = min(mp.cpu_count() // 2, len(ALL_LANGS))
 
 print(f"Extracting sentences \u2192 cached under \'{SENTENCES_DIR}/'")
 print(f"(Workers: {MAX_WORKERS} processes | cached languages skip extraction)\n")
