@@ -249,6 +249,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
         split="train",
         streaming=True,
     )
+    dataset = dataset.shuffle(buffer_size=10_000, seed=SEED)
 
     sentences = []
     seen = 0
