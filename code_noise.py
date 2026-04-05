@@ -2454,7 +2454,7 @@ def _log_snippet() -> str:
 
 def _short_code_artifact() -> str:
     """Return a shorter code-like fragment."""
-    choice = random.choice(["python", "js", "go", "java", "c", "cpp", "sql", "bash", "log", "yaml"])
+    choice = random.choice(["python", "js", "go", "java", "c", "cpp", "sql", "bash"])
     if choice == "python":
         return random.choice([
             f"def {_ident()}({ _ident() }: {_python_type(allow_optional=False)}): return {_value('python', 'number')}",
