@@ -29,6 +29,7 @@ from transformers import (
 )
 
 import os
+import glob
 import pandas as pd
 from pathlib import Path
 from huggingface_hub import login
@@ -955,7 +956,23 @@ def load_tokenized_dataset_cache():
     if meta != expected_meta:
         return None
 
-    return load_from_disk(CACHE_DIR)
+    try:
+        return load_from_disk(CACHE_DIR)
+    except Exception:
+        # Some Colab zips/extractions are happier if we reconstruct the split
+        # datasets directly from their Arrow shards.
+        split_names = ["train", "eval"]
+        loaded_splits = {}
+        for split_name in split_names:
+            split_dir = os.path.join(CACHE_DIR, split_name)
+            arrow_files = sorted(glob.glob(os.path.join(split_dir, "*.arrow")))
+            if not arrow_files:
+                return None
+            split_parts = [Dataset.from_file(path) for path in arrow_files]
+            loaded_splits[split_name] = (
+                split_parts[0] if len(split_parts) == 1 else concatenate_datasets(split_parts)
+            )
+        return DatasetDict(loaded_splits)
 
 
 cached_tokenized = load_tokenized_dataset_cache() if (USE_TOKENIZED_CACHE and not FORCE_REBUILD_TOKENIZED_CACHE) else None
