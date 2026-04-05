@@ -341,32 +341,58 @@ def post_clean_wiki_sentences(sentences: list[str], lang: str) -> list[str]:
             cleaned.append(sentence)
     return cleaned
 
-
 def finalize_wiki_sentence_cache(sentence_map: dict[str, list[str]]) -> dict[str, list[str]]:
     """
-    Apply the final wiki cleanup pass after wiki + SMOL loading, then rewrite the
-    cached parquet files so later runs reuse the cleaned version.
+    Apply the final wiki cleanup pass after wiki + SMOL loading,
+    then rewrite the cached parquet files so later runs reuse the cleaned version.
     """
+
     cleaned_map: dict[str, list[str]] = {}
     total_before = 0
     total_after = 0
     changed_langs = 0
 
-    for lang, sentences in sorted(sentence_map.items()):
-        before = len(sentences)
-        cleaned = post_clean_wiki_sentences(sentences, lang)
-        after = len(cleaned)
-        total_before += before
-        total_after += after
-        if cleaned != sentences:
-            changed_langs += 1
-            _write_sentence_parquet(parquet_path(lang), cleaned)
-        cleaned_map[lang] = cleaned
+    langs = sorted(sentence_map.keys())
+
+    # Global progress bar
+    with tqdm(total=len(langs), desc="Languages", unit="lang") as pbar_langs:
+        for lang in langs:
+            sentences = sentence_map[lang]
+
+            # Per-language progress bar (closes automatically)
+            with tqdm(
+                total=len(sentences),
+                desc=f"{lang} cleanup",
+                unit="sent",
+                leave=False
+            ) as pbar_sent:
+
+                # Run cleaning
+                cleaned = post_clean_wiki_sentences(sentences, lang)
+
+                # Advance per-language bar to completion
+                pbar_sent.update(len(sentences))
+
+            # Metrics
+            before = len(sentences)
+            after = len(cleaned)
+            total_before += before
+            total_after += after
+
+            if cleaned != sentences:
+                changed_langs += 1
+                _write_sentence_parquet(parquet_path(lang), cleaned)
+
+            cleaned_map[lang] = cleaned
+
+            # Advance global bar
+            pbar_langs.update(1)
 
     print(
         f"\nWiki post-clean: {changed_langs} languages updated | "
         f"{total_before:,} -> {total_after:,} sentences"
     )
+
     return cleaned_map
 
 
