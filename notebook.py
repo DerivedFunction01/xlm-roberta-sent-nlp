@@ -13,6 +13,7 @@ import re
 import json
 import gc
 import multiprocessing as mp
+import unicodedata
 from collections import defaultdict, deque
 import string
 from faker import Faker
@@ -167,6 +168,10 @@ BRACKET_NOTES = re.compile(r"\s*[\(\[【（][^\)\]】）]{0,60}[\)\]】）]\s*")
 WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
 WIKI_SPACES = re.compile(r"\s{2,}")
 WIKI_WRITE_BATCH_SIZE = 2048
+WIKI_PUNCT_REPEAT = re.compile(r"([,.;:!?…،。！？])\1+")
+WIKI_BLOCKED_MARKERS = ("http",)
+WIKI_BLOCKED_CHARS = {"=", "<", ">", "|"}
+WIKI_OPENING_QUOTES = {"\"", "'", "“", "”", "‘", "’", "«", "»", "‹", "›"}
 
 # Languages natively supported by pysbd (da and el added from MajorEconomies).
 # Native support in pysbd as of 2026
@@ -236,6 +241,72 @@ def _strip_bracket_notes(text: str) -> str:
 def _collapse_spaces(text: str) -> str:
     """Collapse repeated whitespace to a single space."""
     return WIKI_SPACES.sub(" ", text)
+
+
+def _strip_leading_punct(sentence: str) -> str:
+    """Strip leading punctuation unless the sentence starts with a quote."""
+    sentence = sentence.lstrip()
+    if not sentence or sentence[0] in WIKI_OPENING_QUOTES:
+        return sentence
+
+    idx = 0
+    while idx < len(sentence):
+        ch = sentence[idx]
+        if ch.isspace():
+            idx += 1
+            continue
+        if unicodedata.category(ch).startswith("P"):
+            idx += 1
+            continue
+        break
+    return sentence[idx:].lstrip()
+
+
+def _collapse_repeated_punct(sentence: str) -> str:
+    """Collapse repeated punctuation runs like ',,' or '..' to a single char."""
+    return WIKI_PUNCT_REPEAT.sub(r"\1", sentence)
+
+
+def _has_blocked_artifact(sentence: str) -> bool:
+    """Return True for obvious markup / URL artifacts that should be dropped."""
+    lower = sentence.lower()
+    return any(marker in lower for marker in WIKI_BLOCKED_MARKERS) or any(
+        ch in sentence for ch in WIKI_BLOCKED_CHARS
+    )
+
+
+def _post_clean_wiki_sentence(sentence: str, lang: str) -> str:
+    """Normalize a wiki sentence after extraction and before synthetic sampling."""
+    sentence = clean_wiki_sentence(sentence, lang)
+    sentence = _strip_leading_punct(sentence)
+    sentence = _collapse_repeated_punct(sentence)
+    sentence = _collapse_spaces(sentence)
+    return sentence.strip()
+
+
+def _is_post_clean_wiki_sentence_valid(sentence: str, lang: str) -> bool:
+    """Re-run sentence validity after cleanup and punctuation normalization."""
+    return bool(sentence) and _is_valid_sentence(sentence, lang)
+
+
+def post_clean_wiki_sentences(sentences: list[str], lang: str) -> list[str]:
+    """Apply the final wiki cleanup pass, including dedupe and artifact filtering."""
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for sentence in sentences:
+        if not isinstance(sentence, str):
+            continue
+        if _has_blocked_artifact(sentence):
+            continue
+        sentence = _post_clean_wiki_sentence(sentence, lang)
+        if not sentence or _has_blocked_artifact(sentence):
+            continue
+        if sentence in seen:
+            continue
+        if _is_post_clean_wiki_sentence_valid(sentence, lang):
+            seen.add(sentence)
+            cleaned.append(sentence)
+    return cleaned
 
 
 def _is_valid_sentence(s: str, lang: str) -> bool:
@@ -556,6 +627,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                 if accepted_articles >= n_articles:
                     break
 
+        committed_sentences = post_clean_wiki_sentences(committed_sentences, lang)
         _write_sentence_parquet(final_path, committed_sentences)
         completed_cleanly = True
     finally:
@@ -573,8 +645,7 @@ def load_or_extract(lang: str) -> tuple[str, str]:
     path = parquet_path(lang)
     if os.path.exists(path):
         cached = pd.read_parquet(path)["sentence"].tolist()
-        cleaned = [clean_wiki_sentence(s, lang) for s in cached]
-        cleaned = [s for s in cleaned if _is_valid_sentence(s, lang)]
+        cleaned = post_clean_wiki_sentences(cached, lang)
         if cleaned != cached:
             _write_sentence_parquet(path, cleaned)
         return lang, path
