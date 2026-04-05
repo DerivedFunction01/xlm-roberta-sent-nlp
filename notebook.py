@@ -309,6 +309,34 @@ def post_clean_wiki_sentences(sentences: list[str], lang: str) -> list[str]:
     return cleaned
 
 
+def finalize_wiki_sentence_cache(sentence_map: dict[str, list[str]]) -> dict[str, list[str]]:
+    """
+    Apply the final wiki cleanup pass after wiki + SMOL loading, then rewrite the
+    cached parquet files so later runs reuse the cleaned version.
+    """
+    cleaned_map: dict[str, list[str]] = {}
+    total_before = 0
+    total_after = 0
+    changed_langs = 0
+
+    for lang, sentences in sorted(sentence_map.items()):
+        before = len(sentences)
+        cleaned = post_clean_wiki_sentences(sentences, lang)
+        after = len(cleaned)
+        total_before += before
+        total_after += after
+        if cleaned != sentences:
+            changed_langs += 1
+            _write_sentence_parquet(parquet_path(lang), cleaned)
+        cleaned_map[lang] = cleaned
+
+    print(
+        f"\nWiki post-clean: {changed_langs} languages updated | "
+        f"{total_before:,} -> {total_after:,} sentences"
+    )
+    return cleaned_map
+
+
 def _is_valid_sentence(s: str, lang: str) -> bool:
     mn, mx = _SENT_BOUNDS.get(lang, _DEFAULT_BOUNDS)
     visible = _non_punct_char_count(s)
@@ -836,6 +864,8 @@ if USE_SMOL_AUGMENTATION:
         )
     except Exception as exc:
         print(f"\nSMOL augmentation skipped: {exc}")
+
+lang_sentences = finalize_wiki_sentence_cache(lang_sentences)
 
 # %%
 # --- Neutral (O-label) Corpus ---
