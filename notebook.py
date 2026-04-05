@@ -59,6 +59,8 @@ MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
 SENTENCES_DIR = "./sentences_cache"
 os.makedirs(SENTENCES_DIR, exist_ok=True)
+WIKI_TEMP_DIR = os.path.join(SENTENCES_DIR, "_wiki_tmp")
+os.makedirs(WIKI_TEMP_DIR, exist_ok=True)
 SYNTHETIC_CACHE = f"{SENTENCES_DIR}/synthetic_examples.parquet"
 SYNTHETIC_CACHE_META = f"{SENTENCES_DIR}/synthetic_examples.meta.json"
 CACHE_DIR = f"{SENTENCES_DIR}/tokenized_dataset"
@@ -145,6 +147,7 @@ WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
 BRACKET_NOTES = re.compile(r"\s*[\(\[【（][^\)\]】）]{0,60}[\)\]】）]\s*")
 WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
 WIKI_SPACES = re.compile(r"\s{2,}")
+WIKI_WRITE_BATCH_SIZE = 2048
 
 # Languages natively supported by pysbd (da and el added from MajorEconomies).
 # Native support in pysbd as of 2026
@@ -260,6 +263,34 @@ def clean_wiki_sentence(sentence: str, lang: str) -> str:
     return sentence.strip()
 
 
+def temp_parquet_path(lang: str) -> str:
+    """Return the temporary parquet path used while extracting one language."""
+    return os.path.join(WIKI_TEMP_DIR, f"{lang}.{os.getpid()}.parquet")
+
+
+def _write_sentence_parquet(path: str, sentences: list[str]) -> None:
+    """Write a sentence list to parquet, preferring pyarrow for compact output."""
+    if not sentences:
+        pd.DataFrame({"sentence": []}).to_parquet(path, index=False)
+        return
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError:
+        pd.DataFrame({"sentence": sentences}).to_parquet(path, index=False)
+        return
+    table = pa.table({"sentence": pa.array(sentences, type=pa.string())})
+    pq.write_table(table, path)
+
+
+def _write_sentence_batch(writer, pa, batch: list[str]) -> None:
+    """Write a small batch of extracted sentences to an open parquet writer."""
+    if not batch:
+        return
+    table = pa.table({"sentence": pa.array(batch, type=pa.string())})
+    writer.write_table(table)
+
+
 # ---------------------------------------------------------------------------
 # Per-process segmenter cache.
 # ProcessPoolExecutor forks a fresh Python interpreter per worker — pysbd
@@ -283,10 +314,14 @@ def _get_segmenter(lang: str):
     return seg
 
 
-def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) -> list[str]:
-    """Stream Wikipedia articles, keep long ones, take the first half of paragraphs, and split into sentences."""
+def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) -> str:
+    """Stream Wikipedia articles and write the cleaned sentences to a temp parquet."""
     segmenter = _get_segmenter(lang)
     fetch_target = n_articles * 20
+    final_path = parquet_path(lang)
+    temp_path = temp_parquet_path(lang)
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
 
     dataset = load_dataset(
         "wikimedia/wikipedia",
@@ -296,40 +331,73 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
     )
     dataset = dataset.shuffle(buffer_size=1000, seed=SEED)
 
-    sentences = []
     seen = 0
-    for article in dataset.take(fetch_target):
-        paragraphs = prepare_wiki_paragraphs(article.get("text", ""))
-        if paragraphs is None:
-            continue
+    batch: list[str] = []
+    writer = None
+    pa = None
+    try:
+        try:
+            import pyarrow as _pa
+            import pyarrow.parquet as pq
+            pa = _pa
+            writer = pq.ParquetWriter(temp_path, pa.schema([("sentence", pa.string())]))
+        except ImportError:
+            writer = None
 
-        for paragraph in paragraphs:
-            sents = segmenter.segment(paragraph) if segmenter else SENT_SPLIT.split(paragraph) # type: ignore
-            for s in sents:
-                s = clean_wiki_sentence(s, lang)
-                if _is_valid_sentence(s, lang):
-                    sentences.append(s)
+        with tqdm(total=fetch_target, desc=lang, unit="article", leave=False, dynamic_ncols=True) as bar:
+            for article in dataset.take(fetch_target):
+                paragraphs = prepare_wiki_paragraphs(article.get("text", ""))
+                if paragraphs is None:
+                    bar.update(1)
+                    continue
 
-        seen += 1
-        if seen >= n_articles:
-            break
+                for paragraph in paragraphs:
+                    sents = segmenter.segment(paragraph) if segmenter else SENT_SPLIT.split(paragraph) # type: ignore
+                    for s in sents:
+                        s = clean_wiki_sentence(s, lang)
+                        if _is_valid_sentence(s, lang):
+                            if writer is not None and pa is not None:
+                                batch.append(s)
+                                if len(batch) >= WIKI_WRITE_BATCH_SIZE:
+                                    _write_sentence_batch(writer, pa, batch)
+                                    batch.clear()
+                            else:
+                                batch.append(s)
 
-    return sentences
+                seen += 1
+                bar.update(1)
+                if seen >= n_articles:
+                    break
+
+        if writer is not None and pa is not None:
+            _write_sentence_batch(writer, pa, batch)
+            writer.close()
+            writer = None
+            os.replace(temp_path, final_path)
+        else:
+            _write_sentence_parquet(temp_path, batch)
+            os.replace(temp_path, final_path)
+    finally:
+        if writer is not None:
+            writer.close()
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    return final_path
 
 
-def load_or_extract(lang: str) -> tuple[str, list[str]]:
-    """Return cached sentences from parquet if available, otherwise extract and save."""
+def load_or_extract(lang: str) -> tuple[str, str]:
+    """Return the parquet path for a language, extracting it if needed."""
     path = parquet_path(lang)
     if os.path.exists(path):
         cached = pd.read_parquet(path)["sentence"].tolist()
         cleaned = [clean_wiki_sentence(s, lang) for s in cached]
         cleaned = [s for s in cleaned if _is_valid_sentence(s, lang)]
         if cleaned != cached:
-            pd.DataFrame({"sentence": cleaned}).to_parquet(path, index=False)
-        return lang, cleaned
-    sentences = extract_sentences_from_wiki(lang)
-    pd.DataFrame({"sentence": sentences}).to_parquet(path, index=False)
-    return lang, sentences
+            _write_sentence_parquet(path, cleaned)
+        return lang, path
+    extracted_path = extract_sentences_from_wiki(lang)
+    return lang, extracted_path
 
 
 # ---------------------------------------------------------------------------
@@ -497,9 +565,10 @@ lang_sentences = {}
 with ProcessPoolExecutor(max_workers=MAX_WORKERS) as pool:
     futures = {pool.submit(load_or_extract, lang): lang for lang in ALL_LANGS}
     for future in tqdm(as_completed(futures), total=len(ALL_LANGS), desc="Languages"):
-        lang, sentences = future.result()
+        lang, cache_path = future.result()
+        sentences = pd.read_parquet(cache_path)["sentence"].tolist()
         lang_sentences[lang] = sentences
-        tqdm.write(f"  {lang}: {len(sentences)} sentences  \u2192  {parquet_path(lang)}")
+        tqdm.write(f"  {lang}: {len(sentences)} sentences  \u2192  {cache_path}")
 
 # Optional SMOL augmentation from google/smol (SmolDoc + SmolSent).
 USE_SMOL_AUGMENTATION = True
