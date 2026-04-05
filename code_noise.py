@@ -12,6 +12,26 @@ fake = Faker()
 
 def _ident() -> str:
     """Return a plausible variable/function identifier."""
+    if random.random() < 0.10:
+        ident = random.choice([
+            "i",
+            "j",
+            "k",
+            "n",
+            "x",
+            "y",
+            "z",
+            "t",
+            "v",
+            "m",
+            "c",
+            "r",
+            "s",
+            "e",
+            "f",
+            "u",
+        ])
+        return ident
     common_prefix = random.choice([
         "",
         "",
@@ -38,16 +58,30 @@ def _ident() -> str:
         base = f"{common_prefix}_{base}" if random.random() < 0.7 else f"{common_prefix}{base.title()}"
     mode = random.random()
     if mode < 0.25:
-        return base
+        ident = base
     if mode < 0.50:
-        return f"{base}{random.randint(0, 999)}"
+        ident = f"{base}{random.randint(0, 999)}"
     if mode < 0.70:
-        return f"{base}_{random.randint(0, 999)}"
+        ident = f"{base}_{random.randint(0, 999)}"
     if mode < 0.85:
-        return f"{base}{random.randint(1, 9)}_{fake.word().replace('-', '_').lower().strip('_')}"
-    parts = [fake.word().replace("-", "_") for _ in range(random.randint(1, 2))]
-    ident = "_".join(p.lower() for p in parts if p)
-    ident = ident.strip("_")
+        ident = f"{base}{random.randint(1, 9)}_{fake.word().replace('-', '_').lower().strip('_')}"
+    else:
+        parts = [fake.word().replace("-", "_") for _ in range(random.randint(1, 2))]
+        ident = "_".join(p.lower() for p in parts if p)
+        ident = ident.strip("_") or base
+
+    max_len = random.choice([12, 16, 18, 20, 24, 32])
+    if len(ident) > max_len and random.random() < 0.7:
+        suffix = ""
+        prefix = ident
+        if "_" in ident and random.random() < 0.8:
+            prefix, suffix = ident.rsplit("_", 1)
+            suffix = "_" + suffix
+        elif any(ch.isdigit() for ch in ident) and random.random() < 0.5:
+            idx = next((i for i, ch in enumerate(ident) if ch.isdigit()), len(ident))
+            prefix, suffix = ident[:idx], ident[idx:]
+        keep = max(3, max_len - len(suffix))
+        ident = prefix[:keep].rstrip("_") + suffix
     return ident or base
 
 
