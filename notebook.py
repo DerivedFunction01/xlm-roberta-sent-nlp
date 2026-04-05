@@ -60,6 +60,9 @@ MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
 MAX_WIKI_INDEX = ARTICLES_PER_LANG * 10
 MAX_WIKI_SENTENCES = 200_000
+MAX_WIKI_SENTENCES_BY_LANG = {
+    "en": 300_000,
+}
 SENTENCES_DIR = "./sentences_cache"
 os.makedirs(SENTENCES_DIR, exist_ok=True)
 WIKI_TEMP_DIR = os.path.join(SENTENCES_DIR, "_wiki_tmp")
@@ -285,6 +288,11 @@ def temp_meta_path(lang: str) -> str:
     return os.path.join(WIKI_TEMP_DIR, f"{lang}.meta.json")
 
 
+def max_wiki_sentences_for_lang(lang: str) -> int:
+    """Return the sentence cap for a language, with per-language overrides."""
+    return MAX_WIKI_SENTENCES_BY_LANG.get(lang, MAX_WIKI_SENTENCES)
+
+
 def _write_sentence_parquet(path: str, sentences: list[str]) -> None:
     """Write a sentence list to parquet, preferring pyarrow for compact output."""
     if not sentences:
@@ -348,6 +356,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
     meta_path = temp_meta_path(lang)
 
     committed_sentences: list[str] = []
+    sentence_cap = max_wiki_sentences_for_lang(lang)
     next_article_idx = 0
     accepted_articles = 0
     miss_streak = 0
@@ -424,11 +433,11 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                         if _is_valid_sentence(s, lang):
                             article_batch.append(s)
 
-                remaining_sentences = MAX_WIKI_SENTENCES - len(committed_sentences)
+                remaining_sentences = sentence_cap - len(committed_sentences)
                 if remaining_sentences <= 0:
                     print(
-                        f"  Stopping {lang} after reaching MAX_WIKI_SENTENCES="
-                        f"{MAX_WIKI_SENTENCES}"
+                        f"  Stopping {lang} after reaching sentence cap="
+                        f"{sentence_cap}"
                     )
                     break
 
@@ -450,10 +459,10 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                 })
                 next_article_idx = article_idx + 1
                 bar.update(1)
-                if len(committed_sentences) >= MAX_WIKI_SENTENCES:
+                if len(committed_sentences) >= sentence_cap:
                     print(
-                        f"  Stopping {lang} after reaching MAX_WIKI_SENTENCES="
-                        f"{MAX_WIKI_SENTENCES}"
+                        f"  Stopping {lang} after reaching sentence cap="
+                        f"{sentence_cap}"
                     )
                     break
                 if accepted_articles >= n_articles:
