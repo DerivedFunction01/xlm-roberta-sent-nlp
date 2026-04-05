@@ -177,8 +177,19 @@ WIKI_LEADING_ORPHAN_LETTER = re.compile(r"^[\"'“”‘’«»‹›\s,.;:!?…
 WIKI_BLOCKED_MARKERS = ("http",)
 WIKI_BLOCKED_CHARS = {"=", "<", ">", "|"}
 WIKI_OPENING_QUOTES = {"\"", "'", "“", "”", "‘", "’", "«", "»", "‹", "›"}
-LENGTH_PRIORITY_LANGS = {"vi", "sv", "lo", "sd", "am", "km", "ug", "my"}
 LENGTH_PRIORITY_SCAN_LIMIT = int(MAX_WIKI_INDEX // 1.5)
+LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG = {
+    "vi": 50_000,
+    "sv": 50_000,
+    "lo": 20_000,
+    "sd": 20_000,
+    "am": 20_000,
+    "km": 20_000,
+    "ug": 20_000,
+    "my": 20_000,
+}
+LENGTH_PRIORITY_LANGS = set(LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG)
+LENGTH_PRIORITY_SENTENCE_CAP = 25_000
 
 # Languages natively supported by pysbd (da and el added from MajorEconomies).
 # Native support in pysbd as of 2026
@@ -515,6 +526,14 @@ def max_wiki_sentences_for_lang(lang: str) -> int:
     return MAX_WIKI_SENTENCES_BY_LANG.get(lang, MAX_WIKI_SENTENCES)
 
 
+def max_length_priority_sentences_for_lang(lang: str) -> int:
+    """Return a smaller cap for the length-priority extraction path."""
+    return min(
+        max_wiki_sentences_for_lang(lang),
+        LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG.get(lang, LENGTH_PRIORITY_SENTENCE_CAP),
+    )
+
+
 def _rolling_avg(values: deque[int]) -> float:
     """Return the mean of the values in a rolling window."""
     return round(sum(values) / len(values), 1) if values else 0.0
@@ -609,9 +628,11 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
 
     if lang in LENGTH_PRIORITY_LANGS:
         scan_limit = min(fetch_target, LENGTH_PRIORITY_SCAN_LIMIT)
+        sentence_cap = max_length_priority_sentences_for_lang(lang)
         print(
             f"  Length-priority mode enabled for {lang} "
-            f"(scan_limit={scan_limit}, min_chars={_article_min_chars(lang)})"
+            f"(scan_limit={scan_limit}, sentence_cap={sentence_cap}, "
+            f"min_chars={_article_min_chars(lang)})"
         )
         dataset = load_dataset(
             "wikimedia/wikipedia",
@@ -623,7 +644,6 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
         priority_articles = _collect_priority_articles(dataset, lang, scan_limit)
 
         committed_sentences: list[str] = []
-        sentence_cap = max_wiki_sentences_for_lang(lang)
         sentence_lengths_window: deque[int] = deque(maxlen=WIKI_ROLLING_STATS_WINDOW)
         article_lengths_window: deque[int] = deque(maxlen=WIKI_ROLLING_STATS_WINDOW)
         accepted_articles = 0
