@@ -58,7 +58,7 @@ MIN_RESERVED_SENTENCES = 4
 MAX_RESERVED_SENTENCES = 1000
 MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
-MAX_WIKI_MISS_STREAK = 20_000
+MAX_WIKI_INDEX = ARTICLES_PER_LANG * 10
 SENTENCES_DIR = "./sentences_cache"
 os.makedirs(SENTENCES_DIR, exist_ok=True)
 WIKI_TEMP_DIR = os.path.join(SENTENCES_DIR, "_wiki_tmp")
@@ -391,6 +391,12 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                 if article_idx < next_article_idx:
                     bar.update(1)
                     continue
+                if article_idx >= MAX_WIKI_INDEX:
+                    print(
+                        f"  Stopping {lang} at article index {article_idx} "
+                        f"(MAX_WIKI_INDEX={MAX_WIKI_INDEX})"
+                    )
+                    break
 
                 paragraphs = prepare_wiki_paragraphs(article.get("text", ""), lang)
                 if paragraphs is None:
@@ -407,12 +413,6 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                         "seed": SEED,
                     })
                     bar.update(1)
-                    if miss_streak >= MAX_WIKI_MISS_STREAK:
-                        print(
-                            f"  Stopping {lang} after {miss_streak} consecutive non-productive "
-                            "articles to avoid sweeping the full catalogue"
-                        )
-                        break
                     continue
 
                 article_batch: list[str] = []
