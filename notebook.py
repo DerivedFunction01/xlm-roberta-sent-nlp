@@ -57,6 +57,7 @@ MIN_RESERVED_SENTENCES = 4
 MAX_RESERVED_SENTENCES = 1000
 MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
+MAX_WIKI_MISS_STREAK = 20_000
 SENTENCES_DIR = "./sentences_cache"
 os.makedirs(SENTENCES_DIR, exist_ok=True)
 WIKI_TEMP_DIR = os.path.join(SENTENCES_DIR, "_wiki_tmp")
@@ -347,6 +348,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
     committed_sentences: list[str] = []
     next_article_idx = 0
     accepted_articles = 0
+    miss_streak = 0
     if os.path.exists(temp_path) and os.path.exists(meta_path):
         try:
             committed_sentences = pd.read_parquet(temp_path)["sentence"].tolist()
@@ -356,6 +358,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                 raise ValueError("stale checkpoint metadata")
             next_article_idx = int(meta["next_article_idx"])
             accepted_articles = int(meta["accepted_articles"])
+            miss_streak = int(meta.get("miss_streak", 0))
             print(
                 f"  Resuming {lang} from stream article {next_article_idx} "
                 f"with {accepted_articles} accepted articles"
@@ -364,6 +367,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
             committed_sentences = []
             next_article_idx = 0
             accepted_articles = 0
+            miss_streak = 0
             for path in (temp_path, meta_path):
                 if os.path.exists(path):
                     os.remove(path)
@@ -390,16 +394,24 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                 paragraphs = prepare_wiki_paragraphs(article.get("text", ""), lang)
                 if paragraphs is None:
                     next_article_idx = article_idx + 1
+                    miss_streak += 1
                     _write_sentence_parquet(temp_path, committed_sentences)
                     _write_json_atomic(meta_path, {
                         "lang": lang,
                         "next_article_idx": next_article_idx,
                         "accepted_articles": accepted_articles,
+                        "miss_streak": miss_streak,
                         "final_target_articles": n_articles,
                         "committed_sentence_count": len(committed_sentences),
                         "seed": SEED,
                     })
                     bar.update(1)
+                    if miss_streak >= MAX_WIKI_MISS_STREAK:
+                        print(
+                            f"  Stopping {lang} after {miss_streak} consecutive non-productive "
+                            "articles to avoid sweeping the full catalogue"
+                        )
+                        break
                     continue
 
                 article_batch: list[str] = []
@@ -412,11 +424,13 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
 
                 committed_sentences.extend(article_batch)
                 accepted_articles += 1
+                miss_streak = 0
                 _write_sentence_parquet(temp_path, committed_sentences)
                 _write_json_atomic(meta_path, {
                     "lang": lang,
                     "next_article_idx": article_idx + 1,
                     "accepted_articles": accepted_articles,
+                    "miss_streak": miss_streak,
                     "final_target_articles": n_articles,
                     "committed_sentence_count": len(committed_sentences),
                     "seed": SEED,
