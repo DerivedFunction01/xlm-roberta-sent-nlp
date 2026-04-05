@@ -92,18 +92,184 @@ def _camel() -> str:
     return "".join(parts) or "Result"
 
 
-def _value() -> str:
-    """Return a mixed literal value."""
-    choice = random.random()
-    if choice < 0.25:
-        return str(random.randint(-9999, 9999))
-    if choice < 0.50:
-        return f'"{fake.word()}"'
-    if choice < 0.70:
-        return random.choice(["true", "false", "null", "None", "nil"])
-    if choice < 0.85:
-        return f"{random.uniform(-1000, 1000):.3f}"
-    return f"[{', '.join(repr(fake.word()) for _ in range(random.randint(1, 4)))}]"
+def _module_part() -> str:
+    """Return a short module/package path segment."""
+    common_modules = [
+        "api",
+        "app",
+        "auth",
+        "cache",
+        "client",
+        "config",
+        "core",
+        "data",
+        "db",
+        "engine",
+        "errors",
+        "events",
+        "helpers",
+        "http",
+        "io",
+        "lib",
+        "loader",
+        "logger",
+        "main",
+        "math",
+        "models",
+        "net",
+        "parser",
+        "pipeline",
+        "policy",
+        "queue",
+        "schema",
+        "service",
+        "session",
+        "store",
+        "tasks",
+        "text",
+        "types",
+        "utils",
+        "validation",
+        "view",
+        "worker",
+    ]
+    if random.random() < 0.35:
+        return random.choice(common_modules)
+    base = fake.word().replace("-", "").replace("_", "").lower().strip() or "core"
+    if len(base) > 10 and random.random() < 0.8:
+        base = base[: random.randint(4, 10)]
+    if random.random() < 0.20:
+        base = f"{base}{random.randint(0, 9)}"
+    elif random.random() < 0.30:
+        base = f"{base}_{random.randint(0, 9)}"
+    return base
+
+
+def _module_name(min_parts: int = 1, max_parts: int = 3) -> str:
+    """Return a compact fictional module/package name."""
+    parts = [_module_part() for _ in range(random.randint(min_parts, max_parts))]
+    return ".".join(parts)
+
+
+_VALUE_SPECS: dict[str, dict[str, object]] = {
+    "generic": {
+        "number": lambda: [str(random.randint(-9999, 9999))],
+        "string": lambda: [f'"{fake.word()}"'],
+        "bool": lambda: ["true", "false", "True", "False"],
+        "null": lambda: ["null", "None", "nil", "NULL", "nullptr"],
+        "float": lambda: [f"{random.uniform(-1000, 1000):.3f}"],
+        "collection": lambda: [
+            f"[{', '.join(repr(fake.word()) for _ in range(random.randint(1, 4)))}]",
+        ],
+        "object": lambda: [
+            f"{{'value': {random.randint(0, 9)}}}",
+            f"{{ value: {random.randint(0, 9)} }}",
+        ],
+    },
+    "python": {
+        "number": lambda: [str(random.randint(-9999, 9999))],
+        "string": lambda: [f'"{fake.word()}"'],
+        "bool": lambda: ["True", "False"],
+        "null": lambda: ["None"],
+        "float": lambda: [f"{random.uniform(-1000, 1000):.3f}"],
+        "collection": lambda: [
+            f"[{', '.join(repr(fake.word()) for _ in range(random.randint(1, 4)))}]",
+            f"{{'value': {random.randint(0, 9)}}}",
+            f"{{'items': [{', '.join(str(random.randint(0, 9)) for _ in range(random.randint(1, 3)))}]}}",
+        ],
+        "object": lambda: [
+            f"{{'value': {random.randint(0, 9)}}}",
+            f"{{'name': '{fake.word()}'}}",
+        ],
+    },
+    "js": {
+        "number": lambda: [str(random.randint(-9999, 9999))],
+        "string": lambda: [f'"{fake.word()}"'],
+        "bool": lambda: ["true", "false"],
+        "null": lambda: ["null"],
+        "float": lambda: [f"{random.uniform(-1000, 1000):.3f}"],
+        "collection": lambda: [
+            f"[{', '.join(repr(fake.word()) for _ in range(random.randint(1, 4)))}]".replace("'", '"'),
+            f"{{ value: {random.randint(0, 9)} }}",
+        ],
+        "object": lambda: [
+            f"{{ value: {random.randint(0, 9)} }}",
+            f"{{ name: \"{fake.word()}\" }}",
+        ],
+    },
+    "go": {
+        "number": lambda: [str(random.randint(-9999, 9999))],
+        "string": lambda: [f'"{fake.word()}"'],
+        "bool": lambda: ["true", "false"],
+        "null": lambda: ["nil"],
+        "float": lambda: [f"{random.uniform(-1000, 1000):.3f}"],
+        "collection": lambda: [
+            f"[]string{{\"{fake.word()}\", \"{fake.word()}\"}}",
+            f"[]int{{{random.randint(0, 9)}, {random.randint(0, 9)}}}",
+            f"map[string]int{{\"{fake.word()}\": {random.randint(0, 9)}}}",
+        ],
+        "object": lambda: [
+            f"Config{{Name: \"{fake.word()}\", Count: {random.randint(0, 9)}}}",
+        ],
+    },
+    "java": {
+        "number": lambda: [str(random.randint(-9999, 9999))],
+        "string": lambda: [f'"{fake.word()}"'],
+        "bool": lambda: ["true", "false"],
+        "null": lambda: ["null"],
+        "float": lambda: [f"{random.uniform(-1000, 1000):.3f}"],
+        "collection": lambda: [
+            f"List.of(\"{fake.word()}\", \"{fake.word()}\")",
+            f"Map.of(\"{fake.word()}\", {random.randint(0, 9)})",
+        ],
+        "object": lambda: [
+            "new Object()",
+            f"List.of({random.randint(0, 9)}, {random.randint(0, 9)})",
+        ],
+    },
+    "c": {
+        "number": lambda: [str(random.randint(-9999, 9999))],
+        "string": lambda: [f'"{fake.word()}"'],
+        "bool": lambda: ["true", "false"],
+        "null": lambda: ["NULL"],
+        "float": lambda: [f"{random.uniform(-1000, 1000):.3f}"],
+        "collection": lambda: [
+            f"{{{random.randint(0, 9)}, {random.randint(0, 9)}}}",
+            f"{{\"{fake.word()}\", \"{fake.word()}\"}}",
+        ],
+        "object": lambda: [
+            "(void *)0",
+        ],
+    },
+    "cpp": {
+        "number": lambda: [str(random.randint(-9999, 9999))],
+        "string": lambda: [f'"{fake.word()}"'],
+        "bool": lambda: ["true", "false"],
+        "null": lambda: ["nullptr"],
+        "float": lambda: [f"{random.uniform(-1000, 1000):.3f}"],
+        "collection": lambda: [
+            f"std::vector<int>{{{random.randint(0, 9)}, {random.randint(0, 9)}}}",
+            f"std::map<std::string, int>{{{{\"{fake.word()}\", {random.randint(0, 9)}}}}}",
+        ],
+        "object": lambda: [
+            f"std::string(\"{fake.word()}\")",
+        ],
+    },
+}
+
+
+def _value(language: str = "generic", kind: str | None = None) -> str:
+    """Return a mixed literal value, tuned to the target language."""
+    spec = _VALUE_SPECS.get(language, _VALUE_SPECS["generic"])
+    if kind is None:
+        kind = random.choices(
+            ["number", "string", "bool", "null", "float", "collection", "object"],
+            weights=[0.22, 0.22, 0.16, 0.10, 0.14, 0.10, 0.06],
+            k=1,
+        )[0]
+    pool_factory = spec.get(kind) or _VALUE_SPECS["generic"].get(kind) or _VALUE_SPECS["generic"]["string"]
+    pool = pool_factory() if callable(pool_factory) else pool_factory
+    return random.choice(pool)
 
 
 def _arglist() -> str:
@@ -116,12 +282,11 @@ def _block(lines: list[str], indent: str = "    ") -> str:
 
 
 def _module_path(min_parts: int = 2, max_parts: int = 4) -> str:
-    parts = [_ident() for _ in range(random.randint(min_parts, max_parts))]
-    return ".".join(parts)
+    return _module_name(min_parts=min_parts, max_parts=max_parts)
 
 
 def _package_path(min_parts: int = 2, max_parts: int = 4) -> str:
-    parts = [_ident() for _ in range(random.randint(min_parts, max_parts))]
+    parts = [_module_part() for _ in range(random.randint(min_parts, max_parts))]
     return "/".join(parts)
 
 
@@ -247,6 +412,7 @@ def _control_flow_block(spec: dict[str, object]) -> list[str]:
     idx_name = str(spec.get("idx_name") or _ident())
     probe_value = _numeric_literal(value_type)
     limit_value = _numeric_literal(value_type)
+    loop_limit_value = _numeric_literal("int")
     comparison_op = _comparison_op("c")
     case_values = [0, 1, 2]
     mode = random.choice(list(spec.get("modes", ["if", "loop", "switch"])))
@@ -262,6 +428,7 @@ def _control_flow_block(spec: dict[str, object]) -> list[str]:
             "idx_name": idx_name,
             "probe_value": probe_value,
             "limit_value": limit_value,
+            "loop_limit_value": loop_limit_value,
             "comparison_op": comparison_op,
             "value_type": value_type,
             "case_value": 0,
@@ -278,6 +445,7 @@ def _control_flow_block(spec: dict[str, object]) -> list[str]:
             idx_name=idx_name,
             probe_value=probe_value,
             limit_value=limit_value,
+            loop_limit_value=loop_limit_value,
             comparison_op=comparison_op,
             value_type=value_type,
         ))
@@ -296,6 +464,7 @@ def _control_flow_block(spec: dict[str, object]) -> list[str]:
                 idx_name=idx_name,
                 probe_value=probe_value,
                 limit_value=limit_value,
+                loop_limit_value=loop_limit_value,
                 comparison_op=comparison_op,
                 value_type=value_type,
             )], indent + indent))
@@ -327,6 +496,7 @@ def _control_flow_block(spec: dict[str, object]) -> list[str]:
                 idx_name=idx_name,
                 probe_value=probe_value,
                 limit_value=limit_value,
+                loop_limit_value=loop_limit_value,
                 comparison_op=comparison_op,
                 value_type=value_type,
             )], indent + indent))
@@ -375,7 +545,7 @@ def _python_control_flow(indent: str = "    ") -> list[str]:
         ],
         "if_header_template": "if {probe_name} {comparison_op} {limit_value}:",
         "else_header_template": "else:",
-        "for_header_template": "for {idx_name} in range({limit_value}):",
+        "for_header_template": "for {idx_name} in range({loop_limit_value}):",
         "while_header_template": "while {probe_name} {comparison_op} {limit_value}:",
         "switch_header_template": "match {probe_name}:",
         "case_header_template": "case {case_value}:",
@@ -1239,7 +1409,7 @@ def _python_snippet() -> str:
             f"        self.label = {repr(fake.word())}",
             "",
             f"    def {fn}(self, {arg}: {arg_type}) -> {return_type}:",
-            f'        result = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value()}}}',
+            f'        result = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value("python")}}}',
             f"        if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
             f'            print("[{fake.word()}]", len({arg}))',
             flow,
@@ -1253,7 +1423,7 @@ def _python_snippet() -> str:
         return "\n".join(header + [
             f"async def {fn}({arg}: {arg_type}, limit: int = 0) -> {return_type}:",
             "    await asyncio.sleep(0)",
-            f'    {out} = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value()}}}',
+            f'    {out} = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value("python")}}}',
             f"    if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
             f'        print("[{fake.word()}]", len({arg}))',
             flow,
@@ -1275,7 +1445,7 @@ def _python_snippet() -> str:
     flow = "\n".join(_python_control_flow("    "))
     return "\n".join(header + [
         f"def {fn}({arg}: {arg_type}, limit: int = 0) -> {return_type}:",
-        f'    {out} = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value()}}}',
+        f'    {out} = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value("python")}}}',
         f"    if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
         f'        print("[{fake.word()}]", len({arg}))',
         flow,
@@ -1296,7 +1466,7 @@ def _js_snippet() -> str:
             f"const {fn} = ({arg}) => {{",
             flow,
             _block([
-                f"const result = {{ ok: true, type: 'event', value: {_value()} }};",
+                f"const result = {{ ok: true, type: 'event', value: {_value('js')} }};",
                 f"const size = String({arg} ?? '').length;",
                 f"if (size {_comparison_op('c')} {random.randint(0, 20)}) {{",
                 _block([
@@ -1319,7 +1489,7 @@ def _js_snippet() -> str:
             ctor_flow,
         ])
         method_body = "\n".join([
-            "        const result = { ok: true, value: " + _value() + " };",
+            "        const result = { ok: true, value: " + _value("js") + " };",
             method_flow,
             f'        console.log("[{fake.word()}]", {arg}, result);',
             "        return result;",
@@ -1367,7 +1537,7 @@ def _js_snippet() -> str:
                         f'console.log("[{fake.word()}]", size);',
                     ], indent="        "),
                     "}",
-                    f"return {{ ok: true, value: {_value()} }};",
+                    f"return {{ ok: true, value: {_value('js')} }};",
                 ], indent="        "),
                 "} catch (err) {",
                 _block([
@@ -1383,7 +1553,7 @@ def _js_snippet() -> str:
         f"function {fn}({arg}) {{",
         flow,
         _block([
-            f"const result = {{ ok: true, type: 'event', value: {_value()} }};",
+            f"const result = {{ ok: true, type: 'event', value: {_value('js')} }};",
             f"const size = String({arg} ?? '').length;",
             f"if (size {_comparison_op('c')} {random.randint(0, 20)}) {{",
             _block([
@@ -1737,7 +1907,7 @@ def _go_snippet() -> str:
             f"func New{fn}() *{fn} {{",
             flow,
             _block([
-                f'return &{fn}{{Enabled: true, Label: "{fake.word()}"}}',
+                f'return &{fn}{{Enabled: {_value("go", "bool")}, Label: {_value("go", "string")}}}',
             ]),
             "}",
         ]
@@ -1844,10 +2014,10 @@ def _java_snippet() -> str:
         [f'        System.out.println("[info] {fake.word()}");'],
     ])
     ret_expr = {
-        "String": f'"{fake.word()}"',
+        "String": _value("java", "string"),
         "int": str(random.randint(-999, 999)),
         "long": f"{random.randint(1, 9_999)}L",
-        "boolean": random.choice(["true", "false"]),
+        "boolean": _value("java", "bool"),
         "double": f"{random.uniform(-99, 99):.2f}",
         "void": "",
     }[return_type]
@@ -1895,6 +2065,8 @@ def _c_cpp_snippet() -> str:
         body_lines = [f"{scalar_type} {fn}({scalar_type} {var}) {{"]
         if "char" in scalar_type:
             body_lines.append(f"    if ({var} == NULL) return {zero_value};")
+        if random.random() < 0.5:
+            body_lines.append(f'    const char * note = {_value("c", "string")};')
         body_lines.extend([
             f'    printf("[debug] {_c_printf_format(scalar_type)}\\n", {var});',
             f"    if ({_comparison_expr(cmp_left, style='c')}) return {zero_value};",
@@ -1965,6 +2137,7 @@ def _c_cpp_snippet() -> str:
         flow,
         _block([
             f"std::cout << \"[trace] size=\" << {var}.size() << std::endl;",
+            f"std::string note = {_value('cpp', 'string')};",
             f"{vec_type} out;",
             f"for (auto value : {var}) {{",
             _block([
