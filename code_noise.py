@@ -1376,24 +1376,55 @@ def _sql_snippet() -> str:
 def _bash_snippet() -> str:
     var = _ident().upper()
     path = f"/tmp/{_ident()}"
-    runner = random.choice([
-        "python",
-        "java",
-        "go",
-        "gcc",
-        "node",
-        "ruby",
-        _ident(),
-        _ident() + random.choice(["", "", "_cmd", "-tool"]),
-    ])
-    script = random.choice([
-        "run.py",
-        f"{_ident()}.py",
-        f"{_ident()}.java",
-        f"{_ident()}.go",
-        f"{_ident()}.c",
-        f"{_ident()}.xyz",
-        f"{_ident()}.sh",
+    workdir = f"/var/tmp/{_ident()}"
+    use_workdir = random.random() < 0.75
+    use_pattern = random.random() < 0.55
+    use_mode = random.random() < 0.8
+    artifact_kind = random.choice(["shell", "python", "java", "go", "c", "cpp", "utility"])
+    if artifact_kind == "shell":
+        runner = random.choice(["bash", "sh"])
+        script = random.choice(["run.sh", f"{_ident()}.sh", f"{_ident()}.bash"])
+    elif artifact_kind == "python":
+        runner = random.choice(["python3", "python"])
+        script = random.choice(["run.py", f"{_ident()}.py"])
+    elif artifact_kind == "java":
+        runner = "java"
+        script = random.choice([f"{_ident()}.java", f"{_camel()}.java"])
+    elif artifact_kind == "go":
+        runner = "go"
+        script = random.choice([f"{_ident()}.go", f"{_camel()}.go"])
+    elif artifact_kind == "c":
+        runner = "gcc"
+        script = random.choice([f"{_ident()}.c", f"{_ident()}.h"])
+    elif artifact_kind == "cpp":
+        runner = random.choice(["g++", "clang++", "gcc"])
+        script = random.choice([f"{_ident()}.cpp", f"{_ident()}.cc", f"{_ident()}.hpp"])
+    else:
+        runner = random.choice([
+            "grep",
+            "find",
+            "xargs",
+            "sort",
+            "uniq",
+            "awk",
+            "sed",
+            "tar",
+            "make",
+            "perl",
+            _ident(),
+            _ident() + random.choice(["", "", "_cmd", "-tool"]),
+        ])
+        script = random.choice([
+            f"{_ident()}.sh",
+            f"{_ident()}.txt",
+            f"{_ident()}.log",
+            f"{_ident()}.csv",
+        ])
+    script_path = random.choice([
+        f"./{script}",
+        f"/opt/{_ident()}/{script}",
+        f"$WORKDIR/{script}",
+        script,
     ])
     lang = random.choice(["en", "de", "fr", "es", "pl", "pt", "zh", "ja", "tr", "ru"])
     mode = random.choice(["fast", "safe", "debug", "train", "eval"])
@@ -1403,12 +1434,180 @@ def _bash_snippet() -> str:
         f"LANG={lang}",
         f"--locale {lang}",
     ])
-    return "\n".join([
+    entry_candidates = [
+        (
+            f'{runner} {script_path} --input "$' + var + f'" {extra}'
+            + (f" --mode {mode}" if use_mode else "")
+            if artifact_kind != "utility" or runner in {"grep", "find", "xargs", "sort", "uniq", "awk", "sed", "tar", "make", "perl"}
+            else f'{runner} "{script_path}" --input "$' + var + f'" {extra}'
+        ),
+        f'{"awk -f" if runner == "awk" else "sed -n"} "{script_path}"'
+        + (f' "$WORKDIR"' if use_workdir else ""),
+        f'find "{workdir}" -type f | head -n {random.randint(3, 10)}' if use_workdir else f'find "{path}" -type f | head -n {random.randint(3, 10)}',
+        f'grep -Rni "{fake.word()}" "{workdir if use_workdir else path}" | head -n {random.randint(3, 10)}',
+        f'printf "%s\\n" "{fake.word()}" "{fake.word()}" | sort | uniq -c',
+        f'xargs -I{{}} echo {{}} < "{script_path}"',
+    ]
+    entrypoint = random.choice(entry_candidates)
+    control_flow = "\n".join(_bash_control_flow("    ", path=path, workdir=workdir, var=var))
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
         f'{var}="{path}"',
-        f'echo "[INFO] starting {_ident()}"',
-        f'mkdir -p "{path}"',
-        f'{runner} {script} --input "{path}" {extra} --mode {mode}',
+    ]
+    if use_workdir:
+        lines.append(f'WORKDIR="{workdir}"')
+    if use_pattern:
+        lines.append('PATTERN="${PATTERN:-[[:alpha:]]+}"')
+    if use_mode:
+        lines.append('MODE="${MODE:-debug}"')
+    lines.extend([
+        f'echo "[INFO] starting {fake.word()}"',
     ])
+    if use_workdir:
+        lines.append(f'mkdir -p "${{{var}}}" "$WORKDIR"')
+    else:
+        lines.append(f'mkdir -p "${{{var}}}"')
+    lines.append(control_flow)
+    lines.append(entrypoint)
+    return "\n".join(lines)
+
+
+def _bash_command(op: str, *, path: str, workdir: str, var: str) -> str:
+    """Return a plausible shell command using common Linux utilities."""
+    candidate = random.choice([
+        "grep",
+        "awk",
+        "sed",
+        "find",
+        "sort",
+        "uniq",
+        "cut",
+        "head",
+        "tail",
+        "wc",
+        "tr",
+        "xargs",
+        "printf",
+        "ls",
+        "du",
+        "stat",
+    ])
+    if op == "probe":
+        if candidate == "grep":
+            return f'grep -En "{fake.word()}" "$PATTERN" "{path}" || true'
+        if candidate == "awk":
+            return f'awk \'{ "{" }print NR ":" $0{ "}" }\' "{path}" | head -n 5'
+        if candidate == "sed":
+            return f'sed -n "1,5p" "{path}"'
+        if candidate == "find":
+            return f'find "{workdir}" -type f | head -n 5'
+        if candidate == "sort":
+            return f'find "{workdir}" -type f | sort | uniq -c'
+        if candidate == "uniq":
+            return f'printf "%s\\n" "{fake.word()}" "{fake.word()}" "{fake.word()}" | sort | uniq -c'
+        if candidate == "cut":
+            return f'printf "%s:%s\\n" "{fake.word()}" "{fake.word()}" | cut -d: -f1'
+        if candidate == "head":
+            return f'head -n 5 "{path}"'
+        if candidate == "tail":
+            return f'tail -n 5 "{path}"'
+        if candidate == "wc":
+            return f'wc -l "{path}"'
+        if candidate == "tr":
+            return f'printf "%s\\n" "{fake.word()}" | tr "[:lower:]" "[:upper:]"'
+        if candidate == "xargs":
+            return f'printf "%s\\n" "{fake.word()}" "{fake.word()}" | xargs -I{{}} echo {{}}'
+        if candidate == "du":
+            return f'du -sh "{workdir}"'
+        if candidate == "stat":
+            return f'stat -c "%n %s" "{path}"'
+        return f'printf "%s\\n" "{fake.word()}"'
+    if op == "update":
+        return random.choice([
+            f'COUNT=$((COUNT + 1))',
+            f'printf "[TRACE] %s\\n" "$COUNT"',
+            f'printf "%s\\n" "$PATTERN"',
+            f'echo "[DEBUG] {fake.word()} $COUNT"',
+        ])
+    if op == "echo":
+        return random.choice([
+            f'echo "[TRACE] {fake.word()} $COUNT"',
+            f'printf "[TRACE] %s\\n" "$MODE"',
+            f'printf "%s\\n" "{fake.word()}"',
+        ])
+    return f'printf "%s\\n" "{fake.word()}"'
+
+
+def _bash_control_flow(indent: str = "    ", *, path: str, workdir: str, var: str) -> list[str]:
+    """Generate a shell control-flow block with common Linux utilities."""
+    mode = random.choice(["if", "loop", "switch"])
+    count_limit = random.randint(1, 5)
+    lines = [
+        f"{indent}COUNT=0",
+        f"{indent}FILES=$(find \"$WORKDIR\" -type f | head -n {count_limit})",
+    ]
+
+    if mode == "if":
+        lines.extend([
+            f"{indent}if {_bash_command('probe', path=path, workdir=workdir, var=var)}; then",
+            f"{indent}    {_bash_command('update', path=path, workdir=workdir, var=var)}",
+            f"{indent}    {_bash_command('echo', path=path, workdir=workdir, var=var)}",
+            f"{indent}else",
+            f"{indent}    {_bash_command('probe', path=path, workdir=workdir, var=var)}",
+            f"{indent}fi",
+            f"{indent}if [ \"$COUNT\" -gt {count_limit} ]; then",
+            f"{indent}    printf '[INFO] count=%s\\n' \"$COUNT\"",
+            f"{indent}fi",
+        ])
+        return lines
+
+    if mode == "loop":
+        loop_mode = random.choice(["for", "while"])
+        if loop_mode == "for":
+            lines.extend([
+                f"{indent}for ITEM in $FILES; do",
+                f"{indent}    {_bash_command('probe', path=path, workdir=workdir, var=var)}",
+                f"{indent}    {_bash_command('update', path=path, workdir=workdir, var=var)}",
+                f"{indent}    if [ -n \"$ITEM\" ]; then",
+                f"{indent}        {_bash_command('echo', path=path, workdir=workdir, var=var)}",
+                f"{indent}    fi",
+                f"{indent}done",
+            ])
+        else:
+            lines.extend([
+                f"{indent}while [ \"$COUNT\" -lt {count_limit} ]; do",
+                f"{indent}    {_bash_command('probe', path=path, workdir=workdir, var=var)}",
+                f"{indent}    {_bash_command('update', path=path, workdir=workdir, var=var)}",
+                f"{indent}done",
+            ])
+        return lines
+
+    case_token = random.choice(["start", "scan", "cleanup"])
+    lines.extend([
+        f"{indent}case \"$MODE\" in",
+        f"{indent}    start)",
+        f"{indent}        {_bash_command('probe', path=path, workdir=workdir, var=var)}",
+        f"{indent}        {_bash_command('update', path=path, workdir=workdir, var=var)}",
+        f"{indent}        ;;",
+        f"{indent}    scan)",
+        f"{indent}        find \"$WORKDIR\" -type f | sort | uniq -c",
+        f"{indent}        ;;",
+        f"{indent}    cleanup)",
+        f"{indent}        rm -rf \"$WORKDIR\"/*",
+        f"{indent}        ;;",
+        f"{indent}    *)",
+        f"{indent}        echo \"[WARN] unknown mode: $MODE\"",
+        f"{indent}        ;;",
+        f"{indent}esac",
+        f"{indent}case \"$COUNT\" in",
+        f"{indent}    0) echo \"[INFO] empty\" ;;",
+        f"{indent}    [1-{count_limit}]) echo \"[INFO] small\" ;;",
+        f"{indent}    *) echo \"[INFO] large\" ;;",
+        f"{indent}esac",
+        f"{indent}echo \"[TRACE] {case_token}\"",
+    ])
+    return lines
 
 
 def _go_snippet() -> str:
