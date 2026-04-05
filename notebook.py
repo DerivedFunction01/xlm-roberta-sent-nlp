@@ -343,17 +343,25 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
     meta_path = temp_meta_path(lang)
 
     committed_sentences: list[str] = []
-    seen = 0
+    next_article_idx = 0
+    accepted_articles = 0
     if os.path.exists(temp_path) and os.path.exists(meta_path):
         try:
             committed_sentences = pd.read_parquet(temp_path)["sentence"].tolist()
             with open(meta_path, encoding="utf-8") as f:
                 meta = json.load(f)
-            seen = int(meta.get("seen_articles", 0))
-            print(f"  Resuming {lang} from {seen} committed articles")
+            if "accepted_articles" not in meta or "next_article_idx" not in meta:
+                raise ValueError("stale checkpoint metadata")
+            next_article_idx = int(meta["next_article_idx"])
+            accepted_articles = int(meta["accepted_articles"])
+            print(
+                f"  Resuming {lang} from stream article {next_article_idx} "
+                f"with {accepted_articles} accepted articles"
+            )
         except Exception:
             committed_sentences = []
-            seen = 0
+            next_article_idx = 0
+            accepted_articles = 0
             for path in (temp_path, meta_path):
                 if os.path.exists(path):
                     os.remove(path)
@@ -373,17 +381,18 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
     try:
         with tqdm(total=fetch_target, desc=lang, unit="article", leave=False, dynamic_ncols=True) as bar:
             for article_idx, article in enumerate(dataset.take(fetch_target)):
-                if article_idx < seen:
+                if article_idx < next_article_idx:
                     bar.update(1)
                     continue
 
                 paragraphs = prepare_wiki_paragraphs(article.get("text", ""), lang)
                 if paragraphs is None:
-                    seen = article_idx + 1
+                    next_article_idx = article_idx + 1
                     _write_sentence_parquet(temp_path, committed_sentences)
                     _write_json_atomic(meta_path, {
                         "lang": lang,
-                        "seen_articles": seen,
+                        "next_article_idx": next_article_idx,
+                        "accepted_articles": accepted_articles,
                         "final_target_articles": n_articles,
                         "committed_sentence_count": len(committed_sentences),
                         "seed": SEED,
@@ -400,17 +409,19 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                             article_batch.append(s)
 
                 committed_sentences.extend(article_batch)
+                accepted_articles += 1
                 _write_sentence_parquet(temp_path, committed_sentences)
                 _write_json_atomic(meta_path, {
                     "lang": lang,
-                    "seen_articles": article_idx + 1,
+                    "next_article_idx": article_idx + 1,
+                    "accepted_articles": accepted_articles,
                     "final_target_articles": n_articles,
                     "committed_sentence_count": len(committed_sentences),
                     "seed": SEED,
                 })
-                seen = article_idx + 1
+                next_article_idx = article_idx + 1
                 bar.update(1)
-                if seen >= n_articles:
+                if accepted_articles >= n_articles:
                     break
 
         _write_sentence_parquet(final_path, committed_sentences)
