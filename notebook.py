@@ -49,10 +49,12 @@ MIN_RESERVED_SENTENCES = 4
 MAX_RESERVED_SENTENCES = 1000
 MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
-SYNTHETIC_CACHE = "./sentences_cache/synthetic_examples.parquet"
-SYNTHETIC_CACHE_META = "./sentences_cache/synthetic_examples.meta.json"
-CACHE_DIR = "./sentences_cache/tokenized_dataset"
-CACHE_META = "./sentences_cache/tokenized_dataset.meta.json"
+SENTENCES_DIR = "./sentences_cache"
+os.makedirs(SENTENCES_DIR, exist_ok=True)
+SYNTHETIC_CACHE = f"{SENTENCES_DIR}/synthetic_examples.parquet"
+SYNTHETIC_CACHE_META = f"{SENTENCES_DIR}/synthetic_examples.meta.json"
+CACHE_DIR = f"{SENTENCES_DIR}/tokenized_dataset"
+CACHE_META = f"{SENTENCES_DIR}/tokenized_dataset.meta.json"
 CACHE_VERSION = 1
 TOKENIZED_CACHE_VERSION = 1
 USE_SYNTHETIC_CACHE = True
@@ -120,10 +122,6 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Data Extraction ---
 # Pull ~ARTICLES_PER_LANG sentences per language from the Wikipedia streaming dataset.
-
-SENTENCES_DIR = "./sentences_cache"
-os.makedirs(SENTENCES_DIR, exist_ok=True)
-
 
 def parquet_path(lang: str) -> str:
     return os.path.join(SENTENCES_DIR, f"{lang}.parquet")
@@ -275,7 +273,7 @@ with ProcessPoolExecutor(max_workers=MAX_WORKERS) as pool:
 # do not belong to any language.
 
 # ── 1. im2latex ────────────────────────────────────────────────────────────────
-LATEX_CACHE     = "./sentences_cache/latex_formulas.parquet"
+LATEX_CACHE     = f"{SENTENCES_DIR}/latex_formulas.parquet"
 LATEX_MIN_CHARS = 8
 LATEX_MAX_CHARS = 300
 
