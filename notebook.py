@@ -59,6 +59,7 @@ MAX_RESERVED_SENTENCES = 1000
 MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
 MAX_WIKI_INDEX = ARTICLES_PER_LANG * 10
+MAX_WIKI_SENTENCES = 200_000
 SENTENCES_DIR = "./sentences_cache"
 os.makedirs(SENTENCES_DIR, exist_ok=True)
 WIKI_TEMP_DIR = os.path.join(SENTENCES_DIR, "_wiki_tmp")
@@ -423,6 +424,17 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                         if _is_valid_sentence(s, lang):
                             article_batch.append(s)
 
+                remaining_sentences = MAX_WIKI_SENTENCES - len(committed_sentences)
+                if remaining_sentences <= 0:
+                    print(
+                        f"  Stopping {lang} after reaching MAX_WIKI_SENTENCES="
+                        f"{MAX_WIKI_SENTENCES}"
+                    )
+                    break
+
+                if len(article_batch) > remaining_sentences:
+                    article_batch = article_batch[:remaining_sentences]
+
                 committed_sentences.extend(article_batch)
                 accepted_articles += 1
                 miss_streak = 0
@@ -438,6 +450,12 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                 })
                 next_article_idx = article_idx + 1
                 bar.update(1)
+                if len(committed_sentences) >= MAX_WIKI_SENTENCES:
+                    print(
+                        f"  Stopping {lang} after reaching MAX_WIKI_SENTENCES="
+                        f"{MAX_WIKI_SENTENCES}"
+                    )
+                    break
                 if accepted_articles >= n_articles:
                     break
 
