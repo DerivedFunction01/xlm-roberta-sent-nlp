@@ -12,7 +12,29 @@ fake = Faker()
 
 def _ident() -> str:
     """Return a plausible variable/function identifier."""
+    common_prefix = random.choice([
+        "",
+        "",
+        "",
+        "get",
+        "set",
+        "my",
+        "new",
+        "is",
+        "has",
+        "make",
+        "build",
+        "load",
+        "save",
+        "read",
+        "write",
+        "calc",
+        "find",
+        "run"
+    ])
     base = fake.word().replace("-", "_").lower().strip("_") or "value"
+    if common_prefix:
+        base = f"{common_prefix}_{base}" if random.random() < 0.7 else f"{common_prefix}{base.title()}"
     mode = random.random()
     if mode < 0.25:
         return base
