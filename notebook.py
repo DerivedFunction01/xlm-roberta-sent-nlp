@@ -1086,7 +1086,7 @@ def create_synthetic_doc(
     # Weight per group — tuned to reflect real-world multilingual text distribution.
     GROUP_WEIGHTS = {
         # Give English a dedicated lane so it is not diluted by the broader Latin set.
-        "English":      3.0,
+        "English":      5.0,
         "LatinCore":    3.0,
         "LatinTier2":   1.5,
         "EastAsian":    2.5,
