@@ -272,7 +272,12 @@ def clean_wiki_sentence(sentence: str, lang: str) -> str:
 
 def temp_parquet_path(lang: str) -> str:
     """Return the temporary parquet path used while extracting one language."""
-    return os.path.join(WIKI_TEMP_DIR, f"{lang}.{os.getpid()}.parquet")
+    return os.path.join(WIKI_TEMP_DIR, f"{lang}.parquet")
+
+
+def temp_meta_path(lang: str) -> str:
+    """Return the JSON sidecar used to resume a partially written temp parquet."""
+    return os.path.join(WIKI_TEMP_DIR, f"{lang}.meta.json")
 
 
 def _write_sentence_parquet(path: str, sentences: list[str]) -> None:
@@ -296,6 +301,14 @@ def _write_sentence_batch(writer, pa, batch: list[str]) -> None:
         return
     table = pa.table({"sentence": pa.array(batch, type=pa.string())})
     writer.write_table(table)
+
+
+def _write_json_atomic(path: str, payload: dict) -> None:
+    """Write JSON through a temporary file so checkpoint updates stay atomic-ish."""
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
 
 
 # ---------------------------------------------------------------------------
@@ -327,8 +340,27 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
     fetch_target = n_articles * 20
     final_path = parquet_path(lang)
     temp_path = temp_parquet_path(lang)
-    if os.path.exists(temp_path):
-        os.remove(temp_path)
+    meta_path = temp_meta_path(lang)
+
+    committed_sentences: list[str] = []
+    seen = 0
+    if os.path.exists(temp_path) and os.path.exists(meta_path):
+        try:
+            committed_sentences = pd.read_parquet(temp_path)["sentence"].tolist()
+            with open(meta_path, encoding="utf-8") as f:
+                meta = json.load(f)
+            seen = int(meta.get("seen_articles", 0))
+            print(f"  Resuming {lang} from {seen} committed articles")
+        except Exception:
+            committed_sentences = []
+            seen = 0
+            for path in (temp_path, meta_path):
+                if os.path.exists(path):
+                    os.remove(path)
+    elif os.path.exists(temp_path) or os.path.exists(meta_path):
+        for path in (temp_path, meta_path):
+            if os.path.exists(path):
+                os.remove(path)
 
     dataset = load_dataset(
         "wikimedia/wikipedia",
@@ -338,57 +370,55 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
     )
     dataset = dataset.shuffle(buffer_size=1000, seed=SEED)
 
-    seen = 0
-    batch: list[str] = []
-    writer = None
-    pa = None
     try:
-        try:
-            import pyarrow as _pa
-            import pyarrow.parquet as pq
-            pa = _pa
-            writer = pq.ParquetWriter(temp_path, pa.schema([("sentence", pa.string())]))
-        except ImportError:
-            writer = None
-
         with tqdm(total=fetch_target, desc=lang, unit="article", leave=False, dynamic_ncols=True) as bar:
-            for article in dataset.take(fetch_target):
-                paragraphs = prepare_wiki_paragraphs(article.get("text", ""), lang)
-                if paragraphs is None:
+            for article_idx, article in enumerate(dataset.take(fetch_target)):
+                if article_idx < seen:
                     bar.update(1)
                     continue
 
+                paragraphs = prepare_wiki_paragraphs(article.get("text", ""), lang)
+                if paragraphs is None:
+                    seen = article_idx + 1
+                    _write_sentence_parquet(temp_path, committed_sentences)
+                    _write_json_atomic(meta_path, {
+                        "lang": lang,
+                        "seen_articles": seen,
+                        "final_target_articles": n_articles,
+                        "committed_sentence_count": len(committed_sentences),
+                        "seed": SEED,
+                    })
+                    bar.update(1)
+                    continue
+
+                article_batch: list[str] = []
                 for paragraph in paragraphs:
                     sents = segmenter.segment(paragraph) if segmenter else SENT_SPLIT.split(paragraph) # type: ignore
                     for s in sents:
                         s = clean_wiki_sentence(s, lang)
                         if _is_valid_sentence(s, lang):
-                            if writer is not None and pa is not None:
-                                batch.append(s)
-                                if len(batch) >= WIKI_WRITE_BATCH_SIZE:
-                                    _write_sentence_batch(writer, pa, batch)
-                                    batch.clear()
-                            else:
-                                batch.append(s)
+                            article_batch.append(s)
 
-                seen += 1
+                committed_sentences.extend(article_batch)
+                _write_sentence_parquet(temp_path, committed_sentences)
+                _write_json_atomic(meta_path, {
+                    "lang": lang,
+                    "seen_articles": article_idx + 1,
+                    "final_target_articles": n_articles,
+                    "committed_sentence_count": len(committed_sentences),
+                    "seed": SEED,
+                })
+                seen = article_idx + 1
                 bar.update(1)
                 if seen >= n_articles:
                     break
 
-        if writer is not None and pa is not None:
-            _write_sentence_batch(writer, pa, batch)
-            writer.close()
-            writer = None
-            os.replace(temp_path, final_path)
-        else:
-            _write_sentence_parquet(temp_path, batch)
-            os.replace(temp_path, final_path)
+        _write_sentence_parquet(final_path, committed_sentences)
     finally:
-        if writer is not None:
-            writer.close()
         if os.path.exists(temp_path):
             os.remove(temp_path)
+        if os.path.exists(meta_path):
+            os.remove(meta_path)
 
     return final_path
 
