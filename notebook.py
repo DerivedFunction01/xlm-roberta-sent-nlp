@@ -452,11 +452,29 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
     )
     dataset = dataset.shuffle(buffer_size=1000, seed=SEED)
 
+    def _update_progress(bar, scanned_articles: int) -> None:
+        """Show both scan progress and productive yield in the tqdm footer."""
+        bar.set_postfix_str(
+            f"acc {accepted_articles}/{n_articles} | "
+            f"sent {len(committed_sentences)} | "
+            f"yield {accepted_articles / max(1, scanned_articles):.1%} | "
+            f"avgA {_rolling_avg(article_lengths_window):.0f} | "
+            f"avgS {_rolling_avg(sentence_lengths_window):.0f} | "
+            f"miss {miss_streak}"
+        )
+
     try:
-        with tqdm(total=fetch_target, desc=lang, unit="article", leave=False, dynamic_ncols=True) as bar:
+        with tqdm(
+            total=sentence_cap,
+            initial=len(committed_sentences),
+            desc=f"{lang} sentences",
+            unit="sentence",
+            leave=False,
+            dynamic_ncols=True,
+        ) as bar:
             for article_idx, article in enumerate(dataset.take(fetch_target)):
                 if article_idx < next_article_idx:
-                    bar.update(1)
+                    _update_progress(bar, article_idx + 1)
                     continue
                 if article_idx >= MAX_WIKI_INDEX:
                     print(
@@ -486,7 +504,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                             sentence_lengths_window,
                         ),
                     )
-                    bar.update(1)
+                    _update_progress(bar, article_idx + 1)
                     continue
 
                 article_batch: list[str] = []
@@ -527,7 +545,8 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                     ),
                 )
                 next_article_idx = article_idx + 1
-                bar.update(1)
+                bar.update(len(article_batch))
+                _update_progress(bar, article_idx + 1)
                 if len(committed_sentences) >= sentence_cap:
                     print(
                         f"  Stopping {lang} after reaching sentence cap="
