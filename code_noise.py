@@ -84,6 +84,12 @@ def _comparison_expr(left: str, *, style: str = "sql", rhs_style: str = "numeric
     return f"{left} {_comparison_op(style)} {_comparison_rhs(rhs_style)}"
 
 
+def _numeric_literal(kind: str = "int") -> str:
+    if kind == "float":
+        return f"{random.uniform(0, 20):.2f}"
+    return str(random.randint(0, 20))
+
+
 def _c_type() -> str:
     return random.choice([
         "int",
@@ -139,6 +145,305 @@ def _c_printf_format(type_name: str) -> str:
     if type_name == "bool":
         return "%d"
     return "%d"
+
+
+def _control_flow_block(spec: dict[str, object]) -> list[str]:
+    """Generate one small control-flow block using language-specific templates."""
+    indent = str(spec.get("indent", "    "))
+    value_types = list(spec.get("value_types", ["int", "long", "float"]))
+    value_type = random.choice(value_types)
+    probe_name = str(spec.get("probe_name") or _ident())
+    state_name = str(spec.get("state_name") or _ident())
+    idx_name = str(spec.get("idx_name") or _ident())
+    probe_value = _numeric_literal(value_type)
+    limit_value = _numeric_literal(value_type)
+    comparison_op = _comparison_op("c")
+    case_values = [0, 1, 2]
+    mode = random.choice(list(spec.get("modes", ["if", "loop", "switch"])))
+    pad = lambda level=1: indent * level
+
+    def _fmt(key: str, **kwargs: object) -> str:
+        template = spec.get(key)
+        if key in {"else_header_template", "close_template", "case_break_template"}:
+            return str(template)
+        data = {
+            "probe_name": probe_name,
+            "state_name": state_name,
+            "idx_name": idx_name,
+            "probe_value": probe_value,
+            "limit_value": limit_value,
+            "comparison_op": comparison_op,
+            "value_type": value_type,
+            "case_value": 0,
+            "else_case_value": 0,
+        }
+        data.update(kwargs)
+        return str(template).format(**data)
+
+    lines: list[str] = []
+    for template in spec.get("init_templates", []):
+        lines.append(pad() + str(template).format(
+            probe_name=probe_name,
+            state_name=state_name,
+            idx_name=idx_name,
+            probe_value=probe_value,
+            limit_value=limit_value,
+            comparison_op=comparison_op,
+            value_type=value_type,
+        ))
+
+    body_template = str(spec.get("body_template", ""))
+    else_body_template = str(spec.get("else_body_template", body_template))
+    close_template = str(spec.get("close_template", ""))
+    case_break_template = str(spec.get("case_break_template", ""))
+
+    if mode == "if":
+        lines.append(pad() + _fmt("if_header_template"))
+        if body_template:
+            lines.append(_block([body_template.format(
+                probe_name=probe_name,
+                state_name=state_name,
+                idx_name=idx_name,
+                probe_value=probe_value,
+                limit_value=limit_value,
+                comparison_op=comparison_op,
+                value_type=value_type,
+            )], indent + indent))
+        if random.random() < float(spec.get("if_else_prob", 0.5)) and spec.get("else_header_template"):
+            lines.append(pad() + _fmt("else_header_template"))
+            if else_body_template:
+                lines.append(_block([else_body_template.format(
+                    probe_name=probe_name,
+                    state_name=state_name,
+                    idx_name=idx_name,
+                    probe_value=probe_value,
+                    limit_value=limit_value,
+                    comparison_op=comparison_op,
+                    value_type=value_type,
+                )], indent + indent))
+        if close_template:
+            lines.append(pad() + close_template)
+        return lines
+
+    if mode == "loop":
+        if random.random() < float(spec.get("while_prob", 0.5)) and spec.get("while_header_template"):
+            lines.append(pad() + _fmt("while_header_template"))
+        else:
+            lines.append(pad() + _fmt("for_header_template"))
+        if body_template:
+            lines.append(_block([body_template.format(
+                probe_name=probe_name,
+                state_name=state_name,
+                idx_name=idx_name,
+                probe_value=probe_value,
+                limit_value=limit_value,
+                comparison_op=comparison_op,
+                value_type=value_type,
+            )], indent + indent))
+        if close_template:
+            lines.append(pad() + close_template)
+        return lines
+
+    lines.append(pad() + _fmt("switch_header_template"))
+    for case_value in case_values[: random.randint(1, len(case_values))]:
+        lines.append(pad() + _fmt("case_header_template", case_value=case_value))
+        if body_template:
+            lines.append(_block([body_template.format(
+                probe_name=probe_name,
+                state_name=state_name,
+                idx_name=idx_name,
+                probe_value=probe_value,
+                limit_value=limit_value,
+                comparison_op=comparison_op,
+                value_type=value_type,
+            )], indent + indent))
+        if case_break_template:
+            lines.append(pad() + case_break_template)
+    lines.append(pad() + _fmt("default_header_template"))
+    if else_body_template:
+        lines.append(_block([else_body_template.format(
+            probe_name=probe_name,
+            state_name=state_name,
+            idx_name=idx_name,
+            probe_value=probe_value,
+            limit_value=limit_value,
+            comparison_op=comparison_op,
+            value_type=value_type,
+        )], indent + indent))
+    if close_template:
+        lines.append(pad() + close_template)
+    return lines
+
+
+def _python_control_flow(indent: str = "    ") -> list[str]:
+    return _control_flow_block({
+        "indent": indent,
+        "value_types": ["int", "long", "float"],
+        "init_templates": [
+            "{probe_name} = {probe_value}",
+            "{state_name} = 0",
+        ],
+        "if_header_template": "if {probe_name} {comparison_op} {limit_value}:",
+        "else_header_template": "else:",
+        "for_header_template": "for {idx_name} in range({limit_value}):",
+        "while_header_template": "while {probe_name} {comparison_op} {limit_value}:",
+        "switch_header_template": "match {probe_name}:",
+        "case_header_template": "case {case_value}:",
+        "default_header_template": "case _:",
+        "body_template": "{state_name} = {state_name} + {probe_name}",
+        "else_body_template": "print({probe_name})",
+        "case_break_template": "",
+        "close_template": "",
+        "modes": ["if", "loop", "switch"],
+        "while_prob": 0.5,
+        "if_else_prob": 0.5,
+    })
+
+
+def _js_control_flow(indent: str = "    ") -> list[str]:
+    return _control_flow_block({
+        "indent": indent,
+        "value_types": ["int", "int", "float"],
+        "init_templates": [
+            "let {probe_name} = {probe_value};",
+            "let {state_name} = 0;",
+        ],
+        "if_header_template": "if ({probe_name} {comparison_op} {limit_value}) {{",
+        "else_header_template": "} else {",
+        "for_header_template": "for (let {idx_name} = 0; {idx_name} < {limit_value}; {idx_name}++) {{",
+        "while_header_template": "while ({probe_name} {comparison_op} {limit_value}) {{",
+        "switch_header_template": "switch ({probe_name}) {{",
+        "case_header_template": "case {case_value}:",
+        "default_header_template": "default:",
+        "body_template": "{state_name} = {state_name} + {probe_name}; console.log({probe_name}, {state_name});",
+        "else_body_template": "console.log({probe_name});",
+        "case_break_template": "break;",
+        "close_template": "}",
+        "modes": ["if", "loop", "switch"],
+        "while_prob": 0.5,
+        "if_else_prob": 0.5,
+    })
+
+
+def _go_control_flow(indent: str = "    ") -> list[str]:
+    return _control_flow_block({
+        "indent": indent,
+        "value_types": ["int", "int64", "float64"],
+        "init_templates": [
+            "var {probe_name} {value_type} = {probe_value}",
+            "var {state_name} int = 0",
+        ],
+        "if_header_template": "if {probe_name} {comparison_op} {limit_value} {{",
+        "else_header_template": "} else {",
+        "for_header_template": "for {idx_name} := 0; {idx_name} < {limit_value}; {idx_name}++ {{",
+        "while_header_template": "for {probe_name} {comparison_op} {limit_value} {{",
+        "switch_header_template": "switch {probe_name} {{",
+        "case_header_template": "case {case_value}:",
+        "default_header_template": "default:",
+        "body_template": "{state_name} = {state_name} + 1; fmt.Println({probe_name}, {state_name})",
+        "else_body_template": "fmt.Println({probe_name})",
+        "case_break_template": "break",
+        "close_template": "}",
+        "modes": ["if", "loop", "switch"],
+        "while_prob": 0.5,
+        "if_else_prob": 0.5,
+    })
+
+
+def _java_control_flow(indent: str = "        ") -> list[str]:
+    return _control_flow_block({
+        "indent": indent,
+        "value_types": ["int", "long", "float", "double"],
+        "init_templates": [
+            "{value_type} {probe_name} = {probe_value};",
+            "int {state_name} = 0;",
+        ],
+        "if_header_template": "if ({probe_name} {comparison_op} {limit_value}) {{",
+        "else_header_template": "} else {",
+        "for_header_template": "for (int {idx_name} = 0; {idx_name} < {limit_value}; {idx_name}++) {{",
+        "while_header_template": "while ({probe_name} {comparison_op} {limit_value}) {{",
+        "switch_header_template": "switch ((int) {probe_name}) {{",
+        "case_header_template": "case {case_value}:",
+        "default_header_template": "default:",
+        "body_template": "{state_name} = {state_name} + 1; System.out.println({probe_name});",
+        "else_body_template": "System.out.println({probe_name});",
+        "case_break_template": "break;",
+        "close_template": "}",
+        "modes": ["if", "loop", "switch"],
+        "while_prob": 0.5,
+        "if_else_prob": 0.5,
+    })
+
+
+def _c_control_flow(indent: str = "    ") -> list[str]:
+    return _control_flow_block({
+        "indent": indent,
+        "value_types": ["int", "long", "float"],
+        "init_templates": [
+            "{value_type} {probe_name} = {probe_value};",
+            "int {state_name} = 0;",
+        ],
+        "if_header_template": "if ({probe_name} {comparison_op} {limit_value}) {{",
+        "else_header_template": "} else {",
+        "for_header_template": "for (int {idx_name} = 0; {idx_name} < {limit_value}; ++{idx_name}) {{",
+        "while_header_template": "while ({probe_name} {comparison_op} {limit_value}) {{",
+        "switch_header_template": "switch ((int) {probe_name}) {{",
+        "case_header_template": "case {case_value}:",
+        "default_header_template": "default:",
+        "body_template": "{state_name} = {state_name} + 1; printf(\"[trace] %d\\n\", {state_name});",
+        "else_body_template": "printf(\"[trace] %d\\n\", {state_name});",
+        "case_break_template": "break;",
+        "close_template": "}",
+        "modes": ["if", "loop", "switch"],
+        "while_prob": 0.5,
+        "if_else_prob": 0.5,
+    })
+
+
+def _rust_control_flow(indent: str = "    ") -> list[str]:
+    probe_name = _ident()
+    state_name = _ident()
+    idx_name = _ident()
+    mode = random.choice(["if", "loop", "switch"])
+    value_type = random.choice(["i32", "i64"]) if mode in {"loop", "switch"} else random.choice(["i32", "i64", "f32", "f64"])
+    probe_value = _numeric_literal("float" if "f" in value_type else "int")
+    limit_value = _numeric_literal("float" if "f" in value_type else "int")
+    loop_limit_value = _numeric_literal("int")
+    comparison_op = random.choice(["==", "!=", ">", "<", ">=", "<="])
+
+    lines = [
+        f"{indent}let mut {probe_name}: {value_type} = {probe_value};",
+        f"{indent}let mut {state_name}: i32 = 0;",
+    ]
+
+    if mode == "if":
+        lines.append(f"{indent}if {probe_name} {comparison_op} {limit_value} {{")
+        lines.append(f"{indent}    {state_name} = {state_name} + 1; println!(\"[trace] {{}}\", {probe_name});")
+        if random.random() < 0.5:
+            lines.append(f"{indent}}} else {{")
+            lines.append(f"{indent}    println!(\"[trace] {{}}\", {probe_name});")
+        lines.append(f"{indent}}}")
+        return lines
+
+    if mode == "loop":
+        if random.random() < 0.5:
+            lines.append(f"{indent}for {idx_name} in 0..{loop_limit_value} {{")
+        else:
+            lines.append(f"{indent}while {probe_name} {comparison_op} {limit_value} {{")
+        lines.append(f"{indent}    {state_name} = {state_name} + 1; println!(\"[trace] {{}}\", {probe_name});")
+        lines.append(f"{indent}}}")
+        return lines
+
+    lines.append(f"{indent}match {probe_name} {{")
+    for case_value in [0, 1, 2][: random.randint(1, 3)]:
+        lines.append(f"{indent}    {case_value} => {{")
+        lines.append(f"{indent}        {state_name} = {state_name} + 1; println!(\"[trace] {{}}\", {probe_name});")
+        lines.append(f"{indent}    }},")
+    lines.append(f"{indent}    _ => {{")
+    lines.append(f"{indent}        println!(\"[trace] {{}}\", {probe_name});")
+    lines.append(f"{indent}    }}")
+    lines.append(f"{indent}}}")
+    return lines
 
 
 def _format_imports(spec: dict[str, object]) -> list[str]:
@@ -833,6 +1138,7 @@ def _python_snippet() -> str:
 
     if kind == "class":
         cls = _camel()
+        flow = "\n".join(_python_control_flow("        "))
         return "\n".join(header + [
             f"class {cls}:",
             "    def __init__(self, enabled: bool = True):",
@@ -843,36 +1149,43 @@ def _python_snippet() -> str:
             f'        result = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value()}}}',
             f"        if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
             f'            print("[{fake.word()}]", len({arg}))',
+            flow,
             f'        print(f"[{fake.word()}] {fn}({{{arg}}}) -> {{result}}")',
             "        return result",
         ])
 
     if kind == "async":
         out = _ident()
+        flow = "\n".join(_python_control_flow("    "))
         return "\n".join(header + [
             f"async def {fn}({arg}: str, limit: int = 0) -> dict[str, object]:",
             "    await asyncio.sleep(0)",
             f'    {out} = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value()}}}',
             f"    if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
             f'        print("[{fake.word()}]", len({arg}))',
+            flow,
             f'    print(f"[{fake.word()}] {fn}({{{arg}}}) -> {{{out}}}")',
             f"    return {out}",
         ])
 
     if kind == "script":
+        flow = "\n".join(_python_control_flow("    "))
         return "\n".join(header + [
             "if __name__ == \"__main__\":",
             "    import sys",
             f'    print("[{fake.word()}]", sys.argv[1:] if len(sys.argv) > 1 else [])',
+            flow,
             f"    raise SystemExit({random.randint(0, 3)})",
         ])
 
     out = _ident()
+    flow = "\n".join(_python_control_flow("    "))
     return "\n".join(header + [
         f"def {fn}({arg}: str, limit: int = 0) -> dict[str, object]:",
         f'    {out} = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value()}}}',
         f"    if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
         f'        print("[{fake.word()}]", len({arg}))',
+        flow,
         f'    print(f"[{fake.word()}] {fn}({{{arg}}}) -> {{{out}}}")',
         f"    return {out}",
     ])
@@ -883,10 +1196,12 @@ def _js_snippet() -> str:
     arg = _ident()
     kind = random.choice(["function", "arrow", "class", "async", "module"])
     header = _js_import_header()
+    flow = "\n".join(_js_control_flow("    "))
 
     if kind == "arrow":
         return "\n".join(header + [
             f"const {fn} = ({arg}) => {{",
+            flow,
             _block([
                 f"const result = {{ ok: true, type: 'event', value: {_value()} }};",
                 f"const size = String({arg} ?? '').length;",
@@ -903,28 +1218,35 @@ def _js_snippet() -> str:
 
     if kind == "class":
         cls = _camel()
+        ctor_flow = "\n".join(_js_control_flow("        "))
+        method_flow = "\n".join(_js_control_flow("        "))
+        constructor_body = "\n".join([
+            f"        this.{arg} = {arg};",
+            f"        this.label = '{fake.word()}';",
+            ctor_flow,
+        ])
+        method_body = "\n".join([
+            "        const result = { ok: true, value: " + _value() + " };",
+            method_flow,
+            f'        console.log("[{fake.word()}]", {arg}, result);',
+            "        return result;",
+        ])
         return "\n".join(header + [
             f"class {cls} {{",
-            _block([
-                f"constructor({arg}) {{",
-                _block([
-                    f"this.{arg} = {arg};",
-                    f"this.label = '{fake.word()}';",
-                ], indent="        "),
-                "}",
-                "",
-                f"{fn}() {{",
-                _block([
-                    f"return {{ ok: true, value: {_value()} }};",
-                ], indent="        "),
-                "}",
-            ]),
+            f"constructor({arg}) {{",
+            constructor_body,
+            "}",
+            "",
+            f"{fn}() {{",
+            method_body,
+            "}",
             "}",
         ])
 
     if kind == "async":
         return "\n".join(header + [
             f"async function {fn}({arg}) {{",
+            flow,
             _block([
                 f"const response = await fetch({repr(f'https://{fake.domain_name()}/api/{fake.word()}')});",
                 f"const size = String({arg} ?? '').length;",
@@ -942,6 +1264,7 @@ def _js_snippet() -> str:
     if kind == "module":
         return "\n".join(header + [
             f"export const {fn} = ({arg}) => {{",
+            flow,
             _block([
                 "try {",
                 _block([
@@ -965,6 +1288,7 @@ def _js_snippet() -> str:
 
     return "\n".join(header + [
         f"function {fn}({arg}) {{",
+        flow,
         _block([
             f"const result = {{ ok: true, type: 'event', value: {_value()} }};",
             f"const size = String({arg} ?? '').length;",
@@ -1093,6 +1417,7 @@ def _go_snippet() -> str:
     recv = _ident()
     kind = random.choice(["struct", "interface", "func", "method"])
     ret_type = random.choice(["Config", "string", "int", "bool", "error"])
+    flow = "\n".join(_go_control_flow("    "))
     zero_value = {
         "Config": "Config{}",
         "string": '""',
@@ -1118,6 +1443,7 @@ def _go_snippet() -> str:
         ])
         body = [
             f"func New{fn}() *{fn} {{",
+            flow,
             _block([
                 f'return &{fn}{{Enabled: true, Label: "{fake.word()}"}}',
             ]),
@@ -1131,6 +1457,7 @@ def _go_snippet() -> str:
         ])
         body = [
             f"func {fn.lower()}({arg} string) {ret_type} {{",
+            flow,
             _block([
                 f'fmt.Println("[trace]", {arg})',
                 f"if len({arg}) {_comparison_op('c')} {random.randint(0, 20)} {{",
@@ -1150,6 +1477,7 @@ def _go_snippet() -> str:
         ])
         body = [
             f"func ( {recv} *{fn} ) {arg.title()}({arg} string) ({ret_type}, error) {{",
+            flow,
             _block([
                 f'fmt.Printf("[debug] %s=%v\\n", "{arg}", {arg})',
                 f"if {recv} == nil {{ return {zero_value}, nil }}",
@@ -1165,6 +1493,7 @@ def _go_snippet() -> str:
     else:
         body = [
             f"func {fn}({arg} string) ({ret_type}, error) {{",
+            flow,
             _block([
                 'fmt.Println("[debug]", ' + arg + ")",
                 f"if len({arg}) {_comparison_op('c')} {random.randint(0, 20)} {{",
@@ -1208,6 +1537,7 @@ def _java_snippet() -> str:
     ])
     maybe_static = "static " if random.random() < 0.7 else ""
     header = _java_import_header()
+    flow = "\n".join(_java_control_flow("        "))
     extra_lines = random.choice([
         ['        System.err.println("[debug] " + input);'],
         [
@@ -1233,6 +1563,7 @@ def _java_snippet() -> str:
         f"{class_kind} {cls} {{",
         f"    public {maybe_static}{return_type} {fn}({param_type} input) {{",
         f'        System.out.println("[trace] " + input);',
+        flow,
         *extra_lines,
         *( [f"        return {ret_expr};"] if return_type != "void" else [] ),
         "    }",
@@ -1246,6 +1577,7 @@ def _c_cpp_snippet() -> str:
     fn = _ident()
     var = _ident()
     header_lines: list[str] = []
+    flow = "\n".join(_c_control_flow("    "))
 
     if kind == "c":
         scalar_type = _c_type()
@@ -1274,6 +1606,7 @@ def _c_cpp_snippet() -> str:
         body_lines.extend([
             f'    printf("[debug] {_c_printf_format(scalar_type)}\\n", {var});',
             f"    if ({_comparison_expr(cmp_left, style='c')}) return {zero_value};",
+            flow,
             f"    return {zero_value};",
             "}",
         ])
@@ -1337,6 +1670,7 @@ def _c_cpp_snippet() -> str:
         ])
     body = [
         f"{vec_type} {fn}(const {vec_type}& {var}) {{",
+        flow,
         _block([
             f"std::cout << \"[trace] size=\" << {var}.size() << std::endl;",
             f"{vec_type} out;",
@@ -1374,6 +1708,96 @@ def _c_cpp_snippet() -> str:
     return "\n".join(header_lines + [""] + body)
 
 
+def _rust_snippet() -> str:
+    kind = random.choice(["fn", "struct", "impl"])
+    name = _camel()
+    fn = _ident()
+    arg = _ident()
+    ty = random.choice(["i32", "i64", "f32", "f64"])
+    return_kind = random.choice(["result", "option", "vec"])
+    ret_ty = {
+        "result": "Result<i32, String>",
+        "option": "Option<i32>",
+        "vec": "Vec<i32>",
+    }[return_kind]
+    flow = "\n".join(_rust_control_flow("        " if kind == "impl" else "    "))
+
+    header = []
+    if random.random() < 0.6:
+        header.append("use std::collections::HashMap;")
+    if random.random() < 0.4:
+        header.append("use std::fmt::Debug;")
+
+    if kind == "struct":
+        return "\n".join(header + [
+            f"struct {name} {{",
+            f"    enabled: bool,",
+            f"    count: {random.choice(['i32', 'i64', 'usize'])},",
+            "}",
+            "",
+            f"fn new_{fn}() -> {name} {{",
+            _block([
+                f"{name} {{ enabled: true, count: {random.randint(0, 9)} }}",
+            ]),
+            "}",
+        ])
+
+    if kind == "impl":
+        return "\n".join(header + [
+            f"struct {name} {{",
+            f"    value: {ty},",
+            "}",
+            "",
+            f"impl {name} {{",
+            f"    fn {fn}(&self, {arg}: {ty}) -> {ret_ty} {{",
+            flow,
+            _block([
+                f"if {arg} {_comparison_op('c')} {_numeric_literal('int')} {{",
+                _block([
+                    f"return {'Ok(0)' if return_kind == 'result' else 'Some(0)' if return_kind == 'option' else 'vec![0, 1]'};",
+                ], indent="        "),
+                "}",
+                (
+                    "Ok(0)"
+                    if return_kind == "result"
+                    else "Some(0)"
+                    if return_kind == "option"
+                    else "vec![0, 1, 2]"
+                ),
+            ], indent="        "),
+            "    }",
+            "}",
+        ])
+
+    result_expr = (
+        "Ok(0)"
+        if return_kind == "result"
+        else "Some(0)"
+        if return_kind == "option"
+        else "vec![0, 1, 2]"
+    )
+    fallback_expr = (
+        "Err(String::from(\"oops\"))"
+        if return_kind == "result"
+        else "None"
+        if return_kind == "option"
+        else "vec![3, 4, 5]"
+    )
+    return "\n".join(header + [
+        f"fn {fn}({arg}: {ty}) -> {ret_ty} {{",
+        flow,
+        _block([
+            f"if {arg} {_comparison_op('c')} {_numeric_literal('int')} {{",
+            _block([
+                f"return {result_expr};",
+            ], indent="        "),
+            "}",
+            f"{fallback_expr}",
+        ], indent="    "),
+        "}",
+    ])
+
+
 def _yaml_snippet() -> str:
     enabled = random.choice(["true", "false"])
     return "\n".join([
@@ -1409,6 +1833,7 @@ def generate_code_artifact() -> str:
         _python_snippet,
         _js_snippet,
         _c_cpp_snippet,
+        _rust_snippet,
         _sql_snippet,
         _bash_snippet,
         _go_snippet,
