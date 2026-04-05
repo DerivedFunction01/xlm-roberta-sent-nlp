@@ -133,7 +133,6 @@ WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
 WIKI_PARENS = re.compile(r"\s*[\(\（][^()\(\)（）》】\[\]\{\}]*?[\)\）]\s*")
-WIKI_NUMBERS = re.compile(r"\d+")
 WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
 WIKI_SPACES = re.compile(r"\s{2,}")
 
@@ -174,11 +173,28 @@ _SENT_BOUNDS: dict[str, tuple[int, int]] = {
     "hy": (30, 500), "ka": (25, 450),
 }
 _DEFAULT_BOUNDS = (30, 600)
+WIKI_NON_CONTENT = re.compile(r"[\W_]+", flags=re.UNICODE)
+WIKI_DIGITS = re.compile(r"\d")
+MAX_DIGIT_RATIO = 0.10
+
+
+def _non_punct_char_count(s: str) -> int:
+    """Count visible characters after stripping punctuation and whitespace."""
+    return len(WIKI_NON_CONTENT.sub("", s))
+
+
+def _digit_count(s: str) -> int:
+    """Count digit characters in a sentence."""
+    return len(WIKI_DIGITS.findall(s))
 
 
 def _is_valid_sentence(s: str, lang: str) -> bool:
     mn, mx = _SENT_BOUNDS.get(lang, _DEFAULT_BOUNDS)
-    return mn < len(s) < mx
+    visible = _non_punct_char_count(s)
+    if not (mn < visible < mx):
+        return False
+    digits = _digit_count(s)
+    return digits <= visible * MAX_DIGIT_RATIO
 
 
 def prepare_wiki_paragraphs(text: str) -> list[str] | None:
@@ -206,9 +222,8 @@ def _strip_ascii_for_lang(lang: str) -> bool:
 
 
 def clean_wiki_sentence(sentence: str, lang: str) -> str:
-    """Remove parenthetical text, digits, and extra whitespace from a sentence."""
+    """Remove parenthetical text and extra whitespace from a sentence."""
     sentence = WIKI_PARENS.sub(" ", sentence)
-    sentence = WIKI_NUMBERS.sub("", sentence)
     if _strip_ascii_for_lang(lang):
         sentence = WIKI_ASCII_WORDS.sub("", sentence)
     sentence = WIKI_SPACES.sub(" ", sentence)
