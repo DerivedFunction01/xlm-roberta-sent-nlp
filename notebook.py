@@ -54,7 +54,7 @@ torch.manual_seed(SEED)
 MODEL_CHECKPOINT = "xlm-roberta-base"
 MAX_LENGTH = 512
 ARTICLES_PER_LANG = 10_000   # increase for a larger dataset
-EXAMPLES_TARGET = 4_000_000  # synthetic mixed-language training examples to generate
+EXAMPLES_TARGET = 2_000_000  # synthetic mixed-language training examples to generate
 RESERVE_FRACTION = 0.15   # fraction of each language's sentences kept for guaranteed coverage
 MIN_RESERVED_SENTENCES = 4
 MAX_RESERVED_SENTENCES = 20_000
@@ -74,6 +74,8 @@ WIKI_SEGMENTATION_DEBUG_DIR = os.path.join(WIKI_TEMP_DIR, "segmentation_debug")
 os.makedirs(WIKI_SEGMENTATION_DEBUG_DIR, exist_ok=True)
 SYNTHETIC_CACHE = f"{SENTENCES_DIR}/synthetic_examples.parquet"
 SYNTHETIC_CACHE_META = f"{SENTENCES_DIR}/synthetic_examples.meta.json"
+SYNTHETIC_TEMP_DIR = os.path.join(SENTENCES_DIR, "_synthetic_tmp")
+os.makedirs(SYNTHETIC_TEMP_DIR, exist_ok=True)
 CACHE_DIR = f"{SENTENCES_DIR}/tokenized_dataset"
 os.makedirs(CACHE_DIR, exist_ok=True)
 CACHE_META = f"{CACHE_DIR}/tokenized_dataset.meta.json"
@@ -670,6 +672,47 @@ def _write_json_atomic(path: str, payload: dict) -> None:
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     os.replace(tmp_path, path)
+
+
+def _synthetic_worker_temp_path(worker_idx: int) -> str:
+    """Return the temp parquet path for a synthetic-doc worker."""
+    return os.path.join(SYNTHETIC_TEMP_DIR, f"worker_{worker_idx}.parquet")
+
+
+def _write_synthetic_examples_parquet(path: str, coverage_examples: list[dict], random_examples: list[dict]) -> None:
+    """Write synthetic examples to parquet with kind/original_text/tokens/ner_tags columns."""
+    rows = []
+    for kind, examples in (("coverage", coverage_examples), ("random", random_examples)):
+        for example in examples:
+            rows.append(
+                {
+                    "kind": kind,
+                    "original_text": example.get("original_text", ""),
+                    "tokens": json.dumps(example["tokens"]),
+                    "ner_tags": json.dumps(example["ner_tags"]),
+                }
+            )
+    pd.DataFrame(rows).to_parquet(path, index=False)
+
+
+def _read_synthetic_examples_parquet(path: str) -> tuple[list[dict], list[dict]]:
+    """Read a synthetic-example parquet shard back into coverage/random lists."""
+    df = pd.read_parquet(path)
+    coverage_examples: list[dict] = []
+    random_examples: list[dict] = []
+    for row in df.itertuples(index=False):
+        example = {
+            "original_text": getattr(row, "original_text", ""),
+            "tokens": json.loads(row.tokens), # type: ignore
+            "ner_tags": json.loads(row.ner_tags), # type: ignore
+        }
+        if not example["original_text"]:
+            example["original_text"] = " ".join(example["tokens"])
+        if row.kind == "coverage":
+            coverage_examples.append(example)
+        else:
+            random_examples.append(example)
+    return coverage_examples, random_examples
 
 
 # ---------------------------------------------------------------------------
@@ -1477,7 +1520,7 @@ def generate_synthetic_examples_chunk(
     primary_pool: dict[str, deque[str]],
     fallback_pool: dict[str, deque[str]] | None,
     source_pool: dict[str, list[str]],
-) -> list[dict]:
+) -> str:
     """
     Generate a chunk of synthetic examples in one worker.
 
@@ -1508,7 +1551,21 @@ def generate_synthetic_examples_chunk(
                     source_pool=source_pool,
                 )
             )
-    return examples
+    coverage_examples = [ex for idx, ex in enumerate(examples) if jobs[idx][0] == "coverage"]
+    random_examples = [ex for idx, ex in enumerate(examples) if jobs[idx][0] == "random"]
+    temp_path = _synthetic_worker_temp_path(worker_idx)
+    _write_synthetic_examples_parquet(temp_path, coverage_examples, random_examples)
+    _write_json_atomic(
+        temp_path.replace(".parquet", ".meta.json"),
+        {
+            "worker_idx": worker_idx,
+            "seed": seed,
+            "job_count": len(jobs),
+            "coverage_count": len(coverage_examples),
+            "random_count": len(random_examples),
+        },
+    )
+    return temp_path
 
 
 def save_synthetic_examples_cache(
@@ -1516,19 +1573,7 @@ def save_synthetic_examples_cache(
     random_examples: list[dict],
 ) -> None:
     """Persist synthetic examples to Parquet plus a small metadata sidecar."""
-    rows = []
-    for kind, examples in (("coverage", coverage_examples), ("random", random_examples)):
-        for example in examples:
-            rows.append(
-                {
-                    "kind": kind,
-                    "original_text": example.get("original_text", ""),
-                    "tokens": json.dumps(example["tokens"]),
-                    "ner_tags": json.dumps(example["ner_tags"]),
-                }
-            )
-
-    pd.DataFrame(rows).to_parquet(SYNTHETIC_CACHE, index=False)
+    _write_synthetic_examples_parquet(SYNTHETIC_CACHE, coverage_examples, random_examples)
     with open(SYNTHETIC_CACHE_META, "w") as f:
         json.dump(
             {
@@ -1608,21 +1653,7 @@ def load_synthetic_examples_cache() -> tuple[list[dict], list[dict]] | None:
     if meta != expected_meta:
         return None
 
-    df = pd.read_parquet(SYNTHETIC_CACHE)
-    coverage_examples: list[dict] = []
-    random_examples: list[dict] = []
-    for row in df.itertuples(index=False):
-        example = {
-            "original_text": getattr(row, "original_text", ""),
-            "tokens": json.loads(row.tokens), # type: ignore
-            "ner_tags": json.loads(row.ner_tags), # type: ignore
-        }
-        if not example["original_text"]:
-            example["original_text"] = " ".join(example["tokens"])
-        if row.kind == "coverage":
-            coverage_examples.append(example)
-        else:
-            random_examples.append(example)
+    coverage_examples, random_examples = _read_synthetic_examples_parquet(SYNTHETIC_CACHE)
     return coverage_examples, random_examples
 
 
@@ -1826,34 +1857,26 @@ else:
     random_examples = []
 
     if generation_workers == 1:
-        for kind, lang in tqdm(generation_jobs, desc="Synthetic docs"):
-            if kind == "coverage":
-                coverage_examples.append(
-                    create_synthetic_doc(
-                        reserved_sentence_pools,
-                        fallback_pool=main_sentence_pools,
-                        source_pool=lang_sentences,
-                        required_langs=[lang] if lang else None,
-                    )
-                )
-            else:
-                random_examples.append(
-                    create_synthetic_doc(
-                        main_sentence_pools,
-                        fallback_pool=reserved_sentence_pools,
-                        source_pool=lang_sentences,
-                    )
-                )
+        temp_path = generate_synthetic_examples_chunk(
+            0,
+            generation_jobs,
+            reserved_sentence_pools,
+            main_sentence_pools,
+            lang_sentences,
+        )
+        coverage_examples, random_examples = _read_synthetic_examples_parquet(temp_path)
+        for path in (temp_path, temp_path.replace(".parquet", ".meta.json")):
+            if os.path.exists(path):
+                os.remove(path)
     else:
         job_chunks = chunk_list(generation_jobs, generation_workers)
         reserved_worker_pools = partition_sentence_pools(reserved_sentence_pools, generation_workers)
         main_worker_pools = partition_sentence_pools(main_sentence_pools, generation_workers)
-        coverage_examples = [None] * len(coverage_plan) # type: ignore
-        random_examples = [None] * random_job_count # type: ignore
+        coverage_examples = []
+        random_examples = []
 
         with ProcessPoolExecutor(max_workers=generation_workers) as pool:
             future_to_jobs = {}
-            job_start = 0
             for worker_idx, jobs in enumerate(job_chunks):
                 if not jobs:
                     continue
@@ -1865,21 +1888,16 @@ else:
                     main_worker_pools[worker_idx],
                     lang_sentences,
                 )
-                future_to_jobs[future] = (job_start, jobs)
-                job_start += len(jobs)
+                future_to_jobs[future] = worker_idx
 
             for future in tqdm(as_completed(future_to_jobs), total=len(future_to_jobs), desc="Synthetic docs"):
-                chunk_examples = future.result()
-                job_start, jobs = future_to_jobs[future]
-                for offset, (example, job) in enumerate(zip(chunk_examples, jobs)):
-                    kind, _ = job
-                    if kind == "coverage":
-                        coverage_examples[job_start + offset] = example # type: ignore
-                    else:
-                        random_examples[job_start + offset - len(coverage_plan)] = example # type: ignore
-
-        coverage_examples = [ex for ex in coverage_examples if ex is not None] # type: ignore
-        random_examples = [ex for ex in random_examples if ex is not None] # type: ignore
+                temp_path = future.result()
+                chunk_coverage, chunk_random = _read_synthetic_examples_parquet(temp_path)
+                coverage_examples.extend(chunk_coverage)
+                random_examples.extend(chunk_random)
+                for path in (temp_path, temp_path.replace(".parquet", ".meta.json")):
+                    if os.path.exists(path):
+                        os.remove(path)
 
     if USE_SYNTHETIC_CACHE:
         save_synthetic_examples_cache(coverage_examples, random_examples) # type: ignore
