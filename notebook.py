@@ -43,7 +43,7 @@ torch.manual_seed(SEED)
 
 MODEL_CHECKPOINT = "xlm-roberta-base"
 MAX_LENGTH = 512
-ARTICLES_PER_LANG = 500   # increase for a larger dataset
+ARTICLES_PER_LANG = 2500   # increase for a larger dataset
 EXAMPLES_TARGET = 500_000  # synthetic mixed-language training examples to generate
 RESERVE_FRACTION = 0.15   # fraction of each language's sentences kept for guaranteed coverage
 MIN_RESERVED_SENTENCES = 4
