@@ -6,9 +6,41 @@ import random
 from datetime import datetime, timedelta, timezone
 
 from faker import Faker
+import randomname
+
 
 
 fake = Faker()
+
+
+def _random_word_pair() -> str:
+    """Return a GitHub-style adjective-noun name when available."""
+    return randomname.get_name()
+
+
+def _short_word(word: str, max_len: int = 6) -> str:
+    """Compress a word while keeping it readable enough for synthetic code."""
+    word = "".join(ch for ch in word.lower() if ch.isalnum())
+    if not word:
+        return "x"
+    if len(word) <= max_len:
+        return word
+    stem = word[:max_len]
+    if len(stem) > 3:
+        compressed = stem[0] + "".join(ch for ch in stem[1:] if ch not in "aeiou")
+        if len(compressed) >= 3:
+            return compressed[:max_len]
+    return stem
+
+
+def _compact_name(seed: str, *, max_parts: int = 2, max_part_len: int = 6, max_total_len: int = 14) -> str:
+    """Turn a generated name into a shorter identifier-friendly form."""
+    parts = [p for p in seed.replace("-", " ").replace("_", " ").split() if p]
+    if not parts:
+        return "value"
+    compact = "_".join(_short_word(part, max_part_len) for part in parts[:max_parts])
+    compact = compact.strip("_") or "value"
+    return compact[:max_total_len].strip("_") or "value"
 
 
 def _ident() -> str:
@@ -55,24 +87,21 @@ def _ident() -> str:
         "temp",
         "_"
     ])
-    base = fake.word().replace("-", "_").lower().strip("_") or "value"
+    base = _compact_name(_random_word_pair(), max_parts=1, max_part_len=4, max_total_len=8) or "value"
     if common_prefix:
-        base = f"{common_prefix}_{base}" if random.random() < 0.7 else f"{common_prefix}{base.title()}"
+        base = f"{common_prefix}_{base}" if random.random() < 0.55 else f"{common_prefix}{base.title()}"
     mode = random.random()
-    if mode < 0.25:
+    if mode < 0.30:
         ident = base
-    if mode < 0.50:
+    elif mode < 0.55:
         ident = f"{base}{random.randint(0, 999)}"
-    if mode < 0.70:
+    elif mode < 0.80:
         ident = f"{base}_{random.randint(0, 999)}"
-    if mode < 0.85:
-        ident = f"{base}{random.randint(1, 9)}_{fake.word().replace('-', '_').lower().strip('_')}"
     else:
-        parts = [fake.word().replace("-", "_") for _ in range(random.randint(1, 2))]
-        ident = "_".join(p.lower() for p in parts if p)
-        ident = ident.strip("_") or base
+        suffix = _compact_name(_random_word_pair(), max_parts=1, max_part_len=3, max_total_len=5)
+        ident = f"{base}_{suffix}" if random.random() < 0.65 else f"{base}{random.randint(1, 9)}"
 
-    max_len = random.choice([12, 16, 18, 20, 24, 32])
+    max_len = random.choice([6, 8, 10, 12])
     if len(ident) > max_len and random.random() < 0.7:
         suffix = ""
         prefix = ident
@@ -136,9 +165,7 @@ def _module_part() -> str:
     ]
     if random.random() < 0.35:
         return random.choice(common_modules)
-    base = fake.word().replace("-", "").replace("_", "").lower().strip() or "core"
-    if len(base) > 10 and random.random() < 0.8:
-        base = base[: random.randint(4, 10)]
+    base = _compact_name(_random_word_pair(), max_parts=1, max_part_len=4, max_total_len=6).replace("_", "")
     if random.random() < 0.20:
         base = f"{base}{random.randint(0, 9)}"
     elif random.random() < 0.30:
