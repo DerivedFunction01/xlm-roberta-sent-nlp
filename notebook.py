@@ -341,6 +341,35 @@ def post_clean_wiki_sentences(sentences: list[str], lang: str) -> list[str]:
             cleaned.append(sentence)
     return cleaned
 
+
+WIKI_CLEANUP_META = os.path.join(SENTENCES_DIR, "wiki_cleanup.meta.json")
+
+
+def _load_cleanup_meta() -> dict[str, dict]:
+    """Load the global wiki cleanup sidecar metadata."""
+    if not os.path.exists(WIKI_CLEANUP_META):
+        return {}
+    try:
+        with open(WIKI_CLEANUP_META, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_cleanup_meta(meta: dict[str, dict]) -> None:
+    """Atomically write the global wiki cleanup sidecar metadata."""
+    _write_json_atomic(WIKI_CLEANUP_META, meta)
+
+
+def _cleanup_fingerprint(path: str) -> dict[str, int]:
+    """Return a lightweight fingerprint for a parquet file."""
+    stat = os.stat(path)
+    return {
+        "mtime_ns": int(stat.st_mtime_ns),
+        "size": int(stat.st_size),
+    }
+
 def finalize_wiki_sentence_cache(sentence_map: dict[str, list[str]]) -> dict[str, list[str]]:
     """
     Apply the final wiki cleanup pass after wiki + SMOL loading,
@@ -351,6 +380,7 @@ def finalize_wiki_sentence_cache(sentence_map: dict[str, list[str]]) -> dict[str
     total_before = 0
     total_after = 0
     changed_langs = 0
+    cleanup_meta = _load_cleanup_meta()
 
     langs = sorted(sentence_map.keys())
 
@@ -358,6 +388,14 @@ def finalize_wiki_sentence_cache(sentence_map: dict[str, list[str]]) -> dict[str
     with tqdm(total=len(langs), desc="Languages", unit="lang") as pbar_langs:
         for lang in langs:
             sentences = sentence_map[lang]
+            path = parquet_path(lang)
+            fingerprint = _cleanup_fingerprint(path) if os.path.exists(path) else {}
+            meta_entry = cleanup_meta.get(lang, {})
+            already_cleaned = (
+                bool(meta_entry.get("cleaned"))
+                and meta_entry.get("path") == path
+                and meta_entry.get("input_fingerprint") == fingerprint
+            )
 
             # Per-language progress bar (closes automatically)
             with tqdm(
@@ -367,8 +405,11 @@ def finalize_wiki_sentence_cache(sentence_map: dict[str, list[str]]) -> dict[str
                 leave=False
             ) as pbar_sent:
 
-                # Run cleaning
-                cleaned = post_clean_wiki_sentences(sentences, lang)
+                if already_cleaned:
+                    cleaned = sentences
+                else:
+                    # Run cleaning
+                    cleaned = post_clean_wiki_sentences(sentences, lang)
 
                 # Advance per-language bar to completion
                 pbar_sent.update(len(sentences))
@@ -381,13 +422,23 @@ def finalize_wiki_sentence_cache(sentence_map: dict[str, list[str]]) -> dict[str
 
             if cleaned != sentences:
                 changed_langs += 1
-                _write_sentence_parquet(parquet_path(lang), cleaned)
+                _write_sentence_parquet(path, cleaned)
 
             cleaned_map[lang] = cleaned
+
+            cleanup_meta[lang] = {
+                "path": path,
+                "cleaned": True,
+                "input_fingerprint": fingerprint,
+                "input_sentence_count": before,
+                "cleaned_sentence_count": after,
+                "updated": cleaned != sentences,
+            }
 
             # Advance global bar
             pbar_langs.update(1)
 
+    _write_cleanup_meta(cleanup_meta)
     print(
         f"\nWiki post-clean: {changed_langs} languages updated | "
         f"{total_before:,} -> {total_after:,} sentences"
