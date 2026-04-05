@@ -90,6 +90,28 @@ def _numeric_literal(kind: str = "int") -> str:
     return str(random.randint(0, 20))
 
 
+def _python_type(*, allow_optional: bool = True) -> str:
+    """Return a plausible Python type annotation."""
+    primitive = random.choice(["int", "float", "bool", "str", "bytes"])
+    simple = [
+        primitive,
+        "object",
+        f"list[{primitive}]",
+        f"set[{primitive}]",
+        f"tuple[{primitive}, {primitive}]",
+        f"dict[str, {primitive}]",
+    ]
+    advanced = [
+        f"typing.Optional[{primitive}]",
+        f"typing.Sequence[{primitive}]",
+        f"typing.Iterable[{primitive}]",
+        f"typing.Mapping[str, {primitive}]",
+        f"typing.MutableMapping[str, {primitive}]",
+    ]
+    pool = simple + advanced if allow_optional else simple
+    return random.choice(pool)
+
+
 def _c_type() -> str:
     return random.choice([
         "int",
@@ -795,6 +817,7 @@ def _python_import_header() -> list[str]:
         "django": {"db": ["models"], "http": ["JsonResponse", "HttpResponse"]},
         "flask": ["Flask", "request", "jsonify", "render_template"],
         "pytest": ["fixture", "mark", "raises"],
+        "typing": ["Any", "Callable", "TypeVar", "Generic", "Protocol", "runtime_checkable", "Union", "Optional", "Iterable", "Sequence", "Mapping", "MutableMapping", "Dict", "List", "Set", "Tuple", "NamedTuple", "TypedDict", "cast", "overload", "final", "Literal"],
         _module_path(): None,
         _module_path(): {"tools": [_camel(), _camel()]},
     }
@@ -1135,6 +1158,8 @@ def _python_snippet() -> str:
     arg = _ident()
     kind = random.choice(["function", "class", "async", "script"])
     header = _python_import_header()
+    arg_type = _python_type(allow_optional=True)
+    return_type = _python_type(allow_optional=True)
 
     if kind == "class":
         cls = _camel()
@@ -1145,7 +1170,7 @@ def _python_snippet() -> str:
             "        self.enabled = enabled",
             f"        self.label = {repr(fake.word())}",
             "",
-            f"    def {fn}(self, {arg}: str) -> dict[str, object]:",
+            f"    def {fn}(self, {arg}: {arg_type}) -> {return_type}:",
             f'        result = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value()}}}',
             f"        if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
             f'            print("[{fake.word()}]", len({arg}))',
@@ -1158,7 +1183,7 @@ def _python_snippet() -> str:
         out = _ident()
         flow = "\n".join(_python_control_flow("    "))
         return "\n".join(header + [
-            f"async def {fn}({arg}: str, limit: int = 0) -> dict[str, object]:",
+            f"async def {fn}({arg}: {arg_type}, limit: int = 0) -> {return_type}:",
             "    await asyncio.sleep(0)",
             f'    {out} = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value()}}}',
             f"    if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
@@ -1181,7 +1206,7 @@ def _python_snippet() -> str:
     out = _ident()
     flow = "\n".join(_python_control_flow("    "))
     return "\n".join(header + [
-        f"def {fn}({arg}: str, limit: int = 0) -> dict[str, object]:",
+        f"def {fn}({arg}: {arg_type}, limit: int = 0) -> {return_type}:",
         f'    {out} = {{"status": "ok", "count": {random.randint(0, 9)}, "value": {_value()}}}',
         f"    if len({arg}) {_comparison_op('c')} {random.randint(0, 20)}:",
         f'        print("[{fake.word()}]", len({arg}))',

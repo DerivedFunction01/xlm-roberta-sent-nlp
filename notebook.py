@@ -1021,6 +1021,11 @@ def sample_o_span() -> str:
     pool = random.choices(_O_SOURCES, weights=_O_WEIGHTS, k=1)[0]
     return random.choice(pool)
 
+
+def sample_code_span() -> str:
+    """Draw one code artifact span."""
+    return random.choice(code_noise_pool)
+
 # %%
 # --- Synthetic Document Mixer ---
 
@@ -1406,6 +1411,18 @@ def create_synthetic_doc(
     # --- O-label span injection ---
     # Sample from the combined pool (LaTeX / synthetic math / symbol noise).
     # Allow 1-3 injections per doc so the model sees O spans in varied positions.
+    if len(chosen_langs) == 1 and total_tokens < MAX_LENGTH - 20:
+        span = sample_code_span()
+        original_text_parts.append(span)
+        code_tokens = tokenizer.tokenize(span)
+        remaining = MAX_LENGTH - 2 - len(all_tokens)
+        code_tokens = code_tokens[:min(remaining, 120)]  # code snippets can be longer than other O spans
+        if code_tokens:
+            insert_pos = random.randint(0, len(all_tokens))
+            all_tokens = all_tokens[:insert_pos] + code_tokens + all_tokens[insert_pos:]
+            all_labels = all_labels[:insert_pos] + [0] * len(code_tokens) + all_labels[insert_pos:]
+            total_tokens += len(code_tokens)
+
     if random.random() < o_inject_prob and total_tokens < MAX_LENGTH - 20:
         n_injections = random.choices([1, 2, 3], weights=[0.6, 0.3, 0.1])[0]
         for _ in range(n_injections):
