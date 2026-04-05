@@ -14,6 +14,7 @@ import json
 import gc
 import multiprocessing as mp
 import unicodedata
+import traceback
 from collections import defaultdict, deque
 import string
 from faker import Faker
@@ -69,6 +70,8 @@ SENTENCES_DIR = "./sentences_cache"
 os.makedirs(SENTENCES_DIR, exist_ok=True)
 WIKI_TEMP_DIR = os.path.join(SENTENCES_DIR, "_wiki_tmp")
 os.makedirs(WIKI_TEMP_DIR, exist_ok=True)
+WIKI_SEGMENTATION_DEBUG_DIR = os.path.join(WIKI_TEMP_DIR, "segmentation_debug")
+os.makedirs(WIKI_SEGMENTATION_DEBUG_DIR, exist_ok=True)
 SYNTHETIC_CACHE = f"{SENTENCES_DIR}/synthetic_examples.parquet"
 SYNTHETIC_CACHE_META = f"{SENTENCES_DIR}/synthetic_examples.meta.json"
 CACHE_DIR = f"{SENTENCES_DIR}/tokenized_dataset"
@@ -397,6 +400,39 @@ def prepare_wiki_paragraphs(text: str, lang: str) -> list[str] | None:
     return selected
 
 
+def _log_segmentation_failure(
+    lang: str,
+    article_idx: int,
+    paragraph_idx: int,
+    paragraph: str,
+    exc: Exception,
+    article_title: str = "",
+) -> None:
+    """Write a debug record for a paragraph that makes pysbd fail."""
+    snippet = paragraph[:800].replace("\n", " ")
+    log_path = os.path.join(WIKI_SEGMENTATION_DEBUG_DIR, f"{lang}.log")
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(
+            f"lang={lang} article_idx={article_idx} paragraph_idx={paragraph_idx}\n"
+            f"title={article_title!r}\n"
+            f"error={type(exc).__name__}: {exc}\n"
+            f"snippet={snippet}\n"
+            f"traceback={traceback.format_exc()}\n"
+            f"{'-' * 100}\n"
+        )
+    print(
+        f"  pysbd failed for lang={lang} article={article_idx} paragraph={paragraph_idx} "
+        f"-> {log_path}"
+    )
+
+
+def _sanitize_paragraph_for_pysbd(paragraph: str) -> str:
+    """Remove backslash-heavy markup that can trip pysbd's regex cleaner."""
+    if "\\" not in paragraph:
+        return paragraph
+    return paragraph.replace("\\", " ")
+
+
 def _strip_ascii_for_lang(lang: str) -> bool:
     """Return True when we should scrub ASCII words from a language's text."""
     return LANG_TO_GROUP.get(lang) not in LATIN_GROUPS
@@ -404,6 +440,8 @@ def _strip_ascii_for_lang(lang: str) -> bool:
 
 def clean_wiki_sentence(sentence: str, lang: str) -> str:
     """Remove parenthetical text and extra whitespace from a sentence."""
+    if "\\" in sentence:
+        sentence = sentence.replace("\\", "")
     sentence = _strip_bracket_notes(sentence)
     if _strip_ascii_for_lang(lang):
         sentence = WIKI_ASCII_WORDS.sub("", sentence)
@@ -600,6 +638,7 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                     break
 
                 article_text = article.get("text", "")
+                article_title = article.get("title", "")
                 article_lengths_window.append(len(article_text))
 
                 paragraphs = prepare_wiki_paragraphs(article_text, lang)
@@ -624,8 +663,20 @@ def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) 
                     continue
 
                 article_batch: list[str] = []
-                for paragraph in paragraphs:
-                    sents = segmenter.segment(paragraph) if segmenter else SENT_SPLIT.split(paragraph) # type: ignore
+                for paragraph_idx, paragraph in enumerate(paragraphs):
+                    safe_paragraph = _sanitize_paragraph_for_pysbd(paragraph)
+                    try:
+                        sents = segmenter.segment(safe_paragraph) if segmenter else SENT_SPLIT.split(safe_paragraph) # type: ignore
+                    except re.error as exc:
+                        _log_segmentation_failure(
+                            lang,
+                            article_idx,
+                            paragraph_idx,
+                            paragraph,
+                            exc,
+                            article_title=article_title,
+                        )
+                        sents = SENT_SPLIT.split(safe_paragraph)
                     for s in sents:
                         s = clean_wiki_sentence(s, lang)
                         if _is_valid_sentence(s, lang):
