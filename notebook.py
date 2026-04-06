@@ -717,10 +717,18 @@ def _synthetic_example_to_row(kind: str, example: dict) -> dict:
 
 def _synthetic_row_to_example(row) -> dict:
     """Convert a parquet row back into an in-memory example dict."""
+    if isinstance(row, dict):
+        original_text = row.get("original_text", "")
+        tokens = row.get("tokens", "[]")
+        ner_tags = row.get("ner_tags", "[]")
+    else:
+        original_text = getattr(row, "original_text", "")
+        tokens = getattr(row, "tokens", "[]")
+        ner_tags = getattr(row, "ner_tags", "[]")
     example = {
-        "original_text": getattr(row, "original_text", ""),
-        "tokens": json.loads(getattr(row, "tokens")),
-        "ner_tags": json.loads(getattr(row, "ner_tags")),
+        "original_text": original_text,
+        "tokens": json.loads(tokens) if isinstance(tokens, str) else list(tokens),
+        "ner_tags": json.loads(ner_tags) if isinstance(ner_tags, str) else list(ner_tags),
     }
     if not example["original_text"]:
         example["original_text"] = " ".join(example["tokens"])
