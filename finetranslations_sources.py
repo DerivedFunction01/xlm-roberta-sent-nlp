@@ -155,7 +155,9 @@ def _row_token_count(row: dict[str, Any]) -> int | None:
 def _row_quality_score(row: dict[str, Any]) -> float | None:
     score = row.get("og_quality_score")
     if isinstance(score, (int, float)):
-        return float(score)
+        score = float(score)
+        if score >= 0.0:
+            return score
     return None
 
 
