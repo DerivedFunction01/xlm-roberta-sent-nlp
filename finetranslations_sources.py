@@ -20,6 +20,12 @@ from paths import (
     SENTENCES_DIR,
 )
 from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3
+from source_config import (
+    FT_MAX_MISS_STREAK,
+    FT_MAX_ROW_INDEX,
+    FT_MAX_SENTENCES_PER_LANG,
+    FT_OVERFLOW_SENTENCES_PER_LANG,
+)
 from text_utils import (
     LATIN_GROUPS,
     SENT_SPLIT,
@@ -435,6 +441,9 @@ def _finetrans_cache_meta(
     *,
     seed: int,
     max_sentences_per_lang: int,
+    overflow_sentences_per_lang: int,
+    max_row_index: int,
+    max_miss_streak: int,
     include_translated_english: bool,
     configs: list[tuple[str, str]],
 ) -> dict[str, Any]:
@@ -442,6 +451,9 @@ def _finetrans_cache_meta(
         "dataset": FINETRANS_DATASET,
         "seed": seed,
         "max_sentences_per_lang": max_sentences_per_lang,
+        "overflow_sentences_per_lang": overflow_sentences_per_lang,
+        "max_row_index": max_row_index,
+        "max_miss_streak": max_miss_streak,
         "include_translated_english": include_translated_english,
         "configs": [[config, lang] for config, lang in configs],
         "cache_format": "parquet_records_v1",
@@ -561,6 +573,9 @@ def _process_finetrans_config(
     sentences_dir: str,
     lang_to_group: dict[str, str],
     seed: int,
+    max_row_index: int,
+    max_miss_streak: int,
+    overflow_sentences_per_lang: int,
     include_translated_english: bool,
     expected_meta: dict[str, Any],
     force_rebuild: bool = False,
@@ -589,6 +604,8 @@ def _process_finetrans_config(
 
     pending_records: list[dict[str, Any]] = []
     accepted_rows = int(checkpoint_meta.get("accepted_rows", 0)) if checkpoint_meta else 0
+    accepted_sentences = int(checkpoint_meta.get("accepted_sentences", 0)) if checkpoint_meta else 0
+    miss_streak = int(checkpoint_meta.get("miss_streak", 0)) if checkpoint_meta else 0
 
     if checkpoint_meta is not None:
         print(
@@ -610,6 +627,8 @@ def _process_finetrans_config(
                 "config": config,
                 "lang": lang,
                 "accepted_rows": accepted_rows,
+                "accepted_sentences": accepted_sentences,
+                "miss_streak": miss_streak,
                 "next_row_idx": row_idx,
                 "next_shard_idx": shard_idx,
             }
@@ -633,6 +652,18 @@ def _process_finetrans_config(
     for row_idx, row in enumerate(ds):
         if row_idx < next_row_idx:
             continue
+        if row_idx >= max_row_index:
+            print(
+                f"  Stopping {config} ({lang}) at row index {row_idx} "
+                f"(max_row_index={max_row_index})"
+            )
+            break
+        if accepted_sentences >= overflow_sentences_per_lang:
+            print(
+                f"  Stopping {config} ({lang}) after reaching overflow "
+                f"sentence cap={overflow_sentences_per_lang}"
+            )
+            break
         if not isinstance(row, dict):
             continue
         if _row_is_wikipedia(row):
@@ -652,6 +683,16 @@ def _process_finetrans_config(
         if source_records:
             pending_records.extend(_annotate_record(record, lang) for record in source_records)
             accepted_rows += 1
+            accepted_sentences += len(source_records)
+            miss_streak = 0
+        else:
+            miss_streak += 1
+            if miss_streak >= max_miss_streak:
+                print(
+                    f"  Stopping {config} ({lang}) after miss_streak={miss_streak} "
+                    f"(max_miss_streak={max_miss_streak})"
+                )
+                break
 
         if include_translated_english:
             english_records = _sentence_records_from_row(
@@ -680,6 +721,8 @@ def _process_finetrans_config(
             "config": config,
             "lang": lang,
             "accepted_rows": accepted_rows,
+            "accepted_sentences": accepted_sentences,
+            "miss_streak": miss_streak,
             "next_row_idx": 0,
             "next_shard_idx": next_shard_idx,
         }
@@ -702,7 +745,10 @@ def load_finetranslations_sentences(
     lang_to_group: dict[str, str],
     force_rebuild: bool = False,
     seed: int = 42,
-    max_sentences_per_lang: int = 5_000,
+    max_sentences_per_lang: int = FT_MAX_SENTENCES_PER_LANG,
+    overflow_sentences_per_lang: int = FT_OVERFLOW_SENTENCES_PER_LANG,
+    max_row_index: int = FT_MAX_ROW_INDEX,
+    max_miss_streak: int = FT_MAX_MISS_STREAK,
     include_translated_english: bool = False,
     max_workers: int | None = None,
 ) -> dict[str, list[str]]:
@@ -717,6 +763,9 @@ def load_finetranslations_sentences(
     expected_meta = _finetrans_cache_meta(
         seed=seed,
         max_sentences_per_lang=max_sentences_per_lang,
+        overflow_sentences_per_lang=overflow_sentences_per_lang,
+        max_row_index=max_row_index,
+        max_miss_streak=max_miss_streak,
         include_translated_english=include_translated_english,
         configs=configs,
     )
@@ -761,6 +810,9 @@ def load_finetranslations_sentences(
                 sentences_dir=sentences_dir,
                 lang_to_group=lang_to_group,
                 seed=seed,
+                max_row_index=max_row_index,
+                max_miss_streak=max_miss_streak,
+                overflow_sentences_per_lang=overflow_sentences_per_lang,
                 include_translated_english=include_translated_english,
                 expected_meta=expected_meta,
                 force_rebuild=force_rebuild,
