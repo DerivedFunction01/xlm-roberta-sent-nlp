@@ -69,6 +69,7 @@ USE_TOKENIZED_CACHE = True
 FORCE_REBUILD_TOKENIZED_CACHE = False
 SKIP_TOKENIZED_CACHE_VALIDATION = False
 GENERATION_WORKERS = mp.cpu_count() // 4
+MAX_WIKI_WORKERS = max(1, mp.cpu_count() // 2)
 
 # Optional notebook-state placeholders.
 # These let later cells run even if the generation cell was skipped.
@@ -158,7 +159,6 @@ if Path("hf_token").exists():
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Data Loading ---
-MAX_WIKI_WORKERS = max(1, mp.cpu_count() // 2)
 lang_sentences = load_wiki_sentences(
     ALL_LANGS,
     lang_to_group=LANG_TO_GROUP,
@@ -168,7 +168,7 @@ lang_sentences = load_wiki_sentences(
     max_workers=MAX_WIKI_WORKERS,
 )
 lang_sentences = finalize_wiki_sentence_cache(lang_sentences, lang_to_group=LANG_TO_GROUP)
-
+#%%
 smol_sentences = None
 if USE_SMOL_AUGMENTATION:
     try:
@@ -185,7 +185,7 @@ if USE_SMOL_AUGMENTATION:
         )
     except Exception as exc:
         print(f"\nSMOL augmentation skipped: {exc}")
-
+#%%
 ft_sentences = None
 if USE_FINETRANS_AUGMENTATION:
     try:
@@ -205,7 +205,7 @@ if USE_FINETRANS_AUGMENTATION:
         )
     except Exception as exc:
         print(f"\nFineTranslations augmentation skipped: {exc}")
-
+#%%
 neutral_sources = build_neutral_sources(
     sentences_dir=SENTENCES_DIR,
     english_seed_sentences=(
