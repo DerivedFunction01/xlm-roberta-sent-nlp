@@ -1,21 +1,11 @@
 from __future__ import annotations
 
+from source_config import LANGUAGE_BUCKETS
 
-LANGUAGE_GROUPS = {
-    "English":              ["en"],
-    "RomanceCore":          ["es", "fr", "it", "pt"],
-    "GermanicCore":         ["de", "nl", "sv", "da", "no", "is", "af"],
-    "CentralEuropeanLatin": ["pl", "cs", "ro", "hu", "tr"],
-    "SoutheastAsianLatin":  ["vi", "id", "ms", "sq", "la"],
-    "RussianCore":          ["ru"],
-    "EastSlavicCyrillic":   ["uk", "be"],
-    "BalkanCyrillic":       ["bg", "sr", "mk"],
-    "CentralAsianCyrillic": ["kk", "mn"],
-    "EastAsian":            ["zh", "ja", "ko"],
-    "Indic":                ["hi", "ur", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "as", "or"],
-    "ArabicScript":         ["ar", "fa", "ps", "sd", "ug"],
-    "OtherScripts":         ["el", "he", "hy", "ka", "am", "km", "lo", "my", "th"],
-}
+LANGUAGE_GROUPS = {group: cfg["langs"] for group, cfg in LANGUAGE_BUCKETS.items()}
+LANGUAGE_GROUP_WEIGHTS = {group: float(cfg["weight"]) for group, cfg in LANGUAGE_BUCKETS.items()}
+LANGUAGE_GROUP_MIN_CHARS = {group: int(cfg["min_chars"]) for group, cfg in LANGUAGE_BUCKETS.items()}
+LATIN_GROUPS = {group for group, cfg in LANGUAGE_BUCKETS.items() if cfg.get("latin")}
 
 LANG_ISO2_TO_ISO3 = {
     "en": "eng",

@@ -5,18 +5,7 @@ import unicodedata
 import traceback
 from pathlib import Path
 
-
-LATIN_GROUPS = {
-    "English",
-    "RomanceCore",
-    "GermanicCore",
-    "CentralEuropeanLatin",
-    "SoutheastAsianLatin",
-    "RussianCore",
-    "EastSlavicCyrillic",
-    "BalkanCyrillic",
-    "CentralAsianCyrillic",
-}
+from language import LATIN_GROUPS, LANGUAGE_GROUP_MIN_CHARS
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
@@ -205,21 +194,7 @@ def sanitize_paragraph_for_pysbd(paragraph: str) -> str:
 def _article_min_chars(lang: str, lang_to_group: dict[str, str]) -> int:
     group = lang_to_group.get(lang)
     assert group is not None
-    return {
-        "English": 2_000,
-        "RomanceCore": 2_000,
-        "GermanicCore": 2_000,
-        "CentralEuropeanLatin": 2_000,
-        "SoutheastAsianLatin": 2_000,
-        "RussianCore": 2_000,
-        "EastSlavicCyrillic": 2_000,
-        "BalkanCyrillic": 2_000,
-        "CentralAsianCyrillic": 2_000,
-        "EastAsian": 1_200,
-        "Indic": 2_000,
-        "ArabicScript": 2_000,
-        "OtherScripts": 2_000,
-    }.get(group, 3_000)
+    return LANGUAGE_GROUP_MIN_CHARS.get(group, 3_000)
 
 
 def _split_paragraphs(text: str, lang: str, lang_to_group: dict[str, str]) -> list[str] | None:

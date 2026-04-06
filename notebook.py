@@ -100,7 +100,7 @@ from source_config import (
     SMOL_RESERVE_FRACTION,
     USE_SMOL_AUGMENTATION,
 )
-from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS
+from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, LANGUAGE_GROUP_WEIGHTS
 from wiki_sources import ARTICLES_PER_LANG
 from source_pools import (
     build_source_sentence_pools,
@@ -423,23 +423,7 @@ def create_synthetic_doc(
       - `required_langs` can force coverage so every language appears at least
         once in the overall synthetic corpus.
     """
-    # Weight per group — tuned to reflect real-world multilingual text distribution.
-    GROUP_WEIGHTS = {
-        # Keep English dominant, but let major language families keep meaningful share.
-        "English":              2.5,
-        "RomanceCore":          2.2,
-        "GermanicCore":         1.7,
-        "CentralEuropeanLatin": 1.3,
-        "SoutheastAsianLatin":  1.1,
-        "EastAsian":            1.6,
-        "RussianCore":          1.6,
-        "EastSlavicCyrillic":   1.25,
-        "BalkanCyrillic":       1.15,
-        "CentralAsianCyrillic": 0.95,
-        "Indic":                1.25,
-        "ArabicScript":         1.25,
-        "OtherScripts":         0.8,
-    }
+    GROUP_WEIGHTS = LANGUAGE_GROUP_WEIGHTS
     chosen_langs: list[str] = []
     seen_langs: set[str] = set()
 
