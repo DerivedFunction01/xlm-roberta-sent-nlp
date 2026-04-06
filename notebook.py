@@ -46,18 +46,6 @@ from huggingface_hub import login
 from tqdm.auto import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from paths import SENTENCES_DIR
-from source_config import (
-    MAX_RESERVED_SENTENCES,
-    MIN_RESERVED_SENTENCES,
-    RESERVE_FRACTION,
-    SMOL_MAX_RESERVED_SENTENCES,
-    SMOL_MIN_RESERVED_SENTENCES,
-    SMOL_RESERVE_FRACTION,
-)
-from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS
-from wiki_sources import ARTICLES_PER_LANG
-
 try:
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -92,6 +80,49 @@ coverage_plan: list[str] | None = None
 reserved_worker_pools: list[dict[str, deque[str]]] | None = None
 main_worker_pools: list[dict[str, deque[str]]] | None = None
 # %%
+# --- Project Imports ---
+from paths import SENTENCES_DIR
+from source_config import (
+    MAX_RESERVED_SENTENCES,
+    MIN_RESERVED_SENTENCES,
+    RESERVE_FRACTION,
+    SMOL_FORCE_REBUILD,
+    SMOL_MAX_RESERVED_SENTENCES,
+    SMOL_MIN_RESERVED_SENTENCES,
+    SMOL_RESERVE_FRACTION,
+    USE_SMOL_AUGMENTATION,
+)
+from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS
+from wiki_sources import ARTICLES_PER_LANG
+from source_pools import (
+    build_source_sentence_pools,
+    chunk_list,
+    draw_sentence,
+    partition_sentence_pools,
+    remaining_sentence_count,
+)
+from wiki_sources import finalize_wiki_sentence_cache, load_wiki_sentences
+from smol_sources import load_smol_sentences
+from io_utils import write_json_atomic
+from neutral_sources import build_neutral_sources
+from synthetic_cache import (
+    CACHE_DIR,
+    CACHE_META,
+    CACHE_VERSION,
+    SYNTHETIC_CACHE,
+    SYNTHETIC_CACHE_META,
+    SYNTHETIC_TEMP_DIR,
+    TOKENIZED_CACHE_VERSION,
+    _append_synthetic_rows,
+    _clear_synthetic_cache_dir,
+    _load_synthetic_examples_dataset,
+    _move_synthetic_shard,
+    _synthetic_example_to_row,
+    _synthetic_row_to_example,
+    _synthetic_rows_to_table,
+    _synthetic_worker_temp_path,
+)
+# %%
 # Build BIO label map  (O=0, B-XX=odd, I-XX=even starting at 2)
 label2id = {"O": 0}
 id2label = {0: "O"}
@@ -118,37 +149,6 @@ if Path("hf_token").exists():
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Data Loading ---
-from source_pools import (
-    build_source_sentence_pools,
-    chunk_list,
-    draw_sentence,
-    partition_sentence_pools,
-    remaining_sentence_count,
-)
-from wiki_sources import finalize_wiki_sentence_cache, load_wiki_sentences
-from smol_sources import (
-    load_smol_sentences,
-)
-from io_utils import write_json_atomic
-from neutral_sources import build_neutral_sources
-from synthetic_cache import (
-    CACHE_DIR,
-    CACHE_META,
-    CACHE_VERSION,
-    SYNTHETIC_CACHE,
-    SYNTHETIC_CACHE_META,
-    SYNTHETIC_TEMP_DIR,
-    TOKENIZED_CACHE_VERSION,
-    _append_synthetic_rows,
-    _clear_synthetic_cache_dir,
-    _load_synthetic_examples_dataset,
-    _move_synthetic_shard,
-    _synthetic_example_to_row,
-    _synthetic_row_to_example,
-    _synthetic_rows_to_table,
-    _synthetic_worker_temp_path,
-)
-
 MAX_WIKI_WORKERS = min(mp.cpu_count() // 2, len(ALL_LANGS))
 lang_sentences = load_wiki_sentences(
     ALL_LANGS,
@@ -160,8 +160,6 @@ lang_sentences = load_wiki_sentences(
 )
 lang_sentences = finalize_wiki_sentence_cache(lang_sentences, lang_to_group=LANG_TO_GROUP)
 
-USE_SMOL_AUGMENTATION = True
-SMOL_FORCE_REBUILD = False
 smol_sentences = None
 if USE_SMOL_AUGMENTATION:
     try:
