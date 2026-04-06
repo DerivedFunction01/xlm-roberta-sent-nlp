@@ -8,22 +8,14 @@
 # pip install evaluate pysbd faker seqeval
 # %%
 import random
-import codecs
-import re
 import json
 import gc
 import multiprocessing as mp
-import unicodedata
-import traceback
 from collections import defaultdict, deque
-import string
-from faker import Faker
 import torch
 import numpy as np
 import evaluate
 from datasets import (
-    load_dataset,
-    get_dataset_config_names,
     Dataset,
     DatasetDict,
     concatenate_datasets,
@@ -40,7 +32,6 @@ from transformers import (
 
 import os
 import glob
-import pandas as pd
 from pathlib import Path
 from huggingface_hub import login
 from tqdm.auto import tqdm
@@ -195,7 +186,7 @@ if USE_FINETRANS_AUGMENTATION:
             seed=SEED,
             max_sentences_per_lang=FT_MAX_SENTENCES_PER_LANG,
             include_translated_english=FT_INCLUDE_TRANSLATED_ENGLISH,
-            max_workers=GENERATION_WORKERS,
+            max_workers=MAX_WIKI_WORKERS,
         )
         total_ft_sentences = sum(len(v) for v in ft_sentences.values())
         print(
