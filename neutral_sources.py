@@ -69,8 +69,7 @@ def load_latex_formulas(sentences_dir: str) -> list[str]:
     formulas = []
     for row in ds:
         formula = row["formula"] if isinstance(row, dict) else ""
-        if not isinstance(formula, str):
-            continue
+        assert isinstance(formula, str)
         f = _clean_formula(formula)
         if LATEX_MIN_CHARS <= len(f) <= LATEX_MAX_CHARS:
             formulas.append(f)
