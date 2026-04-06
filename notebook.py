@@ -187,7 +187,7 @@ if USE_FINETRANS_AUGMENTATION:
             seed=SEED,
             max_sentences_per_lang=FT_MAX_SENTENCES_PER_LANG,
             include_translated_english=FT_INCLUDE_TRANSLATED_ENGLISH,
-            max_workers=get_workers(3),
+            max_workers=get_workers(4),
         )
         total_ft_sentences = sum(len(v) for v in ft_sentences.values())
         print(
