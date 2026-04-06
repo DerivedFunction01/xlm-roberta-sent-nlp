@@ -74,6 +74,7 @@ GENERATION_WORKERS = mp.cpu_count() // 4
 # These let later cells run even if the generation cell was skipped.
 lang_sentences: dict[str, list[str]] | None = None
 smol_sentences: dict[str, list[str]] | None = None
+ft_sentences: dict[str, list[str]] | None = None
 reserved_sentence_pools: dict[str, deque[str]] | None = None
 main_sentence_pools: dict[str, deque[str]] | None = None
 coverage_plan: list[str] | None = None
@@ -83,6 +84,13 @@ main_worker_pools: list[dict[str, deque[str]]] | None = None
 # --- Project Imports ---
 from paths import SENTENCES_DIR
 from source_config import (
+    FT_FORCE_REBUILD,
+    FT_INCLUDE_TRANSLATED_ENGLISH,
+    FT_MAX_RESERVED_SENTENCES,
+    FT_MAX_SENTENCES_PER_LANG,
+    FT_MIN_RESERVED_SENTENCES,
+    FT_RESERVE_FRACTION,
+    USE_FINETRANS_AUGMENTATION,
     MAX_RESERVED_SENTENCES,
     MIN_RESERVED_SENTENCES,
     RESERVE_FRACTION,
@@ -103,6 +111,7 @@ from source_pools import (
 )
 from wiki_sources import finalize_wiki_sentence_cache, load_wiki_sentences
 from smol_sources import load_smol_sentences
+from finetranslations_sources import load_finetranslations_sentences
 from io_utils import write_json_atomic
 from neutral_sources import build_neutral_sources
 from synthetic_cache import (
@@ -177,9 +186,31 @@ if USE_SMOL_AUGMENTATION:
     except Exception as exc:
         print(f"\nSMOL augmentation skipped: {exc}")
 
+ft_sentences = None
+if USE_FINETRANS_AUGMENTATION:
+    try:
+        ft_sentences = load_finetranslations_sentences(
+            sentences_dir=SENTENCES_DIR,
+            lang_to_group=LANG_TO_GROUP,
+            force_rebuild=FT_FORCE_REBUILD,
+            seed=SEED,
+            max_sentences_per_lang=FT_MAX_SENTENCES_PER_LANG,
+            include_translated_english=FT_INCLUDE_TRANSLATED_ENGLISH,
+        )
+        total_ft_sentences = sum(len(v) for v in ft_sentences.values())
+        print(
+            f"\nFineTranslations kept separate for pool split: "
+            f"{len(ft_sentences)} languages | {total_ft_sentences} sentences"
+        )
+    except Exception as exc:
+        print(f"\nFineTranslations augmentation skipped: {exc}")
+
 neutral_sources = build_neutral_sources(
     sentences_dir=SENTENCES_DIR,
-    english_seed_sentences=lang_sentences.get("en", []),
+    english_seed_sentences=(
+        lang_sentences.get("en", [])
+        + (ft_sentences.get("en", []) if ft_sentences else [])
+    ),
     seed=SEED,
 )
 latex_formulas = neutral_sources.latex_formulas
@@ -566,6 +597,13 @@ else:
             "min_reserved": SMOL_MIN_RESERVED_SENTENCES,
             "max_reserved": SMOL_MAX_RESERVED_SENTENCES,
         },
+        {
+            "name": "finetranslations",
+            "sentence_map": ft_sentences,
+            "reserve_fraction": FT_RESERVE_FRACTION,
+            "min_reserved": FT_MIN_RESERVED_SENTENCES,
+            "max_reserved": FT_MAX_RESERVED_SENTENCES,
+        },
     ]
     reserved_sentence_pools, main_sentence_pools, source_summaries = build_source_sentence_pools(source_specs)
     for summary in source_summaries:
@@ -735,6 +773,7 @@ def release_wikipedia_generation_memory() -> None:
         "main_sentence_pools",
         "lang_sentences",
         "smol_sentences",
+        "ft_sentences",
         "neutral_sources",
         "coverage_plan",
         "reserved_worker_pools",
