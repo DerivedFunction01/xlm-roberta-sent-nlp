@@ -158,7 +158,7 @@ if Path("hf_token").exists():
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Data Loading ---
-MAX_WIKI_WORKERS = min(mp.cpu_count() // 2, len(ALL_LANGS))
+MAX_WIKI_WORKERS = max(1, mp.cpu_count() // 2)
 lang_sentences = load_wiki_sentences(
     ALL_LANGS,
     lang_to_group=LANG_TO_GROUP,
@@ -196,6 +196,7 @@ if USE_FINETRANS_AUGMENTATION:
             seed=SEED,
             max_sentences_per_lang=FT_MAX_SENTENCES_PER_LANG,
             include_translated_english=FT_INCLUDE_TRANSLATED_ENGLISH,
+            max_workers=MAX_WIKI_WORKERS,
         )
         total_ft_sentences = sum(len(v) for v in ft_sentences.values())
         print(

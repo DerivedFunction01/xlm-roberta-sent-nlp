@@ -5,13 +5,20 @@ import os
 import random
 import re
 from functools import lru_cache
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any
 
+import pandas as pd
 from datasets import get_dataset_config_names, load_dataset
 from tqdm.auto import tqdm
 
-from io_utils import write_json_atomic
-from paths import FINETRANS_CACHE_FILE, FINETRANS_CACHE_META, SENTENCES_DIR
+from io_utils import write_json_atomic, write_records_parquet
+from paths import (
+    FINETRANS_CACHE_FILE,
+    FINETRANS_CACHE_META,
+    FINETRANS_TEMP_FILE,
+    SENTENCES_DIR,
+)
 from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3
 from text_utils import (
     LATIN_GROUPS,
@@ -31,9 +38,55 @@ FINETRANS_LATIN_SHORT_TOKEN_LIMIT = 4
 FINETRANS_MIN_TOKEN_COUNT = 20
 FINETRANS_LATIN_LONGEST_CHUNKS = 2
 FINETRANS_MIN_QUALITY_SCORE = 0.80
+FINETRANS_CHECKPOINT_EVERY_ROWS = 2_500
 LATIN_TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 WIKIPEDIA_URL_RE = re.compile(r"wikipedia(?:\.org)?", flags=re.IGNORECASE)
 FT_ISO3_TO_LANG = {iso3: lang for lang, iso3 in LANG_ISO2_TO_ISO3.items()}
+
+
+def _finetrans_cache_path(sentences_dir: str) -> str:
+    return FINETRANS_CACHE_FILE if sentences_dir == SENTENCES_DIR else os.path.join(
+        sentences_dir,
+        "finetranslations_sentences.parquet",
+    )
+
+
+def _finetrans_meta_path(sentences_dir: str) -> str:
+    return FINETRANS_CACHE_META if sentences_dir == SENTENCES_DIR else os.path.join(
+        sentences_dir,
+        "finetranslations_sentences.meta.json",
+    )
+
+
+def _finetrans_temp_path(sentences_dir: str) -> str:
+    return FINETRANS_TEMP_FILE if sentences_dir == SENTENCES_DIR else os.path.join(
+        sentences_dir,
+        "_finetrans_tmp",
+        "finetranslations_sentences.parquet",
+    )
+
+
+def _finetrans_shard_dir(sentences_dir: str) -> str:
+    return os.path.join(sentences_dir, "_finetrans_tmp", "shards")
+
+
+def _finetrans_shard_path(sentences_dir: str, shard_idx: int) -> str:
+    return os.path.join(_finetrans_shard_dir(sentences_dir), f"part-{shard_idx:05d}.parquet")
+
+
+def _finetrans_config_dir(sentences_dir: str, config_idx: int) -> str:
+    return os.path.join(sentences_dir, "_finetrans_tmp", f"config_{config_idx:05d}")
+
+
+def _finetrans_config_meta_path(sentences_dir: str, config_idx: int) -> str:
+    return os.path.join(_finetrans_config_dir(sentences_dir, config_idx), "checkpoint.meta.json")
+
+
+def _finetrans_config_shard_path(sentences_dir: str, config_idx: int, shard_idx: int) -> str:
+    return os.path.join(
+        _finetrans_config_dir(sentences_dir, config_idx),
+        f"part-{shard_idx:05d}.parquet",
+    )
 
 
 def _config_name_to_lang(config_name: str, lang_to_group: dict[str, str]) -> str | None:
@@ -341,43 +394,306 @@ def _select_bucketed_records(
     return selected[:max_sentences]
 
 
-def _serialize_records(records_by_lang: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+def _annotate_record(record: dict[str, Any], lang: str) -> dict[str, Any]:
+    annotated = dict(record)
+    annotated["lang"] = lang
+    return annotated
+
+
+def _records_to_rows(records_by_lang: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for lang, records in records_by_lang.items():
+        for record in records:
+            row = dict(record)
+            row["lang"] = lang
+            rows.append(row)
+    return rows
+
+
+def _rows_to_sentence_map(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for row in rows:
+        lang = row.get("lang")
+        sentence = row.get("sentence")
+        if isinstance(lang, str) and isinstance(sentence, str) and sentence.strip():
+            result.setdefault(lang, []).append(sentence)
+    return result
+
+
+def _read_records_parquet(path: str) -> list[dict[str, Any]]:
+    if not os.path.exists(path):
+        return []
+    try:
+        frame = pd.read_parquet(path)
+    except Exception:
+        return []
+    records = frame.to_dict(orient="records")
+    return [record for record in records if isinstance(record, dict)]
+
+
+def _finetrans_cache_meta(
+    *,
+    seed: int,
+    max_sentences_per_lang: int,
+    include_translated_english: bool,
+    configs: list[tuple[str, str]],
+) -> dict[str, Any]:
     return {
-        lang: [
-            {
-                "sentence": record["sentence"],
-                "sentence_token_length": record["sentence_token_length"],
-                "og_language_score": record["og_language_score"],
-                "og_token_count": record["og_token_count"],
-                "og_quality_score": record["og_quality_score"],
-                "edu_score_raw": record["edu_score_raw"],
-                "source_language": record["source_language"],
-                "is_wikipedia": record["is_wikipedia"],
-                "score": record["score"],
-            }
-            for record in records
-        ]
-        for lang, records in records_by_lang.items()
+        "dataset": FINETRANS_DATASET,
+        "seed": seed,
+        "max_sentences_per_lang": max_sentences_per_lang,
+        "include_translated_english": include_translated_english,
+        "configs": [[config, lang] for config, lang in configs],
+        "cache_format": "parquet_records_v1",
     }
 
 
-def _normalize_cached_records(payload: Any) -> dict[str, list[str]]:
-    if not isinstance(payload, dict):
-        return {}
-    result: dict[str, list[str]] = {}
-    for lang, items in payload.items():
-        if not isinstance(items, list):
+def _load_finetrans_meta(
+    *,
+    cache_file: str,
+    cache_meta: str,
+    expected_meta: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not os.path.exists(cache_file) or not os.path.exists(cache_meta):
+        return None
+    try:
+        with open(cache_meta, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return None
+    return meta if meta == expected_meta else None
+
+
+def _load_finetrans_checkpoint_meta(
+    *,
+    cache_meta: str,
+    expected_meta: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not os.path.exists(cache_meta):
+        return None
+    try:
+        with open(cache_meta, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return None
+    if meta == expected_meta and meta.get("status") == "checkpoint":
+        return meta
+    return None
+
+
+def _load_finetrans_records_from_shards(shard_dir: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not os.path.isdir(shard_dir):
+        return rows
+    parquet_paths: list[str] = []
+    for root, _, files in os.walk(shard_dir):
+        for name in files:
+            if name.endswith(".parquet"):
+                parquet_paths.append(os.path.join(root, name))
+    for path in sorted(parquet_paths):
+        rows.extend(_read_records_parquet(path))
+    return rows
+
+
+def _clear_finetrans_shards(shard_dir: str) -> None:
+    if not os.path.isdir(shard_dir):
+        return
+    for root, dirs, files in os.walk(shard_dir, topdown=False):
+        for name in files:
+            path = os.path.join(root, name)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        for name in dirs:
+            path = os.path.join(root, name)
+            try:
+                os.rmdir(path)
+            except OSError:
+                pass
+
+
+def _clear_finetrans_config_dir(config_dir: str) -> None:
+    if not os.path.isdir(config_dir):
+        return
+    for root, _, files in os.walk(config_dir):
+        for name in files:
+            path = os.path.join(root, name)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def _load_config_checkpoint_meta(config_meta_path: str, expected_meta: dict[str, Any]) -> dict[str, Any] | None:
+    if not os.path.exists(config_meta_path):
+        return None
+    try:
+        with open(config_meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return None
+    if meta and meta.get("status") == "checkpoint" and meta.get("dataset") == expected_meta["dataset"]:
+        if meta.get("config") == expected_meta.get("config") and meta.get("lang") == expected_meta.get("lang"):
+            return meta
+    return None
+
+
+def _load_config_complete_meta(config_meta_path: str, expected_meta: dict[str, Any]) -> dict[str, Any] | None:
+    if not os.path.exists(config_meta_path):
+        return None
+    try:
+        with open(config_meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return None
+    if meta and meta.get("status") == "complete" and meta.get("dataset") == expected_meta["dataset"]:
+        if meta.get("config") == expected_meta.get("config") and meta.get("lang") == expected_meta.get("lang"):
+            return meta
+    return None
+
+
+def _process_finetrans_config(
+    *,
+    config_idx: int,
+    config: str,
+    lang: str,
+    sentences_dir: str,
+    lang_to_group: dict[str, str],
+    seed: int,
+    include_translated_english: bool,
+    expected_meta: dict[str, Any],
+    force_rebuild: bool = False,
+) -> dict[str, Any]:
+    config_dir = _finetrans_config_dir(sentences_dir, config_idx)
+    config_meta_path = _finetrans_config_meta_path(sentences_dir, config_idx)
+    os.makedirs(config_dir, exist_ok=True)
+
+    if force_rebuild:
+        _clear_finetrans_config_dir(config_dir)
+
+    complete_meta = None if force_rebuild else _load_config_complete_meta(config_meta_path, expected_meta)
+    if complete_meta is not None:
+        return {
+            "config_idx": config_idx,
+            "config": config,
+            "lang": lang,
+            "status": "complete",
+            "config_dir": config_dir,
+            "accepted_rows": int(complete_meta.get("accepted_rows", 0)),
+        }
+
+    checkpoint_meta = None if force_rebuild else _load_config_checkpoint_meta(config_meta_path, expected_meta)
+    next_row_idx = int(checkpoint_meta.get("next_row_idx", 0)) if checkpoint_meta else 0
+    next_shard_idx = int(checkpoint_meta.get("next_shard_idx", 0)) if checkpoint_meta else 0
+
+    pending_records: list[dict[str, Any]] = []
+    accepted_rows = int(checkpoint_meta.get("accepted_rows", 0)) if checkpoint_meta else 0
+
+    if checkpoint_meta is not None:
+        print(
+            f"  Resuming {config} ({lang}) from row {next_row_idx} shard {next_shard_idx}"
+        )
+
+    def _flush_pending(*, row_idx: int, shard_idx: int, status: str) -> int:
+        nonlocal pending_records, accepted_rows
+        if pending_records:
+            shard_path = _finetrans_config_shard_path(sentences_dir, config_idx, shard_idx)
+            write_records_parquet(shard_path, pending_records)
+            shard_idx += 1
+            pending_records = []
+        meta = dict(expected_meta)
+        meta.update(
+            {
+                "status": status,
+                "config_idx": config_idx,
+                "config": config,
+                "lang": lang,
+                "accepted_rows": accepted_rows,
+                "next_row_idx": row_idx,
+                "next_shard_idx": shard_idx,
+            }
+        )
+        write_json_atomic(config_meta_path, meta)
+        return shard_idx
+
+    try:
+        ds = load_dataset(FINETRANS_DATASET, config, split="train", streaming=True)
+        ds = ds.shuffle(buffer_size=1000, seed=seed)
+    except Exception as exc:
+        return {
+            "config_idx": config_idx,
+            "config": config,
+            "lang": lang,
+            "status": "skipped",
+            "error": str(exc),
+            "config_dir": config_dir,
+        }
+
+    for row_idx, row in enumerate(ds):
+        if row_idx < next_row_idx:
             continue
-        sentences: list[str] = []
-        for item in items:
-            if isinstance(item, str):
-                sentences.append(item)
-            elif isinstance(item, dict):
-                sentence = item.get("sentence")
-                if isinstance(sentence, str) and sentence.strip():
-                    sentences.append(sentence)
-        result[lang] = sentences
-    return result
+        if not isinstance(row, dict):
+            continue
+        if _row_is_wikipedia(row):
+            continue
+        source_records = _sentence_records_from_row(row, lang=lang, lang_to_group=lang_to_group)
+        _lang_score = _row_language_score(row) or 0
+        if _lang_score < FINETRANS_MIN_LANGUAGE_SCORE:
+            continue
+        _count_row = _row_token_count(row) or 0
+        if _count_row < FINETRANS_MIN_TOKEN_COUNT:
+            continue
+        if _row_source_language(row) and _row_source_language(row) != lang:
+            continue
+        if _row_base_score(row, lang) < FINETRANS_MIN_QUALITY_SCORE:
+            continue
+
+        if source_records:
+            pending_records.extend(_annotate_record(record, lang) for record in source_records)
+            accepted_rows += 1
+
+        if include_translated_english:
+            english_records = _sentence_records_from_row(
+                row,
+                lang="en",
+                lang_to_group=lang_to_group,
+                translated=True,
+            )
+            for record in english_records:
+                if _row_is_translated_en_acceptable(row):
+                    pending_records.append(_annotate_record(record, "en"))
+
+        if len(pending_records) >= FINETRANS_CHECKPOINT_EVERY_ROWS:
+            next_shard_idx = _flush_pending(
+                row_idx=row_idx + 1,
+                shard_idx=next_shard_idx,
+                status="checkpoint",
+            )
+
+    next_shard_idx = _flush_pending(row_idx=0, shard_idx=next_shard_idx, status="complete")
+    meta = dict(expected_meta)
+    meta.update(
+        {
+            "status": "complete",
+            "config_idx": config_idx,
+            "config": config,
+            "lang": lang,
+            "accepted_rows": accepted_rows,
+            "next_row_idx": 0,
+            "next_shard_idx": next_shard_idx,
+        }
+    )
+    write_json_atomic(config_meta_path, meta)
+    return {
+        "config_idx": config_idx,
+        "config": config,
+        "lang": lang,
+        "status": "complete",
+        "config_dir": config_dir,
+        "accepted_rows": accepted_rows,
+        "shards": next_shard_idx,
+    }
 
 
 def load_finetranslations_sentences(
@@ -388,112 +704,112 @@ def load_finetranslations_sentences(
     seed: int = 42,
     max_sentences_per_lang: int = 5_000,
     include_translated_english: bool = False,
+    max_workers: int | None = None,
 ) -> dict[str, list[str]]:
-    cache_file = FINETRANS_CACHE_FILE if sentences_dir == SENTENCES_DIR else os.path.join(
-        sentences_dir,
-        "finetranslations_sentences.json",
-    )
-    cache_meta = FINETRANS_CACHE_META if sentences_dir == SENTENCES_DIR else os.path.join(
-        sentences_dir,
-        "finetranslations_sentences.meta.json",
-    )
-
-    if not force_rebuild and os.path.exists(cache_file) and os.path.exists(cache_meta):
-        try:
-            with open(cache_meta, encoding="utf-8") as f:
-                meta = json.load(f)
-            expected_meta = {
-                "dataset": FINETRANS_DATASET,
-                "seed": seed,
-                "max_sentences_per_lang": max_sentences_per_lang,
-                "include_translated_english": include_translated_english,
-                "cache_format": "records_v1",
-            }
-            if meta == expected_meta:
-                print(f"Loading FineTranslations cache from {cache_file}")
-                with open(cache_file, encoding="utf-8") as f:
-                    cached = _normalize_cached_records(json.load(f))
-                print(
-                    f"  {len(cached)} languages | "
-                    f"{sum(len(v) for v in cached.values()):,} sentences total"
-                )
-                return cached
-        except Exception:
-            pass
-
     configs = _matching_configs(lang_to_group)
     if not configs:
         print("No FineTranslations subsets matched the current language set.")
         return {}
 
-    candidate_records: dict[str, list[dict[str, Any]]] = {}
-    rng = random.Random(seed)
+    cache_file = _finetrans_cache_path(sentences_dir)
+    cache_meta = _finetrans_meta_path(sentences_dir)
+    temp_file = _finetrans_temp_path(sentences_dir)
+    expected_meta = _finetrans_cache_meta(
+        seed=seed,
+        max_sentences_per_lang=max_sentences_per_lang,
+        include_translated_english=include_translated_english,
+        configs=configs,
+    )
 
+    final_meta = _load_finetrans_meta(
+        cache_file=cache_file,
+        cache_meta=cache_meta,
+        expected_meta=expected_meta,
+    )
+    if not force_rebuild and final_meta is not None and final_meta.get("status") == "complete":
+        print(f"Loading FineTranslations cache from {cache_file}")
+        rows = _read_records_parquet(cache_file)
+        result = _rows_to_sentence_map(rows)
+        total = sum(len(v) for v in result.values())
+        print(f"  {len(result)} languages | {total:,} sentences total")
+        return result
+
+    if force_rebuild:
+        for path in (cache_file, cache_meta):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+    config_root = os.path.join(sentences_dir, "_finetrans_tmp", "configs")
+    os.makedirs(config_root, exist_ok=True)
+    if force_rebuild:
+        _clear_finetrans_shards(config_root)
+
+    max_workers = min(len(configs), max(1, max_workers or 1))
     print(f"Loading FineTranslations ({len(configs)} subsets) ...")
-    for config, lang in tqdm(configs, desc="FineTranslations subsets"):
+    print(f"(Workers: {max_workers} processes | matched configs only)\n")
 
-        try:
-            ds = load_dataset(FINETRANS_DATASET, config, split="train", streaming=True)
-        except Exception as exc:
-            print(f"  Skipping {config}: {exc}")
-            continue
-        ds = ds.shuffle(buffer_size=1000, seed=seed)
+    futures = {}
+    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+        for config_idx, (config, lang) in enumerate(configs):
+            futures[pool.submit(
+                _process_finetrans_config,
+                config_idx=config_idx,
+                config=config,
+                lang=lang,
+                sentences_dir=sentences_dir,
+                lang_to_group=lang_to_group,
+                seed=seed,
+                include_translated_english=include_translated_english,
+                expected_meta=expected_meta,
+                force_rebuild=force_rebuild,
+            )] = (config_idx, config, lang)
 
-        records = candidate_records.setdefault(lang, [])
-
-        for row in ds:
-            if not isinstance(row, dict):
+        for future in tqdm(as_completed(futures), total=len(futures), desc="FineTranslations configs"):
+            config_idx, config, lang = futures[future]
+            try:
+                outcome = future.result()
+            except Exception as exc:
+                print(f"  Skipping {config}: {exc}")
                 continue
-            if _row_is_wikipedia(row):
-                continue
-            source_records = _sentence_records_from_row(row, lang=lang, lang_to_group=lang_to_group)
-            _lang_score = _row_language_score(row) or 0
-            if  _lang_score < FINETRANS_MIN_LANGUAGE_SCORE:
-                continue
-            _count_row = _row_token_count(row) or 0
-            if  _count_row < FINETRANS_MIN_TOKEN_COUNT:
-                continue
-            if _row_source_language(row) and _row_source_language(row) != lang:
-                continue
-            if _row_base_score(row, lang) < FINETRANS_MIN_QUALITY_SCORE:
-                continue
-            records.extend(source_records)
-
-            if include_translated_english:
-                english_records = _sentence_records_from_row(
-                    row,
-                    lang="en",
-                    lang_to_group=lang_to_group,
-                    translated=True,
+            status = outcome.get("status", "unknown")
+            if status == "complete":
+                print(
+                    f"  {config:<16} -> {lang}: +{int(outcome.get('accepted_rows', 0)):,} rows accepted"
                 )
-                for record in english_records:
-                    if not _row_is_translated_en_acceptable(row):
-                        continue
-                    candidate_records.setdefault("en", []).append(record)
+            elif status == "skipped":
+                print(f"  Skipping {config}: {outcome.get('error', 'unknown error')}")
 
-        kept_records = _select_bucketed_records(records, max_sentences_per_lang)
-        print(f"  {config:<16} -> {lang}: +{len(kept_records):,} sentences")
-        candidate_records[lang] = kept_records
+    rows = _load_finetrans_records_from_shards(config_root)
+    records_by_lang: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        lang = row.get("lang")
+        if not isinstance(lang, str):
+            continue
+        records_by_lang.setdefault(lang, []).append({k: v for k, v in row.items() if k != "lang"})
 
+    selected_records: dict[str, list[dict[str, Any]]] = {}
     result: dict[str, list[str]] = {}
-    for lang, records in sorted(candidate_records.items()):
-        sentences = [record["sentence"] for record in records]
-        rng.shuffle(sentences)
-        if len(sentences) > max_sentences_per_lang:
-            sentences = sentences[:max_sentences_per_lang]
-        result[lang] = sentences
+    rng = random.Random(seed)
+    for lang, records in sorted(records_by_lang.items()):
+        kept_records = _select_bucketed_records(records, max_sentences_per_lang)
+        rng.shuffle(kept_records)
+        selected_records[lang] = kept_records
+        result[lang] = [record["sentence"] for record in kept_records]
 
-    write_json_atomic(cache_file, _serialize_records(candidate_records))
+    write_records_parquet(cache_file, _records_to_rows(selected_records))
     write_json_atomic(
         cache_meta,
         {
-            "dataset": FINETRANS_DATASET,
-            "seed": seed,
-            "max_sentences_per_lang": max_sentences_per_lang,
-            "include_translated_english": include_translated_english,
-            "cache_format": "records_v1",
+            **expected_meta,
+            "status": "complete",
+            "next_config_idx": len(configs),
+            "next_row_idx": 0,
+            "next_shard_idx": 0,
         },
     )
+    _clear_finetrans_shards(config_root)
 
     total = sum(len(v) for v in result.values())
     print(f"\nFineTranslations sentences cached -> {cache_file}")

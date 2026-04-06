@@ -29,3 +29,10 @@ def write_sentence_parquet(path: str, sentences: list[str]) -> None:
         return
     table = pa.table({"sentence": pa.array(sentences, type=pa.string())})
     pq.write_table(table, path)
+
+
+def write_records_parquet(path: str, records: list[dict]) -> None:
+    frame = pd.DataFrame.from_records(records)
+    tmp_path = f"{path}.tmp"
+    frame.to_parquet(tmp_path, index=False)
+    os.replace(tmp_path, path)
