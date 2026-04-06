@@ -1739,7 +1739,7 @@ def load_synthetic_examples_cache():
     with open(SYNTHETIC_CACHE_META) as f:
         meta = json.load(f)
 
-    expected_meta = {
+    expected_fields = {
         "cache_version": CACHE_VERSION,
         "examples_target": EXAMPLES_TARGET,
         "reserve_fraction": RESERVE_FRACTION,
@@ -1748,7 +1748,16 @@ def load_synthetic_examples_cache():
         "min_coverage_docs_per_lang": MIN_COVERAGE_DOCS_PER_LANG,
         "max_coverage_docs_per_lang": MAX_COVERAGE_DOCS_PER_LANG,
     }
-    if meta != expected_meta:
+    for key, expected_value in expected_fields.items():
+        if meta.get(key) != expected_value:
+            return None
+
+    shard_names = meta.get("shards")
+    if not isinstance(shard_names, list) or not shard_names:
+        return None
+
+    shard_paths = [os.path.join(SYNTHETIC_CACHE, shard_name) for shard_name in shard_names]
+    if any(not os.path.exists(path) for path in shard_paths):
         return None
 
     return _load_synthetic_examples_dataset()
