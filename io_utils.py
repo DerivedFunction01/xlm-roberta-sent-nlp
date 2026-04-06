@@ -31,8 +31,11 @@ def write_sentence_parquet(path: str, sentences: list[str]) -> None:
     pq.write_table(table, path)
 
 
-def write_records_parquet(path: str, records: list[dict]) -> None:
-    frame = pd.DataFrame.from_records(records)
+def write_records_parquet(path: str, records: list[dict], columns: list[str] | None = None) -> None:
+    if columns is None:
+        frame = pd.DataFrame.from_records(records)
+    else:
+        frame = pd.DataFrame.from_records(records, columns=columns)
     tmp_path = f"{path}.tmp"
     frame.to_parquet(tmp_path, index=False)
     os.replace(tmp_path, path)

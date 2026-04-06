@@ -49,6 +49,19 @@ FINETRANS_MIN_TOKEN_COUNT = 20
 FINETRANS_LATIN_LONGEST_CHUNKS = 2
 FINETRANS_MIN_QUALITY_SCORE = 0.80
 FINETRANS_CHECKPOINT_EVERY_ROWS = 2_500
+FINETRANS_WORKER_COLUMNS = [
+    "lang",
+    "sentence",
+    "sentence_token_length",
+    "og_language_score",
+    "og_token_count",
+    "og_quality_score",
+    "edu_score_raw",
+    "source_language",
+    "is_wikipedia",
+    "score",
+]
+FINETRANS_FINAL_COLUMNS = ["lang", "sentence"]
 LATIN_TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 WIKIPEDIA_URL_RE = re.compile(r"wikipedia(?:\.org)?", flags=re.IGNORECASE)
 FT_ISO3_TO_LANG = {iso3: lang for lang, iso3 in LANG_ISO2_TO_ISO3.items()}
@@ -613,8 +626,8 @@ def _process_finetrans_config(
                 "english_seen_sentences": english_seen_sentences,
             }
         )
-        write_records_parquet(config_records_path, source_buffer)
-        write_records_parquet(english_records_path, english_buffer)
+        write_records_parquet(config_records_path, source_buffer, columns=FINETRANS_WORKER_COLUMNS)
+        write_records_parquet(english_records_path, english_buffer, columns=FINETRANS_WORKER_COLUMNS)
         write_json_atomic(config_meta_path, meta)
 
     try:
@@ -889,7 +902,7 @@ def load_finetranslations_sentences(
         selected_records[lang] = kept_records
         result[lang] = [record["sentence"] for record in kept_records]
 
-    write_records_parquet(cache_file, _records_to_rows(selected_records))
+    write_records_parquet(cache_file, _records_to_rows(selected_records), columns=FINETRANS_FINAL_COLUMNS)
     write_json_atomic(
         cache_meta,
         {
