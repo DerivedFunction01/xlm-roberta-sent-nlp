@@ -13,11 +13,17 @@ from datasets import get_dataset_config_names, load_dataset
 from datasets.utils.logging import disable_progress_bar
 from tqdm.auto import tqdm
 
+try:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+except ImportError:
+    pa = None
+    pq = None
+
 from io_utils import write_json_atomic, write_records_parquet
 from paths import (
     FINETRANS_CACHE_FILE,
     FINETRANS_CACHE_META,
-    FINETRANS_TEMP_FILE,
     SENTENCES_DIR,
 )
 from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3
@@ -70,22 +76,6 @@ def _finetrans_meta_path(sentences_dir: str) -> str:
     )
 
 
-def _finetrans_temp_path(sentences_dir: str) -> str:
-    return FINETRANS_TEMP_FILE if sentences_dir == SENTENCES_DIR else os.path.join(
-        sentences_dir,
-        "_finetrans_tmp",
-        "finetranslations_sentences.parquet",
-    )
-
-
-def _finetrans_shard_dir(sentences_dir: str) -> str:
-    return os.path.join(sentences_dir, "_finetrans_tmp", "shards")
-
-
-def _finetrans_shard_path(sentences_dir: str, shard_idx: int) -> str:
-    return os.path.join(_finetrans_shard_dir(sentences_dir), f"part-{shard_idx:05d}.parquet")
-
-
 def _finetrans_config_dir(sentences_dir: str, config_idx: int) -> str:
     return os.path.join(sentences_dir, "_finetrans_tmp", f"config_{config_idx:05d}")
 
@@ -94,22 +84,8 @@ def _finetrans_config_meta_path(sentences_dir: str, config_idx: int) -> str:
     return os.path.join(_finetrans_config_dir(sentences_dir, config_idx), "checkpoint.meta.json")
 
 
-def _finetrans_config_shard_path(sentences_dir: str, config_idx: int, shard_idx: int) -> str:
-    return os.path.join(
-        _finetrans_config_dir(sentences_dir, config_idx),
-        f"part-{shard_idx:05d}.parquet",
-    )
-
-
 def _finetrans_english_config_dir(sentences_dir: str, config_idx: int) -> str:
     return os.path.join(_finetrans_config_dir(sentences_dir, config_idx), "en")
-
-
-def _finetrans_english_config_shard_path(sentences_dir: str, config_idx: int, shard_idx: int) -> str:
-    return os.path.join(
-        _finetrans_english_config_dir(sentences_dir, config_idx),
-        f"part-{shard_idx:05d}.parquet",
-    )
 
 
 def _finetrans_config_records_path(sentences_dir: str, config_idx: int) -> str:
@@ -472,6 +448,13 @@ def _read_records_parquet(path: str) -> list[dict[str, Any]]:
     return [record for record in records if isinstance(record, dict)]
 
 
+def _write_record_batch(writer, pa_module, batch: list[dict[str, Any]]) -> None:
+    if not batch:
+        return
+    table = pa_module.Table.from_pylist(batch)
+    writer.write_table(table)
+
+
 def _finetrans_cache_meta(
     *,
     seed: int,
@@ -511,23 +494,6 @@ def _load_finetrans_meta(
     except Exception:
         return None
     return meta if meta == expected_meta else None
-
-
-def _load_finetrans_checkpoint_meta(
-    *,
-    cache_meta: str,
-    expected_meta: dict[str, Any],
-) -> dict[str, Any] | None:
-    if not os.path.exists(cache_meta):
-        return None
-    try:
-        with open(cache_meta, encoding="utf-8") as f:
-            meta = json.load(f)
-    except Exception:
-        return None
-    if meta == expected_meta and meta.get("status") == "checkpoint":
-        return meta
-    return None
 
 
 def _load_finetrans_records_from_configs(config_root: str) -> list[dict[str, Any]]:
@@ -605,9 +571,6 @@ def _process_finetrans_config(
     os.makedirs(config_dir, exist_ok=True)
     os.makedirs(english_dir, exist_ok=True)
 
-    if force_rebuild:
-        _clear_finetrans_config_dir(config_dir)
-
     complete_meta = None if force_rebuild else _load_config_complete_meta(config_meta_path, expected_meta)
     if complete_meta is not None:
         return {
@@ -619,33 +582,27 @@ def _process_finetrans_config(
             "accepted_rows": int(complete_meta.get("accepted_rows", 0)),
         }
 
-    checkpoint_meta = None if force_rebuild else _load_config_checkpoint_meta(config_meta_path, expected_meta)
-    if force_rebuild or checkpoint_meta is None:
+    if force_rebuild or not os.path.exists(config_meta_path):
         _clear_finetrans_config_dir(config_dir)
         os.makedirs(config_dir, exist_ok=True)
         os.makedirs(english_dir, exist_ok=True)
-    next_row_idx = int(checkpoint_meta.get("next_row_idx", 0)) if checkpoint_meta else 0
-    english_seen_sentences = int(checkpoint_meta.get("english_seen_sentences", 0)) if checkpoint_meta else 0
+    if pa is None or pq is None:
+        raise RuntimeError("pyarrow is required for FineTranslations streaming writes")
 
-    pending_records: list[dict[str, Any]] = _read_records_parquet(config_records_path) if not force_rebuild else []
-    english_pending_records: list[dict[str, Any]] = (
-        _read_records_parquet(english_records_path) if not force_rebuild else []
-    )
-    accepted_rows = int(checkpoint_meta.get("accepted_rows", 0)) if checkpoint_meta else 0
-    accepted_sentences = int(checkpoint_meta.get("accepted_sentences", 0)) if checkpoint_meta else 0
-    accepted_english_sentences = int(checkpoint_meta.get("accepted_english_sentences", 0)) if checkpoint_meta else 0
-    miss_streak = int(checkpoint_meta.get("miss_streak", 0)) if checkpoint_meta else 0
+    accepted_rows = 0
+    accepted_sentences = 0
+    accepted_english_sentences = 0
+    miss_streak = 0
+    english_seen_sentences = 0
+    next_row_idx = 0
 
-    if checkpoint_meta is not None:
-        print(
-            f"  Resuming {config} ({lang}) from row {next_row_idx}"
-        )
+    source_buffer: list[dict[str, Any]] = []
+    english_buffer: list[dict[str, Any]] = []
+    source_writer = None
+    english_writer = None
 
-    def _flush_pending(
-        *,
-        row_idx: int,
-        status: str,
-    ) -> None:
+    def _flush_pending(*, row_idx: int, status: str) -> None:
+        nonlocal source_buffer, english_buffer, source_writer, english_writer
         meta = dict(expected_meta)
         meta.update(
             {
@@ -661,8 +618,18 @@ def _process_finetrans_config(
                 "english_seen_sentences": english_seen_sentences,
             }
         )
-        write_records_parquet(config_records_path, pending_records)
-        write_records_parquet(english_records_path, english_pending_records)
+        if source_buffer:
+            source_table = pa.Table.from_pylist(source_buffer)
+            if source_writer is None:
+                source_writer = pq.ParquetWriter(config_records_path, source_table.schema)
+            source_writer.write_table(source_table)
+            source_buffer = []
+        if english_buffer:
+            english_table = pa.Table.from_pylist(english_buffer)
+            if english_writer is None:
+                english_writer = pq.ParquetWriter(english_records_path, english_table.schema)
+            english_writer.write_table(english_table)
+            english_buffer = []
         write_json_atomic(config_meta_path, meta)
 
     try:
@@ -710,7 +677,7 @@ def _process_finetrans_config(
             continue
 
         if source_records:
-            pending_records.extend(_annotate_record(record, lang) for record in source_records)
+            source_buffer.extend(_annotate_record(record, lang) for record in source_records)
             accepted_rows += 1
             accepted_sentences += len(source_records)
             miss_streak = 0
@@ -736,16 +703,20 @@ def _process_finetrans_config(
                     english_seen_sentences,
                     english_accept_every,
                 ):
-                    english_pending_records.append(_annotate_record(record, "en"))
+                    english_buffer.append(_annotate_record(record, "en"))
                     accepted_english_sentences += 1
 
         if (
-            len(pending_records) >= FINETRANS_CHECKPOINT_EVERY_ROWS
-            or len(english_pending_records) >= FINETRANS_CHECKPOINT_EVERY_ROWS
+            len(source_buffer) >= FINETRANS_CHECKPOINT_EVERY_ROWS
+            or len(english_buffer) >= FINETRANS_CHECKPOINT_EVERY_ROWS
         ):
             _flush_pending(row_idx=row_idx + 1, status="checkpoint")
 
     _flush_pending(row_idx=0, status="complete")
+    if source_writer is not None:
+        source_writer.close()
+    if english_writer is not None:
+        english_writer.close()
     meta = dict(expected_meta)
     meta.update(
         {
@@ -794,7 +765,6 @@ def load_finetranslations_sentences(
 
     cache_file = _finetrans_cache_path(sentences_dir)
     cache_meta = _finetrans_meta_path(sentences_dir)
-    temp_file = _finetrans_temp_path(sentences_dir)
     expected_meta = _finetrans_cache_meta(
         seed=seed,
         max_sentences_per_lang=max_sentences_per_lang,
