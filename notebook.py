@@ -93,6 +93,7 @@ USE_SYNTHETIC_CACHE = True
 FORCE_REBUILD_SYNTHETIC_CACHE = False
 USE_TOKENIZED_CACHE = True
 FORCE_REBUILD_TOKENIZED_CACHE = False
+SKIP_TOKENIZED_CACHE_VALIDATION = False
 GENERATION_WORKERS = mp.cpu_count() // 4
 
 # Optional notebook-state placeholders.
@@ -147,1084 +148,42 @@ if Path("hf_token").exists():
 # --- Tokenizer ---
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
-# --- Data Extraction ---
-# Pull ~ARTICLES_PER_LANG sentences per language from the Wikipedia streaming dataset.
+# --- Data Loading ---
+from wiki_sources import build_sentence_pools, chunk_list, draw_sentence, load_wiki_sentences, partition_sentence_pools, remaining_sentence_count
+from smol_sources import load_smol_sentences
+from neutral_sources import build_neutral_sources
+from synthetic_cache import (
+    _append_synthetic_rows,
+    _clear_synthetic_cache_dir,
+    _load_synthetic_examples_dataset,
+    _move_synthetic_shard,
+    _synthetic_example_to_row,
+    _synthetic_row_to_example,
+    _synthetic_rows_to_table,
+    _synthetic_worker_temp_path,
+    _write_json_atomic,
+)
+
+MAX_WIKI_WORKERS = min(mp.cpu_count() // 2, len(ALL_LANGS))
+lang_sentences = load_wiki_sentences(
+    ALL_LANGS,
+    lang_to_group=LANG_TO_GROUP,
+    sentences_dir=SENTENCES_DIR,
+    articles_per_lang=ARTICLES_PER_LANG,
+    max_workers=MAX_WIKI_WORKERS,
+)
 
-def parquet_path(lang: str) -> str:
-    return os.path.join(SENTENCES_DIR, f"{lang}.parquet")
-
-
-MIN_ARTICLE_CHARS_BY_GROUP: dict[str, int] = {
-    "English": 2_000,
-    "LatinCore": 2_000,
-    "LatinTier2": 2_000,
-    "Cyrillic": 2_000,
-    "EastAsian": 1_200,
-    "Indic": 2_000,
-    "ArabicScript": 2_000,
-    "OtherScripts": 2_000,
-}
-MIN_ARTICLE_CHARS_DEFAULT = 3_000
-WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
-SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
-WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
-BRACKET_NOTES = re.compile(r"\s*[\(\[【（][^\)\]】）]{0,60}[\)\]】）]\s*")
-WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
-WIKI_SPACES = re.compile(r"\s{2,}")
-WIKI_WRITE_BATCH_SIZE = 2048
-WIKI_PUNCT_REPEAT = re.compile(r"([,.;:!?…،。！？])\1+")
-WIKI_TRAILING_ORPHAN_LETTER = re.compile(r"[\s,.;:!?…،。！？]+([^\W\d_])$")
-WIKI_LEADING_ORPHAN_LETTER = re.compile(r"^[\"'“”‘’«»‹›\s,.;:!?…،。！？]+([^\W\d_])\s+")
-WIKI_BLOCKED_MARKERS = ("http",)
-WIKI_BLOCKED_CHARS = {"=", "<", ">", "|"}
-WIKI_OPENING_QUOTES = {"\"", "'", "“", "”", "‘", "’", "«", "»", "‹", "›"}
-LENGTH_PRIORITY_SCAN_LIMIT = int(MAX_WIKI_INDEX // 1.5)
-LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG = {
-    "vi": 50_000,
-    "sv": 50_000,
-    "lo": 20_000,
-    "sd": 20_000,
-    "am": 20_000,
-    "km": 20_000,
-    "ug": 20_000,
-    "my": 20_000,
-}
-LENGTH_PRIORITY_LANGS = set(LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG)
-LENGTH_PRIORITY_SENTENCE_CAP = 25_000
-
-# Languages natively supported by pysbd (da and el added from MajorEconomies).
-# Native support in pysbd as of 2026
-PYSBD_SUPPORTED = {
-    "en", "hi", "mr", "bg", "es", "ru", "ar", "am", "hy", "fa",
-    "ur", "pl", "zh", "nl", "da", "fr", "it", "el", "my", "ja", "de", "kk",
-}
-
-PYSBD_FALLBACKS = {
-    # Cyrillic
-    "uk": "ru", "be": "ru", "sr": "ru", "mk": "ru", "mn": "ru",
-    # Latin / Romance
-    "pt": "es", "ro": "fr", "la": "it", "sq": "it",
-    # Latin / Northern & Central
-    "sv": "da", "no": "da", "is": "da",
-    "fi": "en", "hu": "en", "cs": "pl",
-    # SE Asia Latin
-    "vi": "en", "id": "en", "ms": "en", "af": "nl", "tr": "en",
-    # RTL / Semitic
-    "he": "ar", "ps": "fa", "ug": "ar",
-    # Indic
-    "bn": "hi", "ta": "hi", "te": "hi", "gu": "hi", "kn": "hi",
-    "ml": "hi", "pa": "hi", "as": "hi", "or": "hi", "sd": "hi",
-    # Others
-    "ka": "en", "km": "zh", "ko": "zh", "lo": "zh", "th": "zh",
-}
-
-# Script-aware sentence length bounds (min_chars, max_chars).
-_SENT_BOUNDS: dict[str, tuple[int, int]] = {
-    "zh": (8,  180), "ja": (10, 180),
-    "ko": (15, 220), "th": (15, 250), "km": (15, 250), "lo": (15, 250), "my": (15, 250),
-    "ar": (25, 450), "fa": (25, 450), "he": (25, 400), "ur": (25, 450),
-    "hi": (30, 500), "bn": (30, 500), "ta": (30, 500), "te": (30, 500), "am": (25, 400),
-    "fi": (20, 450), "hu": (20, 450), "tr": (20, 450), "vi": (15, 300),
-    "de": (40, 600), "ru": (35, 650), "uk": (35, 650), "el": (35, 650),
-    "hy": (30, 500), "ka": (25, 450), "en": (24, 600),
-}
-_DEFAULT_BOUNDS = (30, 600)
-WIKI_NON_CONTENT = re.compile(r"[\W_]+", flags=re.UNICODE)
-WIKI_DIGITS = re.compile(r"\d")
-MAX_DIGIT_RATIO = 0.10
-WIKI_WORDS = re.compile(r"\b\w+\b", flags=re.UNICODE)
-LATIN_GROUPS = {"English", "LatinCore", "LatinTier2"}
-MIN_LATIN_WORDS = 4
-
-
-def _non_punct_char_count(s: str) -> int:
-    """Count visible characters after stripping punctuation and whitespace."""
-    return len(WIKI_NON_CONTENT.sub("", s))
-
-
-def _digit_count(s: str) -> int:
-    """Count digit characters in a sentence."""
-    return len(WIKI_DIGITS.findall(s))
-
-
-def _word_count(s: str) -> int:
-    """Count Unicode word-like tokens in a sentence."""
-    return len(WIKI_WORDS.findall(s))
-
-
-def _strip_bracket_notes(text: str) -> str:
-    """Remove short parenthetical/bracketed notes that are usually noise."""
-    return BRACKET_NOTES.sub(" ", text)
-
-
-def _collapse_spaces(text: str) -> str:
-    """Collapse repeated whitespace to a single space."""
-    return WIKI_SPACES.sub(" ", text)
-
-
-def _strip_leading_punct(sentence: str) -> str:
-    """Strip leading punctuation unless the sentence starts with a quote."""
-    sentence = sentence.lstrip()
-    if not sentence or sentence[0] in WIKI_OPENING_QUOTES:
-        return sentence
-
-    idx = 0
-    while idx < len(sentence):
-        ch = sentence[idx]
-        if ch.isspace():
-            idx += 1
-            continue
-        if unicodedata.category(ch).startswith("P"):
-            idx += 1
-            continue
-        break
-    return sentence[idx:].lstrip()
-
-
-def _collapse_repeated_punct(sentence: str) -> str:
-    """Collapse repeated punctuation runs like ',,' or '..' to a single char."""
-    return WIKI_PUNCT_REPEAT.sub(r"\1", sentence)
-
-
-def _strip_trailing_orphan_letter(sentence: str, lang: str) -> str:
-    """Drop a trailing orphan letter after punctuation for non-Latin scripts."""
-    if LANG_TO_GROUP.get(lang) in LATIN_GROUPS:
-        return sentence
-    sentence = WIKI_TRAILING_ORPHAN_LETTER.sub("", sentence)
-    return sentence.rstrip()
-
-
-def _strip_leading_orphan_letter(sentence: str, lang: str) -> str:
-    """Drop a leading orphan letter after quote/punctuation."""
-    return WIKI_LEADING_ORPHAN_LETTER.sub("", sentence).lstrip()
-
-
-def _has_blocked_artifact(sentence: str) -> bool:
-    """Return True for obvious markup / URL artifacts that should be dropped."""
-    lower = sentence.lower()
-    return any(marker in lower for marker in WIKI_BLOCKED_MARKERS) or any(
-        ch in sentence for ch in WIKI_BLOCKED_CHARS
-    )
-
-
-def _post_clean_wiki_sentence(sentence: str, lang: str) -> str:
-    """Normalize a wiki sentence after extraction and before synthetic sampling."""
-    sentence = clean_wiki_sentence(sentence, lang)
-    sentence = _strip_leading_punct(sentence)
-    sentence = _strip_leading_orphan_letter(sentence, lang)
-    sentence = _collapse_repeated_punct(sentence)
-    sentence = _strip_trailing_orphan_letter(sentence, lang)
-    sentence = _collapse_spaces(sentence)
-    return sentence.strip()
-
-
-def _is_post_clean_wiki_sentence_valid(sentence: str, lang: str) -> bool:
-    """Re-run sentence validity after cleanup and punctuation normalization."""
-    return bool(sentence) and _is_valid_sentence(sentence, lang)
-
-
-def post_clean_wiki_sentences(sentences: list[str], lang: str) -> list[str]:
-    """Apply the final wiki cleanup pass, including dedupe and artifact filtering."""
-    cleaned: list[str] = []
-    seen: set[str] = set()
-    for sentence in sentences:
-        if not isinstance(sentence, str):
-            continue
-        if _has_blocked_artifact(sentence):
-            continue
-        sentence = _post_clean_wiki_sentence(sentence, lang)
-        if not sentence or _has_blocked_artifact(sentence):
-            continue
-        if sentence in seen:
-            continue
-        if _is_post_clean_wiki_sentence_valid(sentence, lang):
-            seen.add(sentence)
-            cleaned.append(sentence)
-    return cleaned
-
-
-WIKI_CLEANUP_META = os.path.join(SENTENCES_DIR, "wiki_cleanup.meta.json")
-
-
-def _load_cleanup_meta() -> dict[str, dict]:
-    """Load the global wiki cleanup sidecar metadata."""
-    if not os.path.exists(WIKI_CLEANUP_META):
-        return {}
-    try:
-        with open(WIKI_CLEANUP_META, encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _write_cleanup_meta(meta: dict[str, dict]) -> None:
-    """Atomically write the global wiki cleanup sidecar metadata."""
-    _write_json_atomic(WIKI_CLEANUP_META, meta)
-
-
-def _cleanup_fingerprint(path: str) -> dict[str, int]:
-    """Return a lightweight fingerprint for a parquet file."""
-    stat = os.stat(path)
-    return {
-        "mtime_ns": int(stat.st_mtime_ns),
-        "size": int(stat.st_size),
-    }
-
-def finalize_wiki_sentence_cache(sentence_map: dict[str, list[str]]) -> dict[str, list[str]]:
-    """
-    Apply the final wiki cleanup pass after wiki + SMOL loading,
-    then rewrite the cached parquet files so later runs reuse the cleaned version.
-    """
-
-    cleaned_map: dict[str, list[str]] = {}
-    total_before = 0
-    total_after = 0
-    changed_langs = 0
-    cleanup_meta = _load_cleanup_meta()
-
-    langs = sorted(sentence_map.keys())
-
-    # Global progress bar
-    with tqdm(total=len(langs), desc="Languages", unit="lang") as pbar_langs:
-        for lang in langs:
-            sentences = sentence_map[lang]
-            path = parquet_path(lang)
-            fingerprint = _cleanup_fingerprint(path) if os.path.exists(path) else {}
-            meta_entry = cleanup_meta.get(lang, {})
-            already_cleaned = (
-                bool(meta_entry.get("cleaned"))
-                and meta_entry.get("path") == path
-                and meta_entry.get("input_fingerprint") == fingerprint
-            )
-
-            # Per-language progress bar (closes automatically)
-            with tqdm(
-                total=len(sentences),
-                desc=f"{lang} cleanup",
-                unit="sent",
-                leave=False
-            ) as pbar_sent:
-
-                if already_cleaned:
-                    cleaned = sentences
-                else:
-                    # Run cleaning
-                    cleaned = post_clean_wiki_sentences(sentences, lang)
-
-                # Advance per-language bar to completion
-                pbar_sent.update(len(sentences))
-
-            # Metrics
-            before = len(sentences)
-            after = len(cleaned)
-            total_before += before
-            total_after += after
-
-            if cleaned != sentences:
-                changed_langs += 1
-                _write_sentence_parquet(path, cleaned)
-
-            cleaned_map[lang] = cleaned
-
-            cleanup_meta[lang] = {
-                "path": path,
-                "cleaned": True,
-                "input_fingerprint": fingerprint,
-                "input_sentence_count": before,
-                "cleaned_sentence_count": after,
-                "updated": cleaned != sentences,
-            }
-
-            # Advance global bar
-            pbar_langs.update(1)
-
-    _write_cleanup_meta(cleanup_meta)
-    print(
-        f"\nWiki post-clean: {changed_langs} languages updated | "
-        f"{total_before:,} -> {total_after:,} sentences"
-    )
-
-    return cleaned_map
-
-
-def _is_valid_sentence(s: str, lang: str) -> bool:
-    mn, mx = _SENT_BOUNDS.get(lang, _DEFAULT_BOUNDS)
-    visible = _non_punct_char_count(s)
-    if not (mn < visible < mx):
-        return False
-    if LANG_TO_GROUP.get(lang) in LATIN_GROUPS and _word_count(s) < MIN_LATIN_WORDS:
-        return False
-    digits = _digit_count(s)
-    return digits <= visible * MAX_DIGIT_RATIO
-
-
-def _article_min_chars(lang: str) -> int:
-    """Return the minimum article length for a language."""
-    group = LANG_TO_GROUP.get(lang)
-    return MIN_ARTICLE_CHARS_BY_GROUP.get(group, MIN_ARTICLE_CHARS_DEFAULT)  # type: ignore
-
-
-def _split_wiki_paragraphs(text: str, lang: str) -> list[str] | None:
-    """Split an article into cleaned paragraphs, or None if too short."""
-    if len(text) < _article_min_chars(lang):
-        return None
-    text = WIKI_MARKUP.sub("", text)
-    paragraphs = [
-        p.strip()
-        for p in WIKI_PARAGRAPH_SPLIT.split(text)
-        if p.strip()
-    ]
-    return paragraphs or None
-
-
-def prepare_wiki_paragraphs(text: str, lang: str) -> list[str] | None:
-    """Return a language-aware paragraph slice, or None if the article is too short."""
-    paragraphs = _split_wiki_paragraphs(text, lang)
-    if paragraphs is None:
-        return None
-
-    fraction = 0.75 if lang == "en" else 0.50
-    cutoff = max(1, int(len(paragraphs) * fraction))
-    selected = paragraphs[:cutoff]
-    selected.sort(key=len, reverse=True)
-    return selected
-
-
-def _log_segmentation_failure(
-    lang: str,
-    article_idx: int,
-    paragraph_idx: int,
-    paragraph: str,
-    exc: Exception,
-    article_title: str = "",
-) -> None:
-    """Write a debug record for a paragraph that makes pysbd fail."""
-    snippet = paragraph[:800].replace("\n", " ")
-    log_path = os.path.join(WIKI_SEGMENTATION_DEBUG_DIR, f"{lang}.log")
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(
-            f"lang={lang} article_idx={article_idx} paragraph_idx={paragraph_idx}\n"
-            f"title={article_title!r}\n"
-            f"error={type(exc).__name__}: {exc}\n"
-            f"snippet={snippet}\n"
-            f"traceback={traceback.format_exc()}\n"
-            f"{'-' * 100}\n"
-        )
-    print(
-        f"  pysbd failed for lang={lang} article={article_idx} paragraph={paragraph_idx} "
-        f"-> {log_path}"
-    )
-
-
-def _sanitize_paragraph_for_pysbd(paragraph: str) -> str:
-    """Remove backslash-heavy markup that can trip pysbd's regex cleaner."""
-    if "\\" not in paragraph:
-        return paragraph
-    return paragraph.replace("\\", " ")
-
-
-def _extract_article_sentences(
-    article_text: str,
-    lang: str,
-    segmenter,
-    article_idx: int,
-    article_title: str = "",
-) -> list[str]:
-    """Extract cleaned sentences from one article text."""
-    paragraphs = prepare_wiki_paragraphs(article_text, lang)
-    if paragraphs is None:
-        return []
-
-    article_batch: list[str] = []
-    for paragraph_idx, paragraph in enumerate(paragraphs):
-        safe_paragraph = _sanitize_paragraph_for_pysbd(paragraph)
-        try:
-            sents = segmenter.segment(safe_paragraph) if segmenter else SENT_SPLIT.split(safe_paragraph) # type: ignore
-        except re.error as exc:
-            _log_segmentation_failure(
-                lang,
-                article_idx,
-                paragraph_idx,
-                paragraph,
-                exc,
-                article_title=article_title,
-            )
-            sents = SENT_SPLIT.split(safe_paragraph)
-        for s in sents:
-            s = clean_wiki_sentence(s, lang)
-            if _is_valid_sentence(s, lang):
-                article_batch.append(s)
-
-    return article_batch
-
-
-def _collect_priority_articles(dataset, lang: str, scan_limit: int) -> list[tuple[int, int, dict]]:
-    """Collect a bounded pool of long articles and sort them by length descending."""
-    min_chars = _article_min_chars(lang)
-    candidates: list[tuple[int, int, dict]] = []
-    for article_idx, article in enumerate(dataset.take(scan_limit)):
-        article_text = article.get("text", "")
-        if len(article_text) < min_chars:
-            continue
-        candidates.append((len(article_text), article_idx, article))
-
-    candidates.sort(key=lambda item: (-item[0], item[1]))
-    return candidates
-
-
-def _strip_ascii_for_lang(lang: str) -> bool:
-    """Return True when we should scrub ASCII words from a language's text."""
-    return LANG_TO_GROUP.get(lang) not in LATIN_GROUPS
-
-
-def clean_wiki_sentence(sentence: str, lang: str) -> str:
-    """Remove parenthetical text and extra whitespace from a sentence."""
-    if "\\" in sentence:
-        sentence = sentence.replace("\\", "")
-    sentence = _strip_bracket_notes(sentence)
-    if _strip_ascii_for_lang(lang):
-        sentence = WIKI_ASCII_WORDS.sub("", sentence)
-    sentence = _collapse_spaces(sentence)
-    return sentence.strip()
-
-
-def temp_parquet_path(lang: str) -> str:
-    """Return the temporary parquet path used while extracting one language."""
-    return os.path.join(WIKI_TEMP_DIR, f"{lang}.parquet")
-
-
-def temp_meta_path(lang: str) -> str:
-    """Return the JSON sidecar used to resume a partially written temp parquet."""
-    return os.path.join(WIKI_TEMP_DIR, f"{lang}.meta.json")
-
-
-def max_wiki_sentences_for_lang(lang: str) -> int:
-    """Return the sentence cap for a language, with per-language overrides."""
-    return MAX_WIKI_SENTENCES_BY_LANG.get(lang, MAX_WIKI_SENTENCES)
-
-
-def max_length_priority_sentences_for_lang(lang: str) -> int:
-    """Return a smaller cap for the length-priority extraction path."""
-    return min(
-        max_wiki_sentences_for_lang(lang),
-        LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG.get(lang, LENGTH_PRIORITY_SENTENCE_CAP),
-    )
-
-
-def _rolling_avg(values: deque[int]) -> float:
-    """Return the mean of the values in a rolling window."""
-    return round(sum(values) / len(values), 1) if values else 0.0
-
-
-def _wiki_checkpoint_payload(
-    lang: str,
-    next_article_idx: int,
-    accepted_articles: int,
-    miss_streak: int,
-    n_articles: int,
-    committed_sentences: list[str],
-    article_lengths_window: deque[int],
-    sentence_lengths_window: deque[int],
-) -> dict:
-    """Build the temp meta payload with checkpoint and tuning stats."""
-    return {
-        "lang": lang,
-        "next_article_idx": next_article_idx,
-        "accepted_articles": accepted_articles,
-        "miss_streak": miss_streak,
-        "final_target_articles": n_articles,
-        "committed_sentence_count": len(committed_sentences),
-        "rolling_avg_article_chars": _rolling_avg(article_lengths_window),
-        "rolling_avg_sentence_chars": _rolling_avg(sentence_lengths_window),
-        "rolling_article_lengths": list(article_lengths_window),
-        "seed": SEED,
-    }
-
-
-def _write_sentence_parquet(path: str, sentences: list[str]) -> None:
-    """Write a sentence list to parquet, preferring pyarrow for compact output."""
-    if not sentences:
-        pd.DataFrame({"sentence": []}).to_parquet(path, index=False)
-        return
-    if pa is None or pq is None:
-        pd.DataFrame({"sentence": sentences}).to_parquet(path, index=False)
-        return
-    table = pa.table({"sentence": pa.array(sentences, type=pa.string())})
-    pq.write_table(table, path)
-
-
-def _write_sentence_batch(writer, pa, batch: list[str]) -> None:
-    """Write a small batch of extracted sentences to an open parquet writer."""
-    if not batch:
-        return
-    table = pa.table({"sentence": pa.array(batch, type=pa.string())})
-    writer.write_table(table)
-
-
-def _write_json_atomic(path: str, payload: dict) -> None:
-    """Write JSON through a temporary file so checkpoint updates stay atomic-ish."""
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, path)
-
-
-def _synthetic_worker_temp_path(worker_idx: int) -> str:
-    """Return the temp parquet path for a synthetic-doc worker."""
-    return os.path.join(SYNTHETIC_TEMP_DIR, f"worker_{worker_idx}.parquet")
-
-
-def _synthetic_shard_path(worker_idx: int) -> str:
-    """Return the final parquet shard path for a synthetic-doc worker."""
-    return os.path.join(SYNTHETIC_CACHE, f"part-{worker_idx:05d}.parquet")
-
-
-def _synthetic_rows_to_table(rows: list[dict]):
-    """Convert a list of row dicts into an Arrow table."""
-    if pa is None:
-        raise RuntimeError("pyarrow is required for synthetic parquet shards")
-
-    schema = pa.schema(
-        [
-            ("kind", pa.string()),
-            ("original_text", pa.string()),
-            ("tokens", pa.string()),
-            ("ner_tags", pa.string()),
-        ]
-    )
-    return pa.Table.from_pylist(rows, schema=schema)
-
-
-def _append_synthetic_rows(writer, rows: list[dict]) -> None:
-    """Append a small batch of synthetic rows to an open Parquet writer."""
-    if not rows:
-        return
-    writer.write_table(_synthetic_rows_to_table(rows))
-
-
-def _synthetic_example_to_row(kind: str, example: dict) -> dict:
-    """Convert one generated example into a parquet row."""
-    return {
-        "kind": kind,
-        "original_text": example.get("original_text", ""),
-        "tokens": json.dumps(example["tokens"]),
-        "ner_tags": json.dumps(example["ner_tags"]),
-    }
-
-
-def _synthetic_row_to_example(row) -> dict:
-    """Convert a parquet row back into an in-memory example dict."""
-    if isinstance(row, dict):
-        original_text = row.get("original_text", "")
-        tokens = row.get("tokens", "[]")
-        ner_tags = row.get("ner_tags", "[]")
-    else:
-        original_text = getattr(row, "original_text", "")
-        tokens = getattr(row, "tokens", "[]")
-        ner_tags = getattr(row, "ner_tags", "[]")
-    example = {
-        "original_text": original_text,
-        "tokens": json.loads(tokens) if isinstance(tokens, str) else list(tokens),
-        "ner_tags": json.loads(ner_tags) if isinstance(ner_tags, str) else list(ner_tags),
-    }
-    if not example["original_text"]:
-        example["original_text"] = " ".join(example["tokens"])
-    return example
-
-
-def _move_synthetic_shard(temp_path: str, worker_idx: int) -> str:
-    """Move a worker temp shard into the final synthetic cache directory."""
-    final_path = _synthetic_shard_path(worker_idx)
-    os.replace(temp_path, final_path)
-    meta_temp = temp_path.replace(".parquet", ".meta.json")
-    meta_final = final_path.replace(".parquet", ".meta.json")
-    if os.path.exists(meta_temp):
-        os.replace(meta_temp, meta_final)
-    return final_path
-
-
-def _clear_synthetic_cache_dir() -> None:
-    """Remove old synthetic shard files before rebuilding the cache."""
-    if not os.path.exists(SYNTHETIC_CACHE):
-        os.makedirs(SYNTHETIC_CACHE, exist_ok=True)
-        return
-    for path in glob.glob(os.path.join(SYNTHETIC_CACHE, "*.parquet")):
-        os.remove(path)
-    for path in glob.glob(os.path.join(SYNTHETIC_CACHE, "*.meta.json")):
-        os.remove(path)
-
-
-def _synthetic_cache_shards() -> list[str]:
-    """Return all parquet shards currently stored for synthetic examples."""
-    return sorted(glob.glob(os.path.join(SYNTHETIC_CACHE, "*.parquet")))
-
-
-def _load_synthetic_examples_dataset():
-    """Load the synthetic cache as a Hugging Face dataset backed by parquet shards."""
-    shard_paths = _synthetic_cache_shards()
-    if not shard_paths:
-        return None
-    try:
-        return load_dataset("parquet", data_files=shard_paths, split="train")
-    except Exception:
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Per-process segmenter cache.
-# ProcessPoolExecutor forks a fresh Python interpreter per worker — pysbd
-# Segmenter objects cannot be pickled, so we initialise them lazily inside
-# each worker process and cache them in a module-level dict.
-# ---------------------------------------------------------------------------
-_PROC_SEGMENTERS: dict[str, object] = {}
-
-
-def _get_segmenter(lang: str):
-    """Return a cached pysbd Segmenter for this process, or None for regex fallback."""
-    if lang in _PROC_SEGMENTERS:
-        return _PROC_SEGMENTERS[lang]
-    try:
-        import pysbd as _pysbd
-        proxy = PYSBD_FALLBACKS.get(lang, lang if lang in PYSBD_SUPPORTED else None)
-        seg = _pysbd.Segmenter(language=proxy, clean=True) if proxy else None
-    except (ImportError, ValueError):
-        seg = None
-    _PROC_SEGMENTERS[lang] = seg
-    return seg
-
-
-def extract_sentences_from_wiki(lang: str, n_articles: int = ARTICLES_PER_LANG) -> str:
-    """Stream Wikipedia articles and write the cleaned sentences to a temp parquet."""
-    segmenter = _get_segmenter(lang)
-    fetch_target = n_articles * 20
-    final_path = parquet_path(lang)
-    temp_path = temp_parquet_path(lang)
-    meta_path = temp_meta_path(lang)
-
-    if lang in LENGTH_PRIORITY_LANGS:
-        scan_limit = min(fetch_target, LENGTH_PRIORITY_SCAN_LIMIT)
-        sentence_cap = max_length_priority_sentences_for_lang(lang)
-        print(
-            f"  Length-priority mode enabled for {lang} "
-            f"(scan_limit={scan_limit}, sentence_cap={sentence_cap}, "
-            f"min_chars={_article_min_chars(lang)})"
-        )
-        dataset = load_dataset(
-            "wikimedia/wikipedia",
-            f"20231101.{lang}",
-            split="train",
-            streaming=True,
-        )
-        dataset = dataset.shuffle(buffer_size=1000, seed=SEED)
-        priority_articles = _collect_priority_articles(dataset, lang, scan_limit)
-
-        committed_sentences: list[str] = []
-        sentence_lengths_window: deque[int] = deque(maxlen=WIKI_ROLLING_STATS_WINDOW)
-        article_lengths_window: deque[int] = deque(maxlen=WIKI_ROLLING_STATS_WINDOW)
-        accepted_articles = 0
-
-        with tqdm(
-            total=sentence_cap,
-            desc=f"{lang} sentences",
-            unit="sentence",
-            leave=False,
-            dynamic_ncols=True,
-        ) as bar:
-            for article_len, article_idx, article in priority_articles:
-                if len(committed_sentences) >= sentence_cap or accepted_articles >= n_articles:
-                    break
-
-                article_text = article.get("text", "")
-                article_title = article.get("title", "")
-                article_lengths_window.append(article_len)
-
-                article_batch = _extract_article_sentences(
-                    article_text,
-                    lang,
-                    segmenter,
-                    article_idx,
-                    article_title=article_title,
-                )
-                if not article_batch:
-                    continue
-
-                remaining_sentences = sentence_cap - len(committed_sentences)
-                if remaining_sentences <= 0:
-                    break
-                if len(article_batch) > remaining_sentences:
-                    article_batch = article_batch[:remaining_sentences]
-
-                committed_sentences.extend(article_batch)
-                sentence_lengths_window.extend(len(s) for s in article_batch)
-                accepted_articles += 1
-                bar.update(len(article_batch))
-                bar.set_postfix_str(
-                    f"acc {accepted_articles}/{n_articles} | "
-                    f"sent {len(committed_sentences)} | "
-                    f"avgA {_rolling_avg(article_lengths_window):.0f} | "
-                    f"avgS {_rolling_avg(sentence_lengths_window):.0f}"
-                )
-
-        committed_sentences = post_clean_wiki_sentences(committed_sentences, lang)
-        _write_sentence_parquet(final_path, committed_sentences)
-        return final_path
-
-    committed_sentences: list[str] = []
-    sentence_cap = max_wiki_sentences_for_lang(lang)
-    sentence_lengths_window: deque[int] = deque(
-        (len(s) for s in committed_sentences[-WIKI_ROLLING_STATS_WINDOW:]),
-        maxlen=WIKI_ROLLING_STATS_WINDOW,
-    )
-    article_lengths_window: deque[int] = deque(maxlen=WIKI_ROLLING_STATS_WINDOW)
-    next_article_idx = 0
-    accepted_articles = 0
-    miss_streak = 0
-    completed_cleanly = False
-    if os.path.exists(temp_path) and os.path.exists(meta_path):
-        try:
-            committed_sentences = pd.read_parquet(temp_path)["sentence"].tolist()
-            with open(meta_path, encoding="utf-8") as f:
-                meta = json.load(f)
-            if "accepted_articles" not in meta or "next_article_idx" not in meta:
-                raise ValueError("stale checkpoint metadata")
-            next_article_idx = int(meta["next_article_idx"])
-            accepted_articles = int(meta["accepted_articles"])
-            miss_streak = int(meta.get("miss_streak", 0))
-            sentence_lengths_window.extend(
-                len(s) for s in committed_sentences[-WIKI_ROLLING_STATS_WINDOW:]
-            )
-            article_lengths_window.extend(int(v) for v in meta.get("rolling_article_lengths", []))
-            print(
-                f"  Resuming {lang} from stream article {next_article_idx} "
-                f"with {accepted_articles} accepted articles"
-            )
-        except Exception:
-            committed_sentences = []
-            next_article_idx = 0
-            accepted_articles = 0
-            miss_streak = 0
-            for path in (temp_path, meta_path):
-                if os.path.exists(path):
-                    os.remove(path)
-    elif os.path.exists(temp_path) or os.path.exists(meta_path):
-        for path in (temp_path, meta_path):
-            if os.path.exists(path):
-                os.remove(path)
-
-    dataset = load_dataset(
-        "wikimedia/wikipedia",
-        f"20231101.{lang}",
-        split="train",
-        streaming=True,
-    )
-    dataset = dataset.shuffle(buffer_size=1000, seed=SEED)
-
-    def _update_progress(bar, scanned_articles: int) -> None:
-        """Show both scan progress and productive yield in the tqdm footer."""
-        bar.set_postfix_str(
-            f"acc {accepted_articles}/{n_articles} | "
-            f"sent {len(committed_sentences)} | "
-            f"yield {accepted_articles / max(1, scanned_articles):.1%} | "
-            f"avgA {_rolling_avg(article_lengths_window):.0f} | "
-            f"avgS {_rolling_avg(sentence_lengths_window):.0f} | "
-            f"miss {miss_streak}"
-        )
-
-    try:
-        with tqdm(
-            total=sentence_cap,
-            initial=len(committed_sentences),
-            desc=f"{lang} sentences",
-            unit="sentence",
-            leave=False,
-            dynamic_ncols=True,
-        ) as bar:
-            for article_idx, article in enumerate(dataset.take(fetch_target)):
-                if article_idx < next_article_idx:
-                    _update_progress(bar, article_idx + 1)
-                    continue
-                if article_idx >= MAX_WIKI_INDEX:
-                    print(
-                        f"  Stopping {lang} at article index {article_idx} "
-                        f"(MAX_WIKI_INDEX={MAX_WIKI_INDEX})"
-                    )
-                    break
-
-                article_text = article.get("text", "")
-                article_title = article.get("title", "")
-                article_lengths_window.append(len(article_text))
-
-                article_batch = _extract_article_sentences(
-                    article_text,
-                    lang,
-                    segmenter,
-                    article_idx,
-                    article_title=article_title,
-                )
-                if not article_batch:
-                    next_article_idx = article_idx + 1
-                    miss_streak += 1
-                    _write_sentence_parquet(temp_path, committed_sentences)
-                    _write_json_atomic(
-                        meta_path,
-                        _wiki_checkpoint_payload(
-                            lang,
-                            next_article_idx,
-                            accepted_articles,
-                            miss_streak,
-                            n_articles,
-                            committed_sentences,
-                            article_lengths_window,
-                            sentence_lengths_window,
-                        ),
-                    )
-                    _update_progress(bar, article_idx + 1)
-                    continue
-
-                remaining_sentences = sentence_cap - len(committed_sentences)
-                if remaining_sentences <= 0:
-                    print(
-                        f"  Stopping {lang} after reaching sentence cap="
-                        f"{sentence_cap}"
-                    )
-                    break
-
-                if len(article_batch) > remaining_sentences:
-                    article_batch = article_batch[:remaining_sentences]
-
-                committed_sentences.extend(article_batch)
-                sentence_lengths_window.extend(len(s) for s in article_batch)
-                accepted_articles += 1
-                miss_streak = 0
-                _write_sentence_parquet(temp_path, committed_sentences)
-                _write_json_atomic(
-                    meta_path,
-                    _wiki_checkpoint_payload(
-                        lang,
-                        article_idx + 1,
-                        accepted_articles,
-                        miss_streak,
-                        n_articles,
-                        committed_sentences,
-                        article_lengths_window,
-                        sentence_lengths_window,
-                    ),
-                )
-                next_article_idx = article_idx + 1
-                bar.update(len(article_batch))
-                _update_progress(bar, article_idx + 1)
-                if len(committed_sentences) >= sentence_cap:
-                    print(
-                        f"  Stopping {lang} after reaching sentence cap="
-                        f"{sentence_cap}"
-                    )
-                    break
-                if accepted_articles >= n_articles:
-                    break
-
-        committed_sentences = post_clean_wiki_sentences(committed_sentences, lang)
-        _write_sentence_parquet(final_path, committed_sentences)
-        completed_cleanly = True
-    finally:
-        if completed_cleanly:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            if os.path.exists(meta_path):
-                os.remove(meta_path)
-
-    return final_path
-
-
-def load_or_extract(lang: str) -> tuple[str, str]:
-    """Return the parquet path for a language, extracting it if needed."""
-    path = parquet_path(lang)
-    if os.path.exists(path):
-        cached = pd.read_parquet(path)["sentence"].tolist()
-        cleaned = post_clean_wiki_sentences(cached, lang)
-        if cleaned != cached:
-            _write_sentence_parquet(path, cleaned)
-        return lang, path
-    extracted_path = extract_sentences_from_wiki(lang)
-    return lang, extracted_path
-
-
-# ---------------------------------------------------------------------------
-# SMOL augmentation
-# ---------------------------------------------------------------------------
-# The loader lives in this notebook so the full data pipeline is self-contained.
-# Most SMOL config tags already match our pipeline ISO codes, so we only list
-# the aliases that need collapsing.
-SMOL_CODE_MAP: dict[str, str] = {
-    "pt-PT": "pt",
-    "yue": "zh",
-    "ar-MA": "ar",
-    "arz": "ar",
-    "aeb": "ar",
-    "ayl": "ar",
-    "apd": "ar",
-}
-
-MAX_SENTENCES_PER_LANG = 5_000
-UNCAPPED_LANGS: set[str] = set()
-
-SMOL_CACHE_DIR = SENTENCES_DIR
-SMOL_CACHE_FILE = os.path.join(SMOL_CACHE_DIR, "smol_sentences.json")
-os.makedirs(SMOL_CACHE_DIR, exist_ok=True)
-
-def _smol_parse_config(config: str) -> tuple[str, str] | None:
-    try:
-        _, pair = config.split("__", 1)
-        sl, tl = pair.split("_", 1)
-        return sl, tl
-    except ValueError:
-        return None
-
-
-def _smol_add_sentences(bucket: list[str], raw_sentences: object, lang: str) -> None:
-    """Normalize and append a sequence of SMOL sentences into a bucket."""
-    if isinstance(raw_sentences, str):
-        raw_sentences = [raw_sentences]
-    if not isinstance(raw_sentences, list):
-        return
-
-    for sent in raw_sentences:
-        if not isinstance(sent, str):
-            continue
-        sent = _strip_bracket_notes(sent)
-        sent = _collapse_spaces(sent)
-        if _is_valid_sentence(sent, lang):
-            bucket.append(sent)
-
-
-def _load_smoldoc(accumulator: dict[str, list[str]]) -> tuple[set[str], set[str]]:
-    configs = [c for c in get_dataset_config_names("google/smol") if c.startswith("smoldoc__")]
-    source_langs_seen: set[str] = set()
-    target_langs_seen: set[str] = set()
-    for config in tqdm(configs, desc="SmolDoc subsets"):
-        parsed = _smol_parse_config(config)
-        if parsed is None:
-            continue
-        sl, tl = parsed
-        mapped = SMOL_CODE_MAP.get(tl, tl)
-        if mapped not in LANG_TO_GROUP:
-            continue
-
-        ds = load_dataset("google/smol", config, split="train", trust_remote_code=True)
-        target_bucket = accumulator.setdefault(mapped, [])
-        target_langs_seen.add(mapped)
-        if sl in LANG_TO_GROUP and sl not in source_langs_seen:
-            source_bucket = accumulator.setdefault(sl, [])
-            for row in ds:
-                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl) # type: ignore
-            source_langs_seen.add(sl)
-
-        for row in ds:
-            _smol_add_sentences(target_bucket, row.get("trgs"), mapped)  # type: ignore
-
-    return source_langs_seen, target_langs_seen
-
-
-def _load_smolsent(accumulator: dict[str, list[str]]) -> tuple[set[str], set[str]]:
-    configs = [c for c in get_dataset_config_names("google/smol") if c.startswith("smolsent__")]
-    source_langs_seen: set[str] = set()
-    target_langs_seen: set[str] = set()
-    for config in tqdm(configs, desc="SmolSent subsets"):
-        parsed = _smol_parse_config(config)
-        if parsed is None:
-            continue
-        sl, tl = parsed
-        mapped = SMOL_CODE_MAP.get(tl, tl)
-        if mapped not in LANG_TO_GROUP:
-            continue
-
-        ds = load_dataset("google/smol", config, split="train", trust_remote_code=True)
-        target_bucket = accumulator.setdefault(mapped, [])
-        target_langs_seen.add(mapped)
-        if sl in LANG_TO_GROUP and sl not in source_langs_seen:
-            source_bucket = accumulator.setdefault(sl, [])
-            for row in ds:
-                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl) # type: ignore
-            source_langs_seen.add(sl)
-
-        seg = _get_segmenter(mapped)
-
-        for row in ds:
-            trg = row.get("trg") or "" # type: ignore
-            if not isinstance(trg, str):
-                continue
-            sents = seg.segment(trg) if seg else [trg]  # type: ignore
-            _smol_add_sentences(target_bucket, sents, mapped)
-
-    return source_langs_seen, target_langs_seen
-
-
-def load_smol_sentences(force_rebuild: bool = False, seed: int = 42) -> dict[str, list[str]]:
-    """Load, dedupe, shuffle, and cache google/smol sentences by ISO code."""
-    if not force_rebuild and os.path.exists(SMOL_CACHE_FILE):
-        print(f"Loading SMOL cache from {SMOL_CACHE_FILE}")
-        with open(SMOL_CACHE_FILE, encoding="utf-8") as f:
-            cached: dict[str, list[str]] = json.load(f)
-        print(f"  {len(cached)} languages | {sum(len(v) for v in cached.values()):,} sentences total")
-        return cached
-
-    accumulator: dict[str, list[str]] = {}
-
-    print("Loading SmolDoc ...")
-    smoldoc_src_langs, smoldoc_target_langs = _load_smoldoc(accumulator)
-
-    print("Loading SmolSent ...")
-    smolsent_src_langs, smolsent_target_langs = _load_smolsent(accumulator)
-
-    print(f"SMOL src languages loaded once: {len(smoldoc_src_langs | smolsent_src_langs)}")
-    print(f"SMOL target languages loaded: {len(smoldoc_target_langs | smolsent_target_langs)}")
-
-    rng = random.Random(seed)
-    result: dict[str, list[str]] = {}
-    for lang, sents in sorted(accumulator.items()):
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for sent in sents:
-            if sent not in seen:
-                seen.add(sent)
-                deduped.append(sent)
-        rng.shuffle(deduped)
-        cap = None if lang in UNCAPPED_LANGS else MAX_SENTENCES_PER_LANG
-        result[lang] = deduped if cap is None else deduped[:cap]
-
-    with open(SMOL_CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-
-    total = sum(len(v) for v in result.values())
-    print(f"\nSMOL sentences cached -> {SMOL_CACHE_FILE}")
-    print(f"  {len(result)} languages | {total:,} sentences total")
-    for lang in sorted(result):
-        print(f"  {lang:<6}  {len(result[lang]):>5} sentences")
-
-    return result
-
-# ProcessPoolExecutor saturates CPU cores for segmentation work.
-# Workers == min(cpu_count, n_langs) — no point exceeding either.
-MAX_WORKERS = min(mp.cpu_count() // 2, len(ALL_LANGS))
-
-print(f"Extracting sentences \u2192 cached under \'{SENTENCES_DIR}/'")
-print(f"(Workers: {MAX_WORKERS} processes | cached languages skip extraction)\n")
-
-lang_sentences = {}
-with ProcessPoolExecutor(max_workers=MAX_WORKERS) as pool:
-    futures = {pool.submit(load_or_extract, lang): lang for lang in ALL_LANGS}
-    for future in tqdm(as_completed(futures), total=len(ALL_LANGS), desc="Languages"):
-        lang, cache_path = future.result()
-        sentences = pd.read_parquet(cache_path)["sentence"].tolist()
-        lang_sentences[lang] = sentences
-        tqdm.write(f"  {lang}: {len(sentences)} sentences  \u2192  {cache_path}")
-
-# Optional SMOL augmentation from google/smol (SmolDoc + SmolSent).
 USE_SMOL_AUGMENTATION = True
 SMOL_FORCE_REBUILD = False
+smol_sentences = None
 if USE_SMOL_AUGMENTATION:
     try:
-        smol_sentences = load_smol_sentences(force_rebuild=SMOL_FORCE_REBUILD)
+        smol_sentences = load_smol_sentences(
+            sentences_dir=SENTENCES_DIR,
+            lang_to_group=LANG_TO_GROUP,
+            force_rebuild=SMOL_FORCE_REBUILD,
+            seed=SEED,
+        )
         total_smol_sentences = sum(len(v) for v in smol_sentences.values())
         print(
             f"\nSMOL kept separate for pool split: "
@@ -1233,216 +192,24 @@ if USE_SMOL_AUGMENTATION:
     except Exception as exc:
         print(f"\nSMOL augmentation skipped: {exc}")
 
-lang_sentences = finalize_wiki_sentence_cache(lang_sentences)
-
-# %%
-# --- Neutral (O-label) Corpus ---
-# Four complementary O-label sources, all inserted as label-0 spans:
-#   1. im2latex-100k     — real LaTeX formulas from arXiv papers
-#   2. math_gen          — procedurally generated math expressions (14 domains)
-#   3. symbol_noise      — random streams of unicode symbols, emoji, punctuation
-#   4. gibberish          — ROT13 English / Faker text that should still be O
-#
-# Together they teach the model that equations, markup, noise, and gibberish
-# do not belong to any language.
-
-# Keep the cache helpers local to this cell so the noise pools can be rebuilt
-# without needing to execute the wiki extraction cell first.
-def _write_text_parquet(path: str, column_name: str, values: list[str]) -> None:
-    """Write a text list to parquet under a named column."""
-    if not values:
-        pd.DataFrame({column_name: []}).to_parquet(path, index=False)
-        return
-    if pa is None or pq is None:
-        pd.DataFrame({column_name: values}).to_parquet(path, index=False)
-        return
-    table = pa.table({column_name: pa.array(values, type=pa.string())})
-    pq.write_table(table, path)
-
-
-def _load_or_build_text_pool(
-    path: str,
-    column_name: str,
-    builder,
-    label: str,
-) -> list[str]:
-    """Load a cached text pool from parquet or build and cache it."""
-    if os.path.exists(path):
-        return pd.read_parquet(path)[column_name].tolist()
-    values = builder()
-    _write_text_parquet(path, column_name, values)
-    print(f"  Cached {len(values)} {label} → {path}")
-    return values
-
-# ── 1. im2latex ────────────────────────────────────────────────────────────────
-LATEX_CACHE     = f"{SENTENCES_DIR}/latex_formulas.parquet"
-LATEX_MIN_CHARS = 8
-LATEX_MAX_CHARS = 300
-
-_LATEX_WRAP = re.compile(
-    r"^\s*\$+|\$+\s*$|^\\\[|\\\]$|^\\begin\{.*?\}|\\end\{.*?\}$"
+neutral_sources = build_neutral_sources(
+    sentences_dir=SENTENCES_DIR,
+    english_seed_sentences=lang_sentences.get("en", []),
+    seed=SEED,
 )
-
-def _clean_formula(f: str) -> str:
-    return _LATEX_WRAP.sub("", f).strip()
-
-def load_latex_formulas() -> list[str]:
-    if os.path.exists(LATEX_CACHE):
-        return pd.read_parquet(LATEX_CACHE)["formula"].tolist()
-    print("Downloading im2latex-100k ...")
-    ds = load_dataset("yuntian-deng/im2latex-100k", split="train")
-    formulas = []
-    for row in ds:
-        _f = row["formula"] if isinstance(row, dict) else ""
-        assert isinstance(_f, str)
-        f = _clean_formula(_f)
-        if LATEX_MIN_CHARS <= len(f) <= LATEX_MAX_CHARS:
-            formulas.append(f)
-    pd.DataFrame({"formula": formulas}).to_parquet(LATEX_CACHE, index=False)
-    print(f"  Cached {len(formulas)} usable formulas → {LATEX_CACHE}")
-    return formulas
-
-latex_formulas: list[str] = load_latex_formulas()
-print(f"im2latex:    {len(latex_formulas):>6} formulas")
-
-# ── 2. math_gen ────────────────────────────────────────────────────────────────
-# Import the procedural generator living alongside this file.
-import importlib.util as _ilu, pathlib as _pl
-_mg_path = _pl.Path(__file__).parent / "math_gen.py"
-_spec    = _ilu.spec_from_file_location("math_gen", _mg_path)
-_mg      = _ilu.module_from_spec(_spec) # type: ignore
-_spec.loader.exec_module(_mg) # type: ignore
-generate_synthetic_math = _mg.generate_synthetic_math
-
-SYNTH_MATH_N = 50_000   # pre-generate a pool; cheap and avoids per-doc overhead
-SYNTH_MATH_CACHE = f"{SENTENCES_DIR}/synth_math_pool.parquet"
-synth_math_pool: list[str] = _load_or_build_text_pool(
-    SYNTH_MATH_CACHE,
-    "expression",
-    lambda: [generate_synthetic_math() for _ in range(SYNTH_MATH_N)],
-    "synthetic math expressions",
-)
-print(f"math_gen:    {len(synth_math_pool):>6} expressions")
-
-# ── 3. code_noise ──────────────────────────────────────────────────────────────
-# HTML tags, code fragments, logs, and configs with content removed.
-_code_path = _pl.Path(__file__).parent / "code_noise.py"
-_code_spec = _ilu.spec_from_file_location("code_noise", _code_path)
-_code = _ilu.module_from_spec(_code_spec) # type: ignore
-_code_spec.loader.exec_module(_code) # type: ignore
-generate_html_artifact = _code.generate_html_artifact
-generate_css_artifact = _code.generate_css_artifact
-generate_code_artifact = _code.generate_code_artifact
-
-HTML_NOISE_N = 30_000
-HTML_NOISE_CACHE = f"{SENTENCES_DIR}/html_noise_pool.parquet"
-html_noise_pool: list[str] = _load_or_build_text_pool(
-    HTML_NOISE_CACHE,
-    "snippet",
-    lambda: [generate_html_artifact() for _ in range(HTML_NOISE_N)],
-    "HTML noise snippets",
-)
-print(f"html noise:  {len(html_noise_pool):>6} snippets")
-
-CSS_NOISE_N = 30_000
-CSS_NOISE_CACHE = f"{SENTENCES_DIR}/css_noise_pool.parquet"
-css_noise_pool: list[str] = _load_or_build_text_pool(
-    CSS_NOISE_CACHE,
-    "snippet",
-    lambda: [generate_css_artifact() for _ in range(CSS_NOISE_N)],
-    "CSS noise snippets",
-)
-print(f"css noise:   {len(css_noise_pool):>6} snippets")
-
-CODE_NOISE_N = 30_000
-CODE_NOISE_CACHE = f"{SENTENCES_DIR}/code_noise_pool.parquet"
-code_noise_pool: list[str] = _load_or_build_text_pool(
-    CODE_NOISE_CACHE,
-    "snippet",
-    lambda: [generate_code_artifact() for _ in range(CODE_NOISE_N)],
-    "code noise snippets",
-)
-print(f"code noise:  {len(code_noise_pool):>6} snippets")
-
-# ── 4. Symbol / emoji noise ────────────────────────────────────────────────────
-# Random streams of unicode block symbols, emoji, punctuation, and arrows.
-# Mimics garbled text, copy-paste artifacts, and non-linguistic tokens.
-
-fake = Faker()
-
-def generate_symbol_noise(min_len: int = 3, max_len: int = 20) -> str:
-    """Return a random string of symbols/emoji with optional spacing using Faker."""
-    n = random.randint(min_len, max_len)
-
-    # We mix emojis and standard punctuation
-    parts = []
-    for _ in range(n):
-        # 50/50 chance to pick an emoji or a symbol
-        if random.random() < 0.5:
-            parts.append(fake.emoji())
-        else:
-            parts.append(random.choice(string.punctuation))
-    spaced = []
-    for i, ch in enumerate(parts):
-        spaced.append(ch)
-        if i < len(parts) - 1 and random.random() < 0.3:
-            spaced.append(" ")
-
-    return "".join(spaced)
-
-
-# Pre-generate a noise pool as well
-NOISE_N = 30_000
-NOISE_CACHE = f"{SENTENCES_DIR}/symbol_noise_pool.parquet"
-noise_pool: list[str] = _load_or_build_text_pool(
-    NOISE_CACHE,
-    "snippet",
-    lambda: [generate_symbol_noise() for _ in range(NOISE_N)],
-    "symbol noise strings",
-)
-print(f"symbol noise:{len(noise_pool):>6} strings")
-
-english_seed_sentences = (lang_sentences or {}).get("en", [])
-
-
-def generate_gibberish_text() -> str:
-    """Return rot13-transformed English or Faker-based filler text."""
-    if english_seed_sentences and random.random() < 0.7:
-        base = random.choice(english_seed_sentences)
-    else:
-        base = fake.text(max_nb_chars=random.randint(80, 240))
-    gib = codecs.decode(base, "rot_13")
-    return _collapse_spaces(gib).strip()
-
-
-GIBBERISH_N = 30_000
-GIBBERISH_CACHE = f"{SENTENCES_DIR}/gibberish_pool.parquet"
-gibberish_pool: list[str] = _load_or_build_text_pool(
-    GIBBERISH_CACHE,
-    "snippet",
-    lambda: [generate_gibberish_text() for _ in range(GIBBERISH_N)],
-    "gibberish strings",
-)
-print(f"gibberish:  {len(gibberish_pool):>6} strings")
-
-# ── Combined O-label pool ──────────────────────────────────────────────────────
-# Weighted so real LaTeX and synthetic math dominate, while HTML, CSS, code, and
-# gibberish remain visible but secondary.
-_O_SOURCES  = [latex_formulas, synth_math_pool, html_noise_pool, css_noise_pool, code_noise_pool, noise_pool, gibberish_pool]
-_O_WEIGHTS  = [0.28,           0.22,            0.14,           0.08,          0.10,         0.09,       0.09]
-
-def sample_o_span() -> str:
-    """Draw one O-label span from the combined pool."""
-    pool = random.choices(_O_SOURCES, weights=_O_WEIGHTS, k=1)[0]
-    return random.choice(pool)
-
-
-def sample_code_span() -> str:
-    """Draw one code artifact span."""
-    return random.choice(code_noise_pool)
+latex_formulas = neutral_sources.latex_formulas
+synth_math_pool = neutral_sources.synth_math_pool
+html_noise_pool = neutral_sources.html_noise_pool
+css_noise_pool = neutral_sources.css_noise_pool
+code_noise_pool = neutral_sources.code_noise_pool
+noise_pool = neutral_sources.noise_pool
+gibberish_pool = neutral_sources.gibberish_pool
+sample_o_span = neutral_sources.sample_o_span
+sample_code_span = neutral_sources.sample_code_span
 
 # %%
 # --- Synthetic Document Mixer ---
+
 
 def bio_label_tokens(tokens: list[str], lang: str, is_first: bool) -> list[int]:
     """Assign BIO labels to a token sequence for a given language."""
@@ -1477,97 +244,13 @@ def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 
     return tokens, labels
 
 
-def build_sentence_pools(
-    sentence_map: dict[str, list[str]],
-    reserve_fraction: float = RESERVE_FRACTION,
-    min_reserved: int = MIN_RESERVED_SENTENCES,
-    max_reserved: int = MAX_RESERVED_SENTENCES,
-) -> tuple[dict[str, deque[str]], dict[str, deque[str]]]:
-    """
-    Split each language into a reserved coverage pool and a main sampling pool.
-
-    Both pools are shuffled first, then consumed without replacement. Once a pool
-    is empty, callers can fall back to the original sentence list.
-    """
-    reserved: dict[str, deque[str]] = {}
-    main: dict[str, deque[str]] = {}
-
-    for lang, sentences in sentence_map.items():
-        if not sentences:
-            continue
-        shuffled = sentences[:]
-        random.shuffle(shuffled)
-        reserve_target = int(round(len(shuffled) * reserve_fraction))
-        reserve_n = min(
-            len(shuffled),
-            max(
-                min_reserved,
-                min(reserve_target, max_reserved),
-            ),
-        )
-        reserved[lang] = deque(shuffled[:reserve_n])
-        main[lang] = deque(shuffled[reserve_n:])
-
-    return reserved, main
-
-
-def draw_sentence(
-    lang: str,
-    primary_pool: dict[str, deque[str]],
-    fallback_pool: dict[str, deque[str]] | None = None,
-) -> str | None:
-    """
-    Draw a sentence without replacement from the preferred pool, then fallback
-    pool.
-    """
-    if primary_pool.get(lang):
-        return primary_pool[lang].popleft()
-    if fallback_pool and fallback_pool.get(lang):
-        return fallback_pool[lang].popleft()
-    return None
-
-
-def remaining_sentence_count(
-    lang: str,
-    primary_pool: dict[str, deque[str]],
-    fallback_pool: dict[str, deque[str]] | None = None,
-) -> int:
-    """Return how many unused sentences remain for a language in the active pools."""
-    total = len(primary_pool.get(lang, ()))
-    if fallback_pool is not None:
-        total += len(fallback_pool.get(lang, ()))
-    return total
-
-
-def chunk_list(items: list, n_chunks: int) -> list[list]:
-    """Split a list into roughly equal contiguous chunks."""
-    if n_chunks <= 1:
-        return [items]
-    chunk_size = (len(items) + n_chunks - 1) // n_chunks
-    return [items[i : i + chunk_size] for i in range(0, len(items), chunk_size)]
-
-
-def partition_sentence_pools(
-    pools: dict[str, deque[str]],
-    n_workers: int,
-) -> list[dict[str, deque[str]]]:
-    """Round-robin partition each language pool across workers."""
-    worker_pools: list[dict[str, deque[str]]] = [dict() for _ in range(n_workers)]
-    for lang, dq in pools.items():
-        items = list(dq)
-        for worker_idx in range(n_workers):
-            shard = items[worker_idx::n_workers]
-            if shard:
-                worker_pools[worker_idx][lang] = deque(shard)
-    return worker_pools
-
-
 def generate_synthetic_examples_chunk(
     worker_idx: int,
     coverage_langs: list[str],
     random_count: int,
     primary_pool: dict[str, deque[str]],
     fallback_pool: dict[str, deque[str]] | None,
+    synthetic_temp_dir: str,
 ) -> str:
     """
     Generate a chunk of synthetic examples in one worker.
@@ -1580,7 +263,7 @@ def generate_synthetic_examples_chunk(
     np.random.seed(seed % (2**32 - 1))
 
     worker_desc = f"Worker {worker_idx}"
-    temp_path = _synthetic_worker_temp_path(worker_idx)
+    temp_path = _synthetic_worker_temp_path(synthetic_temp_dir, worker_idx)
     batch_rows: list[dict] = []
     coverage_count = 0
     random_written = 0
@@ -1702,7 +385,7 @@ def load_synthetic_examples_cache():
     if any(not os.path.exists(path) for path in shard_paths):
         return None
 
-    return _load_synthetic_examples_dataset()
+    return _load_synthetic_examples_dataset(SYNTHETIC_CACHE)
 
 
 def create_synthetic_doc(
@@ -1885,7 +568,12 @@ if synthetic_dataset is not None:
 else:
     # Guarantee representation by reserving a fraction of each language's sentences,
     # then building several guaranteed documents from that reserved pool.
-    reserved_sentence_pools, main_sentence_pools = build_sentence_pools(lang_sentences)
+    reserved_sentence_pools, main_sentence_pools = build_sentence_pools(
+        lang_sentences,
+        reserve_fraction=RESERVE_FRACTION,
+        min_reserved=MIN_RESERVED_SENTENCES,
+        max_reserved=MAX_RESERVED_SENTENCES,
+    )
     reserved_total = sum(len(pool) for pool in reserved_sentence_pools.values())
     main_total = sum(len(pool) for pool in main_sentence_pools.values())
 
@@ -1933,7 +621,7 @@ else:
     lang_sentences = None
     smol_sentences = None
 
-    _clear_synthetic_cache_dir()
+    _clear_synthetic_cache_dir(SYNTHETIC_CACHE)
     random_job_count = max(0, EXAMPLES_TARGET - len(coverage_plan))
     generation_workers = min(GENERATION_WORKERS, max(1, EXAMPLES_TARGET))
     shard_paths: list[str] = []
@@ -1951,8 +639,9 @@ else:
             random_job_count,
             reserved_sentence_pools,
             main_sentence_pools,
+            SYNTHETIC_TEMP_DIR,
         )
-        final_path = _move_synthetic_shard(temp_path, 0)
+        final_path = _move_synthetic_shard(temp_path, 0, synthetic_cache_dir=SYNTHETIC_CACHE)
         shard_paths.append(final_path)
         with open(final_path.replace(".parquet", ".meta.json"), encoding="utf-8") as f:
             meta = json.load(f)
@@ -1972,13 +661,14 @@ else:
                     random_counts[worker_idx],
                     reserved_worker_pools[worker_idx],
                     main_worker_pools[worker_idx],
+                    SYNTHETIC_TEMP_DIR,
                 )
                 future_to_worker[future] = worker_idx
 
             for future in tqdm(as_completed(future_to_worker), total=len(future_to_worker), desc="Synthetic docs"):
                 temp_path = future.result()
                 worker_idx = future_to_worker[future]
-                final_path = _move_synthetic_shard(temp_path, worker_idx)
+                final_path = _move_synthetic_shard(temp_path, worker_idx, synthetic_cache_dir=SYNTHETIC_CACHE)
                 shard_paths.append(final_path)
                 with open(final_path.replace(".parquet", ".meta.json"), encoding="utf-8") as f:
                     meta = json.load(f)
@@ -1987,7 +677,7 @@ else:
     if USE_SYNTHETIC_CACHE:
         save_synthetic_examples_cache(shard_paths, synthetic_total_examples)
 
-    synthetic_dataset = _load_synthetic_examples_dataset()
+    synthetic_dataset = _load_synthetic_examples_dataset(SYNTHETIC_CACHE)
 
 if synthetic_dataset is None:
     raise RuntimeError("Synthetic dataset cache could not be loaded.")
@@ -2062,6 +752,8 @@ def release_wikipedia_generation_memory() -> None:
         "reserved_sentence_pools",
         "main_sentence_pools",
         "lang_sentences",
+        "smol_sentences",
+        "neutral_sources",
         "coverage_plan",
         "reserved_worker_pools",
         "main_worker_pools",
@@ -2072,7 +764,6 @@ def release_wikipedia_generation_memory() -> None:
         "code_noise_pool",
         "noise_pool",
         "gibberish_pool",
-        "_O_SOURCES",
     ]:
         globals()[name] = None
 
@@ -2151,6 +842,23 @@ def load_tokenized_dataset_cache():
     """Load tokenized train/eval split if the metadata matches the current config."""
     if not (os.path.exists(CACHE_DIR) and os.path.exists(CACHE_META)):
         return None
+
+    if SKIP_TOKENIZED_CACHE_VALIDATION:
+        try:
+            return load_from_disk(CACHE_DIR)
+        except Exception:
+            split_names = ["train", "eval"]
+            loaded_splits = {}
+            for split_name in split_names:
+                split_dir = os.path.join(CACHE_DIR, split_name)
+                arrow_files = sorted(glob.glob(os.path.join(split_dir, "*.arrow")))
+                if not arrow_files:
+                    return None
+                split_parts = [Dataset.from_file(path) for path in arrow_files]
+                loaded_splits[split_name] = (
+                    split_parts[0] if len(split_parts) == 1 else concatenate_datasets(split_parts)
+                )
+            return DatasetDict(loaded_splits)
 
     with open(CACHE_META) as f:
         meta = json.load(f)
