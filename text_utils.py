@@ -6,7 +6,17 @@ import traceback
 from pathlib import Path
 
 
-LATIN_GROUPS = {"English", "LatinCore", "LatinTier2"}
+LATIN_GROUPS = {
+    "English",
+    "RomanceCore",
+    "GermanicCore",
+    "CentralEuropeanLatin",
+    "SoutheastAsianLatin",
+    "RussianCore",
+    "EastSlavicCyrillic",
+    "BalkanCyrillic",
+    "CentralAsianCyrillic",
+}
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
@@ -197,9 +207,14 @@ def _article_min_chars(lang: str, lang_to_group: dict[str, str]) -> int:
     assert group is not None
     return {
         "English": 2_000,
-        "LatinCore": 2_000,
-        "LatinTier2": 2_000,
-        "Cyrillic": 2_000,
+        "RomanceCore": 2_000,
+        "GermanicCore": 2_000,
+        "CentralEuropeanLatin": 2_000,
+        "SoutheastAsianLatin": 2_000,
+        "RussianCore": 2_000,
+        "EastSlavicCyrillic": 2_000,
+        "BalkanCyrillic": 2_000,
+        "CentralAsianCyrillic": 2_000,
         "EastAsian": 1_200,
         "Indic": 2_000,
         "ArabicScript": 2_000,

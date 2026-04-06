@@ -2,14 +2,19 @@ from __future__ import annotations
 
 
 LANGUAGE_GROUPS = {
-    "English":      ["en"],
-    "LatinCore":    ["es", "fr", "de", "it", "pt", "nl"],
-    "LatinTier2":   ["vi", "tr", "la", "id", "ms", "af", "sq", "is", "no", "sv", "da", "fi", "hu", "pl", "cs", "ro"],
-    "Cyrillic":     ["ru", "bg", "uk", "sr", "be", "kk", "mk", "mn"],
-    "EastAsian":    ["zh", "ja", "ko"],
-    "Indic":        ["hi", "ur", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "as", "or"],
-    "ArabicScript": ["ar", "fa", "ps", "sd", "ug"],
-    "OtherScripts": ["el", "he", "hy", "ka", "am", "km", "lo", "my", "th"],
+    "English":              ["en"],
+    "RomanceCore":          ["es", "fr", "it", "pt"],
+    "GermanicCore":         ["de", "nl", "sv", "da", "no", "is", "af"],
+    "CentralEuropeanLatin": ["pl", "cs", "ro", "hu", "tr"],
+    "SoutheastAsianLatin":  ["vi", "id", "ms", "sq", "la"],
+    "RussianCore":          ["ru"],
+    "EastSlavicCyrillic":   ["uk", "be"],
+    "BalkanCyrillic":       ["bg", "sr", "mk"],
+    "CentralAsianCyrillic": ["kk", "mn"],
+    "EastAsian":            ["zh", "ja", "ko"],
+    "Indic":                ["hi", "ur", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "as", "or"],
+    "ArabicScript":         ["ar", "fa", "ps", "sd", "ug"],
+    "OtherScripts":         ["el", "he", "hy", "ka", "am", "km", "lo", "my", "th"],
 }
 
 LANG_ISO2_TO_ISO3 = {

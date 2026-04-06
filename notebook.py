@@ -425,15 +425,20 @@ def create_synthetic_doc(
     """
     # Weight per group — tuned to reflect real-world multilingual text distribution.
     GROUP_WEIGHTS = {
-        # Give English a dedicated lane so it is not diluted by the broader Latin set.
-        "English":      5.0,
-        "LatinCore":    3.0,
-        "LatinTier2":   1.5,
-        "EastAsian":    2.5,
-        "Cyrillic":     1.5,
-        "Indic":        1.5,
-        "ArabicScript": 1.5,
-        "OtherScripts": 1.0,
+        # Keep English dominant, but let major language families keep meaningful share.
+        "English":              2.5,
+        "RomanceCore":          2.2,
+        "GermanicCore":         1.7,
+        "CentralEuropeanLatin": 1.3,
+        "SoutheastAsianLatin":  1.1,
+        "EastAsian":            1.6,
+        "RussianCore":          1.6,
+        "EastSlavicCyrillic":   1.25,
+        "BalkanCyrillic":       1.15,
+        "CentralAsianCyrillic": 0.95,
+        "Indic":                1.25,
+        "ArabicScript":         1.25,
+        "OtherScripts":         0.8,
     }
     chosen_langs: list[str] = []
     seen_langs: set[str] = set()
