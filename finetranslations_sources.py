@@ -27,8 +27,7 @@ FINETRANS_LATIN_MAX_ENGLISH_RATIO = 0.35
 FINETRANS_LATIN_MIN_TOKENS = 4
 FINETRANS_MIN_TOKEN_COUNT = 20
 FINETRANS_LATIN_LONGEST_CHUNKS = 2
-FINETRANS_MIN_QUALITY_SCORE = 0.40
-FINETRANS_KEEP_TOP_PER_LANG = 50_000
+FINETRANS_MIN_QUALITY_SCORE = 0.80
 LATIN_TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 WIKIPEDIA_URL_RE = re.compile(r"wikipedia(?:\.org)?", flags=re.IGNORECASE)
 FT_ISO3_TO_LANG = {iso3: lang for lang, iso3 in LANG_ISO2_TO_ISO3.items()}
@@ -145,6 +144,10 @@ def _latin_tokens(text: str) -> list[str]:
     return LATIN_TOKEN_RE.findall(text.lower())
 
 
+def _sentence_token_length(sentence: str) -> int:
+    return len(_latin_tokens(sentence))
+
+
 def _looks_english_heavy(text: str) -> bool:
     tokens = _latin_tokens(text)
     if len(tokens) < FINETRANS_LATIN_MIN_TOKENS:
@@ -153,6 +156,25 @@ def _looks_english_heavy(text: str) -> bool:
     stopword_hits = sum(1 for token in tokens if token in sw)
     english_ratio = stopword_hits / max(1, len(tokens))
     return stopword_hits >= 3 and english_ratio >= FINETRANS_LATIN_MAX_ENGLISH_RATIO
+
+
+def _row_base_score(row: dict[str, Any], lang: str) -> float:
+    score = 0.0
+    quality = _row_quality_score(row)
+    if quality is not None:
+        score += quality * 10.0
+    token_count = _row_token_count(row)
+    if token_count is not None:
+        score += min(token_count / 50.0, 4.0)
+    if lang == "en":
+        edu = _row_edu_score(row)
+        if edu is not None:
+            score += edu * 2.0
+    return score
+
+
+def _sentence_base_score(row: dict[str, Any], lang: str, sentence_token_length: int) -> float:
+    return _row_base_score(row, lang) + min(sentence_token_length / 8.0, 4.0)
 
 
 def _latin_source_lines(chunks: list[str]) -> list[str]:
@@ -173,19 +195,51 @@ def _latin_source_lines(chunks: list[str]) -> list[str]:
     return lines
 
 
-def _row_sentence_score(row: dict[str, Any], lang: str) -> float:
-    score = 0.0
-    quality = _row_quality_score(row)
-    if quality is not None:
-        score += quality * 10.0
-    token_count = _row_token_count(row)
-    if token_count is not None:
-        score += min(token_count / 50.0, 4.0)
-    if lang == "en":
-        edu = _row_edu_score(row)
-        if edu is not None:
-            score += edu * 2.0
-    return score
+def _sentence_records_from_row(
+    row: dict[str, Any],
+    *,
+    lang: str,
+    lang_to_group: dict[str, str],
+    translated: bool = False,
+) -> list[dict[str, Any]]:
+    if translated:
+        chunks = _row_chunks(row, "translated_chunks", "translated_text")
+    else:
+        chunks = _row_chunks(row, "og_chunks", "og_full_text")
+    if not chunks:
+        return []
+
+    raw_sentences: list[str]
+    if translated:
+        raw_sentences = []
+        for chunk in chunks:
+            raw_sentences.extend(_segment_text(chunk, lang))
+        cleaned_sentences = post_clean_sentences(raw_sentences, lang, lang_to_group)
+    elif lang_to_group.get(lang) in LATIN_GROUPS:
+        cleaned_sentences = post_clean_sentences(_latin_source_lines(chunks), lang, lang_to_group)
+    else:
+        raw_sentences = []
+        for chunk in chunks:
+            raw_sentences.extend(_segment_text(chunk, lang))
+        cleaned_sentences = post_clean_sentences(raw_sentences, lang, lang_to_group)
+
+    record_sentences: list[dict[str, Any]] = []
+    for sentence in cleaned_sentences:
+        sentence_len = _sentence_token_length(sentence)
+        record_sentences.append(
+            {
+                "sentence": sentence,
+                "sentence_token_length": sentence_len,
+                "og_language_score": _row_language_score(row),
+                "og_token_count": _row_token_count(row),
+                "og_quality_score": _row_quality_score(row),
+                "edu_score_raw": _row_edu_score(row) if translated else None,
+                "source_language": _row_source_language(row),
+                "is_wikipedia": _row_is_wikipedia(row),
+                "score": _sentence_base_score(row, lang, sentence_len),
+            }
+        )
+    return record_sentences
 
 
 def _segment_text(text: str, lang: str) -> list[str]:
@@ -198,58 +252,114 @@ def _segment_text(text: str, lang: str) -> list[str]:
     return [segment for segment in segments if isinstance(segment, str) and segment.strip()]
 
 
-def _prepare_source_sentences(
-    row: dict[str, Any],
-    lang: str,
-    lang_to_group: dict[str, str],
-) -> list[str]:
-    chunks = _row_chunks(row, "og_chunks", "og_full_text")
-    if not chunks:
-        return []
-    if lang_to_group.get(lang) in LATIN_GROUPS:
-        lines = _latin_source_lines(chunks)
-        return post_clean_sentences(lines, lang, lang_to_group)
-    sentences: list[str] = []
-    for chunk in chunks:
-        sentences.extend(_segment_text(chunk, lang))
-    return post_clean_sentences(sentences, lang, lang_to_group)
+def _row_is_translated_en_acceptable(row: dict[str, Any]) -> bool:
+    edu = _row_edu_score(row)
+    if edu is None:
+        return True
+    return edu >= 1.0
 
 
-def _extend_bucket(
-    bucket: list[str],
-    seen: set[str],
-    scored_rows: list[tuple[float, dict[str, Any]]],
-    *,
-    lang: str,
-    lang_to_group: dict[str, str],
+def _compute_length_thresholds(records: list[dict[str, Any]]) -> tuple[int, int]:
+    lengths = sorted(
+        record["sentence_token_length"]
+        for record in records
+        if isinstance(record.get("sentence_token_length"), int)
+    )
+    if not lengths:
+        return (0, 0)
+    q25_idx = max(0, min(len(lengths) - 1, int(round((len(lengths) - 1) * 0.25))))
+    q75_idx = max(0, min(len(lengths) - 1, int(round((len(lengths) - 1) * 0.75))))
+    return lengths[q25_idx], lengths[q75_idx]
+
+
+def _select_bucketed_records(
+    records: list[dict[str, Any]],
     max_sentences: int,
-) -> None:
-    for _, row in scored_rows:
-        if len(bucket) >= max_sentences:
-            return
-        score = _row_language_score(row)
-        if score is not None and score < FINETRANS_MIN_LANGUAGE_SCORE:
-            continue
-        token_count = _row_token_count(row)
-        if token_count is not None and token_count < FINETRANS_MIN_TOKEN_COUNT:
-            continue
-        row_lang = _row_source_language(row)
-        if row_lang and row_lang != lang:
-            continue
-        cleaned = _prepare_source_sentences(row, lang, lang_to_group)
-        for sentence in cleaned:
-            if sentence in seen:
-                continue
-            seen.add(sentence)
-            bucket.append(sentence)
-            if len(bucket) >= max_sentences:
-                return
+) -> list[dict[str, Any]]:
+    short_max, medium_max = _compute_length_thresholds(records)
+    buckets: dict[str, list[dict[str, Any]]] = {"short": [], "medium": [], "long": []}
+    for record in records:
+        length = int(record.get("sentence_token_length") or 0)
+        if length <= short_max:
+            bucket = "short"
+        elif length <= medium_max:
+            bucket = "medium"
+        else:
+            bucket = "long"
+        buckets.setdefault(bucket, []).append(record)
+
+    per_bucket_cap = max(1, max_sentences // 3)
+    selected: list[dict[str, Any]] = []
+    for bucket_name in ("short", "medium", "long"):
+        bucket_records = buckets.get(bucket_name, [])
+        bucket_records.sort(
+            key=lambda rec: (
+                -float(rec["score"]),
+                -(rec["sentence_token_length"]),
+                -(rec["og_quality_score"] or 0.0),
+                -(rec["og_language_score"] or 0.0),
+                -(rec["og_token_count"] or 0),
+            )
+        )
+        selected.extend(bucket_records[:per_bucket_cap])
+
+    if len(selected) < max_sentences:
+        leftovers = [
+            rec
+            for bucket_name in ("short", "medium", "long")
+            for rec in buckets.get(bucket_name, [])[per_bucket_cap:]
+        ]
+        leftovers.sort(
+            key=lambda rec: (
+                -float(rec["score"]),
+                -(rec["sentence_token_length"]),
+                -(rec["og_quality_score"] or 0.0),
+                -(rec["og_language_score"] or 0.0),
+                -(rec["og_token_count"] or 0),
+            )
+        )
+        selected.extend(leftovers[: max(0, max_sentences - len(selected))])
+
+    return selected[:max_sentences]
 
 
-def _sort_scored_rows(rows: list[dict[str, Any]], lang: str) -> list[tuple[float, dict[str, Any]]]:
-    scored = [(_row_sentence_score(row, lang), row) for row in rows]
-    scored.sort(key=lambda item: (-item[0], _row_token_count(item[1]) or 0))
-    return scored
+def _serialize_records(records_by_lang: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+    return {
+        lang: [
+            {
+                "sentence": record["sentence"],
+                "sentence_token_length": record["sentence_token_length"],
+                "og_language_score": record["og_language_score"],
+                "og_token_count": record["og_token_count"],
+                "og_quality_score": record["og_quality_score"],
+                "edu_score_raw": record["edu_score_raw"],
+                "source_language": record["source_language"],
+                "is_wikipedia": record["is_wikipedia"],
+                "score": record["score"],
+            }
+            for record in records
+        ]
+        for lang, records in records_by_lang.items()
+    }
+
+
+def _normalize_cached_records(payload: Any) -> dict[str, list[str]]:
+    if not isinstance(payload, dict):
+        return {}
+    result: dict[str, list[str]] = {}
+    for lang, items in payload.items():
+        if not isinstance(items, list):
+            continue
+        sentences: list[str] = []
+        for item in items:
+            if isinstance(item, str):
+                sentences.append(item)
+            elif isinstance(item, dict):
+                sentence = item.get("sentence")
+                if isinstance(sentence, str) and sentence.strip():
+                    sentences.append(sentence)
+        result[lang] = sentences
+    return result
 
 
 def load_finetranslations_sentences(
@@ -279,11 +389,12 @@ def load_finetranslations_sentences(
                 "seed": seed,
                 "max_sentences_per_lang": max_sentences_per_lang,
                 "include_translated_english": include_translated_english,
+                "cache_format": "records_v1",
             }
             if meta == expected_meta:
                 print(f"Loading FineTranslations cache from {cache_file}")
                 with open(cache_file, encoding="utf-8") as f:
-                    cached: dict[str, list[str]] = json.load(f)
+                    cached = _normalize_cached_records(json.load(f))
                 print(
                     f"  {len(cached)} languages | "
                     f"{sum(len(v) for v in cached.values()):,} sentences total"
@@ -297,9 +408,7 @@ def load_finetranslations_sentences(
         print("No FineTranslations subsets matched the current language set.")
         return {}
 
-    accumulator: dict[str, list[str]] = {}
-    seen: dict[str, set[str]] = {}
-    candidate_rows: dict[str, list[dict[str, Any]]] = {}
+    candidate_records: dict[str, list[dict[str, Any]]] = {}
     rng = random.Random(seed)
 
     print(f"Loading FineTranslations ({len(configs)} subsets) ...")
@@ -312,58 +421,51 @@ def load_finetranslations_sentences(
             continue
         ds = ds.shuffle(buffer_size=1000, seed=seed)
 
-        bucket = accumulator.setdefault(lang, [])
-        lang_seen = seen.setdefault(lang, set())
-        rows = candidate_rows.setdefault(lang, [])
+        records = candidate_records.setdefault(lang, [])
 
         for row in ds:
-            if len(bucket) >= max_sentences_per_lang:
-                break
-
             if not isinstance(row, dict):
                 continue
             if _row_is_wikipedia(row):
                 continue
-            score = _row_sentence_score(row, lang)
-            if score < FINETRANS_MIN_QUALITY_SCORE:
+            source_records = _sentence_records_from_row(row, lang=lang, lang_to_group=lang_to_group)
+            _lang_score = _row_language_score(row) or 0
+            if  _lang_score < FINETRANS_MIN_LANGUAGE_SCORE:
                 continue
-            rows.append(row)
+            _count_row = _row_token_count(row) or 0
+            if  _count_row < FINETRANS_MIN_TOKEN_COUNT:
+                continue
+            if _row_source_language(row) and _row_source_language(row) != lang:
+                continue
+            if _row_base_score(row, lang) < FINETRANS_MIN_QUALITY_SCORE:
+                continue
+            records.extend(source_records)
 
             if include_translated_english:
-                english_chunks = _row_chunks(row, "translated_chunks", "translated_text")
-                if english_chunks:
-                    english_bucket = accumulator.setdefault("en", [])
-                    english_seen = seen.setdefault("en", set())
-                    _extend_bucket(
-                        english_bucket,
-                        english_seen,
-                        english_chunks,
-                        lang="en",
-                        lang_to_group=lang_to_group,
-                        max_sentences=max_sentences_per_lang,
-                    )
+                english_records = _sentence_records_from_row(
+                    row,
+                    lang="en",
+                    lang_to_group=lang_to_group,
+                    translated=True,
+                )
+                for record in english_records:
+                    if not _row_is_translated_en_acceptable(row):
+                        continue
+                    candidate_records.setdefault("en", []).append(record)
 
-        scored_rows = _sort_scored_rows(rows, lang)
-        _extend_bucket(
-            bucket,
-            lang_seen,
-            scored_rows[:FINETRANS_KEEP_TOP_PER_LANG],
-            lang=lang,
-            lang_to_group=lang_to_group,
-            max_sentences=max_sentences_per_lang,
-        )
-        added = len(bucket)
-        print(f"  {config:<16} -> {lang}: +{added:,} sentences")
+        kept_records = _select_bucketed_records(records, max_sentences_per_lang)
+        print(f"  {config:<16} -> {lang}: +{len(kept_records):,} sentences")
+        candidate_records[lang] = kept_records
 
     result: dict[str, list[str]] = {}
-    for lang, sentences in sorted(accumulator.items()):
-        deduped = list(sentences)
-        rng.shuffle(deduped)
-        if len(deduped) > max_sentences_per_lang:
-            deduped = deduped[:max_sentences_per_lang]
-        result[lang] = deduped
+    for lang, records in sorted(candidate_records.items()):
+        sentences = [record["sentence"] for record in records]
+        rng.shuffle(sentences)
+        if len(sentences) > max_sentences_per_lang:
+            sentences = sentences[:max_sentences_per_lang]
+        result[lang] = sentences
 
-    write_json_atomic(cache_file, result)
+    write_json_atomic(cache_file, _serialize_records(candidate_records))
     write_json_atomic(
         cache_meta,
         {
@@ -371,6 +473,7 @@ def load_finetranslations_sentences(
             "seed": seed,
             "max_sentences_per_lang": max_sentences_per_lang,
             "include_translated_english": include_translated_english,
+            "cache_format": "records_v1",
         },
     )
 
