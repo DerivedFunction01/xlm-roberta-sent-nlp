@@ -4,8 +4,9 @@ import json
 import os
 import random
 import re
+import time
 from functools import lru_cache
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 from typing import Any
 
 import pandas as pd
@@ -805,20 +806,71 @@ def load_finetranslations_sentences(
                 force_rebuild=force_rebuild,
             )] = (config_idx, config, lang)
 
-        for future in tqdm(as_completed(futures), total=len(futures), desc="FineTranslations configs"):
-            config_idx, config, lang = futures[future]
-            try:
-                outcome = future.result()
-            except Exception as exc:
-                print(f"  Skipping {config}: {exc}")
-                continue
-            status = outcome.get("status", "unknown")
-            if status == "complete":
-                print(
-                    f"  {config:<16} -> {lang}: +{int(outcome.get('accepted_rows', 0)):,} rows accepted"
+        bars: dict[int, Any] = {}
+        pending_futures = dict(futures)
+        try:
+            for future, (config_idx, config, lang) in futures.items():
+                bars[config_idx] = tqdm(
+                    total=max_row_index,
+                    desc=f"{config:<16} -> {lang}",
+                    position=config_idx,
+                    leave=False,
+                    dynamic_ncols=True,
                 )
-            elif status == "skipped":
-                print(f"  Skipping {config}: {outcome.get('error', 'unknown error')}")
+
+            while pending_futures:
+                done_futures = [future for future in pending_futures if future.done()]
+                for future in done_futures:
+                    config_idx, config, lang = pending_futures.pop(future)
+                    try:
+                        outcome = future.result()
+                    except Exception as exc:
+                        tqdm.write(f"  Skipping {config}: {exc}")
+                        continue
+                    status = outcome.get("status", "unknown")
+                    if status == "complete":
+                        tqdm.write(
+                            f"  {config:<16} -> {lang}: +{int(outcome.get('accepted_rows', 0)):,} rows accepted"
+                        )
+                    elif status == "skipped":
+                        tqdm.write(f"  Skipping {config}: {outcome.get('error', 'unknown error')}")
+                    bar = bars.get(config_idx)
+                    if bar is not None:
+                        bar.n = max(bar.n, bar.total or 0)
+                        bar.refresh()
+                        bar.close()
+                        bars.pop(config_idx, None)
+
+                for future, (config_idx, config, lang) in pending_futures.items():
+                    bar = bars.get(config_idx)
+                    if bar is None:
+                        continue
+                    config_meta_path = _finetrans_config_meta_path(sentences_dir, config_idx)
+                    if not os.path.exists(config_meta_path):
+                        continue
+                    try:
+                        with open(config_meta_path, encoding="utf-8") as f:
+                            meta = json.load(f)
+                    except Exception:
+                        continue
+                    next_row_idx = int(meta.get("next_row_idx", 0))
+                    accepted_rows = int(meta.get("accepted_rows", 0))
+                    accepted_sentences = int(meta.get("accepted_sentences", 0))
+                    accepted_english_sentences = int(meta.get("accepted_english_sentences", 0))
+                    bar.total = max(bar.total or 0, max_row_index)
+                    bar.n = min(next_row_idx, bar.total or next_row_idx)
+                    bar.set_postfix_str(
+                        f"rows {accepted_rows:,} | sent {accepted_sentences:,} | en {accepted_english_sentences:,}"
+                    )
+                    bar.refresh()
+
+                time.sleep(1.0)
+        finally:
+            for bar in bars.values():
+                try:
+                    bar.close()
+                except Exception:
+                    pass
 
     rows = _load_finetrans_records_from_configs(config_root)
     records_by_lang: dict[str, list[dict[str, Any]]] = {}
