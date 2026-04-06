@@ -787,6 +787,15 @@ def load_finetranslations_sentences(
         print(f"  {len(result)} languages | {total:,} sentences total")
         return result
 
+    if not force_rebuild and (
+        os.path.exists(cache_file) or os.path.exists(cache_meta)
+    ):
+        raise RuntimeError(
+            "FineTranslations cache metadata does not match the current config. "
+            "Refusing to rebuild over the existing cache. "
+            "Delete the cache files or set FT_FORCE_REBUILD=True to regenerate them."
+        )
+
     if force_rebuild:
         for path in (cache_file, cache_meta):
             if os.path.exists(path):
