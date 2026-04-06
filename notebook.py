@@ -87,8 +87,6 @@ os.makedirs(SYNTHETIC_TEMP_DIR, exist_ok=True)
 CACHE_DIR = f"{SENTENCES_DIR}/tokenized_dataset"
 os.makedirs(CACHE_DIR, exist_ok=True)
 CACHE_META = f"{CACHE_DIR}/tokenized_dataset.meta.json"
-CACHE_DEBUG_PARQUET = f"{CACHE_DIR}/tokenized_debug.parquet"
-CACHE_DEBUG_META = f"{CACHE_DIR}/tokenized_debug.meta.json"
 CACHE_VERSION = 2
 TOKENIZED_CACHE_VERSION = 2
 USE_SYNTHETIC_CACHE = True
@@ -1675,62 +1673,6 @@ def save_synthetic_examples_cache(
         )
 
 
-def save_token_debug_cache(coverage_examples: list[dict], random_examples: list[dict]) -> None:
-    """Persist a flattened token-level debug parquet with original text and token ids."""
-    rows = []
-    for examples in (coverage_examples, random_examples):
-        for example in examples:
-            original_text = example.get("original_text", "")
-            tokens = example["tokens"]
-            ids = example["ner_tags"]
-            for token, tag_id in zip(tokens, ids):
-                rows.append(
-                    {
-                        "original_text": original_text,
-                        "token": token,
-                        "id": tag_id,
-                    }
-                )
-
-    pd.DataFrame(rows).to_parquet(CACHE_DEBUG_PARQUET, index=False)
-    with open(CACHE_DEBUG_META, "w") as f:
-        json.dump(
-            {
-                "cache_version": TOKENIZED_CACHE_VERSION,
-                "model_checkpoint": MODEL_CHECKPOINT,
-                "max_length": MAX_LENGTH,
-                "seed": SEED,
-                "row_count": len(rows),
-            },
-            f,
-            indent=2,
-        )
-
-
-def ensure_token_debug_cache() -> None:
-    """Rebuild the token debug cache from synthetic examples if it is missing."""
-    if os.path.exists(CACHE_DEBUG_PARQUET) and os.path.exists(CACHE_DEBUG_META):
-        return
-    synthetic_dataset = _load_synthetic_examples_dataset() if (USE_SYNTHETIC_CACHE and not FORCE_REBUILD_SYNTHETIC_CACHE) else None
-    if synthetic_dataset is None:
-        return
-    sample_n = min(len(synthetic_dataset), 10_000)
-    sample_dataset = synthetic_dataset.select(range(sample_n))
-    coverage_examples = []
-    random_examples = []
-    for row in sample_dataset:
-        example = {
-            "original_text": row.get("original_text", ""),
-            "tokens": json.loads(row["tokens"]),
-            "ner_tags": json.loads(row["ner_tags"]),
-        }
-        if row["kind"] == "coverage":
-            coverage_examples.append(example)
-        else:
-            random_examples.append(example)
-    save_token_debug_cache(coverage_examples, random_examples)
-
-
 def load_synthetic_examples_cache():
     """Load cached synthetic examples as a parquet-backed dataset if metadata matches."""
     if not os.path.exists(SYNTHETIC_CACHE_META):
@@ -2252,7 +2194,6 @@ if cached_tokenized is not None:
     train_dataset = cached_tokenized["train"]
     eval_dataset = cached_tokenized["eval"]
     print(f"Loaded tokenized dataset cache from {CACHE_DIR}")
-    ensure_token_debug_cache()
 else:
     if synthetic_dataset is None:
         synthetic_dataset = load_synthetic_examples_cache() if (USE_SYNTHETIC_CACHE and not FORCE_REBUILD_SYNTHETIC_CACHE) else None
@@ -2281,18 +2222,6 @@ else:
         batched=False,
         remove_columns=["kind"],
     )
-
-    raw_coverage_dataset = synthetic_dataset.filter(lambda ex: ex["kind"] == "coverage")  # type: ignore
-    raw_random_dataset = synthetic_dataset.filter(lambda ex: ex["kind"] == "random")  # type: ignore
-    debug_coverage_sample = [
-        _synthetic_row_to_example(row)
-        for row in raw_coverage_dataset.select(range(min(len(raw_coverage_dataset), 1000)))
-    ]
-    debug_random_sample = [
-        _synthetic_row_to_example(row)
-        for row in raw_random_dataset.select(range(min(len(raw_random_dataset), 1000)))
-    ]
-    save_token_debug_cache(debug_coverage_sample, debug_random_sample)
 
     coverage_dataset = coverage_dataset.map(
         tokenize_and_align,
