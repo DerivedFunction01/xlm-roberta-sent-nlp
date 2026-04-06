@@ -23,6 +23,7 @@ from text_utils import (
 
 FINETRANS_DATASET = "HuggingFaceFW/finetranslations"
 FINETRANS_MIN_LANGUAGE_SCORE = 0.85
+FINETRANS_LATIN_STRICT_LANGUAGE_SCORE_CUTOFF = 0.95
 FINETRANS_LATIN_MAX_ENGLISH_RATIO = 0.35
 FINETRANS_LATIN_MIN_TOKENS = 4
 FINETRANS_MIN_TOKEN_COUNT = 20
@@ -177,16 +178,23 @@ def _sentence_base_score(row: dict[str, Any], lang: str, sentence_token_length: 
     return _row_base_score(row, lang) + min(sentence_token_length / 8.0, 4.0)
 
 
-def _latin_source_lines(chunks: list[str]) -> list[str]:
+def _latin_source_lines(
+    chunks: list[str],
+    *,
+    lang_score: float | None = None,
+) -> list[str]:
     selected_chunks = _longest_chunks(chunks)
     lines: list[str] = []
     seen: set[str] = set()
+    apply_english_filter = (
+        lang_score is None or lang_score < FINETRANS_LATIN_STRICT_LANGUAGE_SCORE_CUTOFF
+    )
     for chunk in selected_chunks:
         for raw_line in chunk.splitlines():
             line = raw_line.strip()
             if not line:
                 continue
-            if _looks_english_heavy(line):
+            if apply_english_filter and _looks_english_heavy(line):
                 continue
             if line in seen:
                 continue
@@ -216,7 +224,11 @@ def _sentence_records_from_row(
             raw_sentences.extend(_segment_text(chunk, lang))
         cleaned_sentences = post_clean_sentences(raw_sentences, lang, lang_to_group)
     elif lang_to_group.get(lang) in LATIN_GROUPS:
-        cleaned_sentences = post_clean_sentences(_latin_source_lines(chunks), lang, lang_to_group)
+        cleaned_sentences = post_clean_sentences(
+            _latin_source_lines(chunks, lang_score=_row_language_score(row)),
+            lang,
+            lang_to_group,
+        )
     else:
         raw_sentences = []
         for chunk in chunks:
