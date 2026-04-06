@@ -13,13 +13,6 @@ from datasets import get_dataset_config_names, load_dataset
 from datasets.utils.logging import disable_progress_bar
 from tqdm.auto import tqdm
 
-try:
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-except ImportError:
-    pa = None
-    pq = None
-
 from io_utils import write_json_atomic, write_records_parquet
 from paths import (
     FINETRANS_CACHE_FILE,
@@ -582,27 +575,28 @@ def _process_finetrans_config(
             "accepted_rows": int(complete_meta.get("accepted_rows", 0)),
         }
 
-    if force_rebuild or not os.path.exists(config_meta_path):
+    checkpoint_meta = None if force_rebuild else _load_config_checkpoint_meta(config_meta_path, expected_meta)
+    if force_rebuild or checkpoint_meta is None:
         _clear_finetrans_config_dir(config_dir)
         os.makedirs(config_dir, exist_ok=True)
         os.makedirs(english_dir, exist_ok=True)
-    if pa is None or pq is None:
-        raise RuntimeError("pyarrow is required for FineTranslations streaming writes")
+    accepted_rows = int(checkpoint_meta.get("accepted_rows", 0)) if checkpoint_meta else 0
+    accepted_sentences = int(checkpoint_meta.get("accepted_sentences", 0)) if checkpoint_meta else 0
+    accepted_english_sentences = int(checkpoint_meta.get("accepted_english_sentences", 0)) if checkpoint_meta else 0
+    miss_streak = int(checkpoint_meta.get("miss_streak", 0)) if checkpoint_meta else 0
+    english_seen_sentences = int(checkpoint_meta.get("english_seen_sentences", 0)) if checkpoint_meta else 0
+    next_row_idx = int(checkpoint_meta.get("next_row_idx", 0)) if checkpoint_meta else 0
 
-    accepted_rows = 0
-    accepted_sentences = 0
-    accepted_english_sentences = 0
-    miss_streak = 0
-    english_seen_sentences = 0
-    next_row_idx = 0
+    source_buffer: list[dict[str, Any]] = _read_records_parquet(config_records_path)
+    english_buffer: list[dict[str, Any]] = _read_records_parquet(english_records_path)
 
-    source_buffer: list[dict[str, Any]] = []
-    english_buffer: list[dict[str, Any]] = []
-    source_writer = None
-    english_writer = None
+    if checkpoint_meta is not None:
+        print(
+            f"  Resuming {config} ({lang}) from row {next_row_idx}"
+        )
 
     def _flush_pending(*, row_idx: int, status: str) -> None:
-        nonlocal source_buffer, english_buffer, source_writer, english_writer
+        nonlocal source_buffer, english_buffer
         meta = dict(expected_meta)
         meta.update(
             {
@@ -618,18 +612,8 @@ def _process_finetrans_config(
                 "english_seen_sentences": english_seen_sentences,
             }
         )
-        if source_buffer:
-            source_table = pa.Table.from_pylist(source_buffer)
-            if source_writer is None:
-                source_writer = pq.ParquetWriter(config_records_path, source_table.schema)
-            source_writer.write_table(source_table)
-            source_buffer = []
-        if english_buffer:
-            english_table = pa.Table.from_pylist(english_buffer)
-            if english_writer is None:
-                english_writer = pq.ParquetWriter(english_records_path, english_table.schema)
-            english_writer.write_table(english_table)
-            english_buffer = []
+        write_records_parquet(config_records_path, source_buffer)
+        write_records_parquet(english_records_path, english_buffer)
         write_json_atomic(config_meta_path, meta)
 
     try:
@@ -713,10 +697,6 @@ def _process_finetrans_config(
             _flush_pending(row_idx=row_idx + 1, status="checkpoint")
 
     _flush_pending(row_idx=0, status="complete")
-    if source_writer is not None:
-        source_writer.close()
-    if english_writer is not None:
-        english_writer.close()
     meta = dict(expected_meta)
     meta.update(
         {
