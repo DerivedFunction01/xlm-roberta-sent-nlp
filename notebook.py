@@ -67,28 +67,8 @@ MIN_RESERVED_SENTENCES = 4
 MAX_RESERVED_SENTENCES = 20_000
 MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
-MAX_WIKI_INDEX = ARTICLES_PER_LANG * 10
-MAX_WIKI_SENTENCES = 200_000
-MAX_WIKI_SENTENCES_BY_LANG = {
-    "en": 300_000,
-}
-WIKI_ROLLING_STATS_WINDOW = 250
 SENTENCES_DIR = "./sentences_cache"
 os.makedirs(SENTENCES_DIR, exist_ok=True)
-WIKI_TEMP_DIR = os.path.join(SENTENCES_DIR, "_wiki_tmp")
-os.makedirs(WIKI_TEMP_DIR, exist_ok=True)
-WIKI_SEGMENTATION_DEBUG_DIR = os.path.join(WIKI_TEMP_DIR, "segmentation_debug")
-os.makedirs(WIKI_SEGMENTATION_DEBUG_DIR, exist_ok=True)
-SYNTHETIC_CACHE = os.path.join(SENTENCES_DIR, "synthetic_examples")
-os.makedirs(SYNTHETIC_CACHE, exist_ok=True)
-SYNTHETIC_CACHE_META = os.path.join(SYNTHETIC_CACHE, "synthetic_examples.meta.json")
-SYNTHETIC_TEMP_DIR = os.path.join(SENTENCES_DIR, "_synthetic_tmp")
-os.makedirs(SYNTHETIC_TEMP_DIR, exist_ok=True)
-CACHE_DIR = f"{SENTENCES_DIR}/tokenized_dataset"
-os.makedirs(CACHE_DIR, exist_ok=True)
-CACHE_META = f"{CACHE_DIR}/tokenized_dataset.meta.json"
-CACHE_VERSION = 2
-TOKENIZED_CACHE_VERSION = 2
 USE_SYNTHETIC_CACHE = True
 FORCE_REBUILD_SYNTHETIC_CACHE = False
 USE_TOKENIZED_CACHE = True
@@ -149,10 +129,25 @@ if Path("hf_token").exists():
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Data Loading ---
-from wiki_sources import build_sentence_pools, chunk_list, draw_sentence, load_wiki_sentences, partition_sentence_pools, remaining_sentence_count
+from wiki_sources import (
+    build_sentence_pools,
+    chunk_list,
+    draw_sentence,
+    finalize_wiki_sentence_cache,
+    load_wiki_sentences,
+    partition_sentence_pools,
+    remaining_sentence_count,
+)
 from smol_sources import load_smol_sentences
 from neutral_sources import build_neutral_sources
 from synthetic_cache import (
+    CACHE_DIR,
+    CACHE_META,
+    CACHE_VERSION,
+    SYNTHETIC_CACHE,
+    SYNTHETIC_CACHE_META,
+    SYNTHETIC_TEMP_DIR,
+    TOKENIZED_CACHE_VERSION,
     _append_synthetic_rows,
     _clear_synthetic_cache_dir,
     _load_synthetic_examples_dataset,
@@ -168,10 +163,12 @@ MAX_WIKI_WORKERS = min(mp.cpu_count() // 2, len(ALL_LANGS))
 lang_sentences = load_wiki_sentences(
     ALL_LANGS,
     lang_to_group=LANG_TO_GROUP,
+    seed=SEED,
     sentences_dir=SENTENCES_DIR,
     articles_per_lang=ARTICLES_PER_LANG,
     max_workers=MAX_WIKI_WORKERS,
 )
+lang_sentences = finalize_wiki_sentence_cache(lang_sentences, lang_to_group=LANG_TO_GROUP)
 
 USE_SMOL_AUGMENTATION = True
 SMOL_FORCE_REBUILD = False
