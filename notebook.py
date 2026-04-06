@@ -58,9 +58,10 @@ USE_SYNTHETIC_CACHE = True
 FORCE_REBUILD_SYNTHETIC_CACHE = False
 USE_TOKENIZED_CACHE = True
 FORCE_REBUILD_TOKENIZED_CACHE = False
+def get_workers(split: int = 1):
+    return mp.cpu_count() // split
+
 SKIP_TOKENIZED_CACHE_VALIDATION = False
-GENERATION_WORKERS = mp.cpu_count() // 4
-MAX_WIKI_WORKERS = max(1, mp.cpu_count() // 2)
 
 # Optional notebook-state placeholders.
 # These let later cells run even if the generation cell was skipped.
@@ -156,7 +157,7 @@ lang_sentences = load_wiki_sentences(
     seed=SEED,
     sentences_dir=SENTENCES_DIR,
     articles_per_lang=ARTICLES_PER_LANG,
-    max_workers=MAX_WIKI_WORKERS,
+    max_workers=get_workers(2),
 )
 #%%
 smol_sentences = None
@@ -186,7 +187,7 @@ if USE_FINETRANS_AUGMENTATION:
             seed=SEED,
             max_sentences_per_lang=FT_MAX_SENTENCES_PER_LANG,
             include_translated_english=FT_INCLUDE_TRANSLATED_ENGLISH,
-            max_workers=MAX_WIKI_WORKERS,
+            max_workers=get_workers(3),
         )
         total_ft_sentences = sum(len(v) for v in ft_sentences.values())
         print(
@@ -623,7 +624,7 @@ else:
 
     _clear_synthetic_cache_dir(SYNTHETIC_CACHE)
     random_job_count = max(0, EXAMPLES_TARGET - len(coverage_plan))
-    generation_workers = min(GENERATION_WORKERS, max(1, EXAMPLES_TARGET))
+    generation_workers = min(get_workers(4), max(1, EXAMPLES_TARGET))
     shard_paths: list[str] = []
     synthetic_total_examples = 0
     coverage_chunks = chunk_list(coverage_plan, generation_workers)
