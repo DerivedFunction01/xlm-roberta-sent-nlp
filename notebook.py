@@ -168,7 +168,7 @@ lang_sentences = load_wiki_sentences(
     max_workers=MAX_WIKI_WORKERS,
 )
 lang_sentences = finalize_wiki_sentence_cache(lang_sentences, lang_to_group=LANG_TO_GROUP)
-#%%
+# %%
 smol_sentences = None
 if USE_SMOL_AUGMENTATION:
     try:
@@ -185,7 +185,7 @@ if USE_SMOL_AUGMENTATION:
         )
     except Exception as exc:
         print(f"\nSMOL augmentation skipped: {exc}")
-#%%
+# %%
 ft_sentences = None
 if USE_FINETRANS_AUGMENTATION:
     try:
@@ -196,7 +196,7 @@ if USE_FINETRANS_AUGMENTATION:
             seed=SEED,
             max_sentences_per_lang=FT_MAX_SENTENCES_PER_LANG,
             include_translated_english=FT_INCLUDE_TRANSLATED_ENGLISH,
-            max_workers=MAX_WIKI_WORKERS,
+            max_workers=GENERATION_WORKERS,
         )
         total_ft_sentences = sum(len(v) for v in ft_sentences.values())
         print(
@@ -205,7 +205,7 @@ if USE_FINETRANS_AUGMENTATION:
         )
     except Exception as exc:
         print(f"\nFineTranslations augmentation skipped: {exc}")
-#%%
+# %%
 neutral_sources = build_neutral_sources(
     sentences_dir=SENTENCES_DIR,
     english_seed_sentences=(
