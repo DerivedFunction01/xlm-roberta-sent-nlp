@@ -47,7 +47,16 @@ from tqdm.auto import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from paths import SENTENCES_DIR
+from source_config import (
+    MAX_RESERVED_SENTENCES,
+    MIN_RESERVED_SENTENCES,
+    RESERVE_FRACTION,
+    SMOL_MAX_RESERVED_SENTENCES,
+    SMOL_MIN_RESERVED_SENTENCES,
+    SMOL_RESERVE_FRACTION,
+)
 from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS
+from wiki_sources import ARTICLES_PER_LANG
 
 try:
     import pyarrow as pa
@@ -63,16 +72,9 @@ torch.manual_seed(SEED)
 
 MODEL_CHECKPOINT = "xlm-roberta-base"
 MAX_LENGTH = 512
-ARTICLES_PER_LANG = 10_000   # increase for a larger dataset
 EXAMPLES_TARGET = 2_000_000  # synthetic mixed-language training examples to generate
-RESERVE_FRACTION = 0.15   # fraction of each language's sentences kept for guaranteed coverage
-MIN_RESERVED_SENTENCES = 4
-MAX_RESERVED_SENTENCES = 20_000
 MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
-SMOL_RESERVE_FRACTION = 0.50
-SMOL_MIN_RESERVED_SENTENCES = 1
-SMOL_MAX_RESERVED_SENTENCES = MAX_RESERVED_SENTENCES
 USE_SYNTHETIC_CACHE = True
 FORCE_REBUILD_SYNTHETIC_CACHE = False
 USE_TOKENIZED_CACHE = True
