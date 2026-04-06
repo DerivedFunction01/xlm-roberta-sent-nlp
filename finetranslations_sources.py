@@ -27,6 +27,7 @@ FINETRANS_MIN_LANGUAGE_SCORE = 0.85
 FINETRANS_LATIN_STRICT_LANGUAGE_SCORE_CUTOFF = 0.95
 FINETRANS_LATIN_MAX_ENGLISH_RATIO = 0.35
 FINETRANS_LATIN_MIN_TOKENS = 4
+FINETRANS_LATIN_SHORT_TOKEN_LIMIT = 4
 FINETRANS_MIN_TOKEN_COUNT = 20
 FINETRANS_LATIN_LONGEST_CHUNKS = 2
 FINETRANS_MIN_QUALITY_SCORE = 0.80
@@ -156,7 +157,9 @@ def _sentence_token_length(sentence: str) -> int:
 def _looks_english_heavy(text: str) -> bool:
     tokens = _latin_tokens(text)
     if len(tokens) < FINETRANS_LATIN_MIN_TOKENS:
-        return False
+        return any(_is_english_word(token) for token in tokens)
+    if len(tokens) <= FINETRANS_LATIN_SHORT_TOKEN_LIMIT:
+        return sum(1 for token in tokens if _is_english_word(token)) >= 1
     stopword_hits = sum(1 for token in tokens if _is_english_word(token))
     english_ratio = stopword_hits / max(1, len(tokens))
     return stopword_hits >= 3 and english_ratio >= FINETRANS_LATIN_MAX_ENGLISH_RATIO

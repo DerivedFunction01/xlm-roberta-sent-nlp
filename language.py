@@ -124,6 +124,7 @@ ENGLISH_STOP_WORDS = [
     "appear",
     "appreciate",
     "appropriate",
+    "app",
     "are",
     "arent",
     "aren",
