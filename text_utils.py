@@ -194,6 +194,7 @@ def sanitize_paragraph_for_pysbd(paragraph: str) -> str:
 
 def _article_min_chars(lang: str, lang_to_group: dict[str, str]) -> int:
     group = lang_to_group.get(lang)
+    assert group is not None
     return {
         "English": 2_000,
         "LatinCore": 2_000,
