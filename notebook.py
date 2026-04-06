@@ -110,7 +110,7 @@ from source_pools import (
     partition_sentence_pools,
     remaining_sentence_count,
 )
-from wiki_sources import finalize_wiki_sentence_cache, load_wiki_sentences
+from wiki_sources import load_wiki_sentences
 from smol_sources import load_smol_sentences
 from finetranslations_sources import load_finetranslations_sentences
 from io_utils import write_json_atomic
@@ -167,7 +167,6 @@ lang_sentences = load_wiki_sentences(
     articles_per_lang=ARTICLES_PER_LANG,
     max_workers=MAX_WIKI_WORKERS,
 )
-lang_sentences = finalize_wiki_sentence_cache(lang_sentences, lang_to_group=LANG_TO_GROUP)
 #%%
 smol_sentences = None
 if USE_SMOL_AUGMENTATION:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import deque
-import json
 import os
 import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -11,7 +10,7 @@ from datasets import load_dataset
 from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic as _write_json_atomic, write_sentence_parquet as _write_sentence_parquet
-from paths import SENTENCES_DIR, WIKI_CLEANUP_META, WIKI_SEGMENTATION_DEBUG_DIR, WIKI_TEMP_DIR
+from paths import SENTENCES_DIR, WIKI_SEGMENTATION_DEBUG_DIR, WIKI_TEMP_DIR
 from text_utils import (
     _article_min_chars,
     _get_segmenter,
@@ -56,94 +55,6 @@ LENGTH_PRIORITY_SENTENCE_CAP = 25_000
 
 def parquet_path(sentences_dir: str, lang: str) -> str:
     return os.path.join(sentences_dir, f"{lang}.parquet")
-
-
-def _load_cleanup_meta() -> dict[str, dict]:
-    if not os.path.exists(WIKI_CLEANUP_META):
-        return {}
-    try:
-        with open(WIKI_CLEANUP_META, encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _write_cleanup_meta(meta: dict[str, dict]) -> None:
-    _write_json_atomic(WIKI_CLEANUP_META, meta)
-
-
-def _cleanup_fingerprint(path: str) -> dict[str, int]:
-    stat = os.stat(path)
-    return {
-        "mtime_ns": int(stat.st_mtime_ns),
-        "size": int(stat.st_size),
-    }
-
-
-def finalize_wiki_sentence_cache(
-    sentence_map: dict[str, list[str]],
-    *,
-    lang_to_group: dict[str, str],
-) -> dict[str, list[str]]:
-    cleaned_map: dict[str, list[str]] = {}
-    total_before = 0
-    total_after = 0
-    changed_langs = 0
-    cleanup_meta = _load_cleanup_meta()
-
-    langs = sorted(sentence_map.keys())
-
-    with tqdm(total=len(langs), desc="Languages", unit="lang") as pbar_langs:
-        for lang in langs:
-            sentences = sentence_map[lang]
-            path = parquet_path(SENTENCES_DIR, lang)
-            fingerprint = _cleanup_fingerprint(path) if os.path.exists(path) else {}
-            meta_entry = cleanup_meta.get(lang, {})
-            already_cleaned = (
-                bool(meta_entry.get("cleaned"))
-                and meta_entry.get("path") == path
-                and meta_entry.get("input_fingerprint") == fingerprint
-            )
-
-            with tqdm(
-                total=len(sentences),
-                desc=f"{lang} cleanup",
-                unit="sent",
-                leave=False,
-            ) as pbar_sent:
-                if already_cleaned:
-                    cleaned = sentences
-                else:
-                    cleaned = post_clean_sentences(sentences, lang, lang_to_group)
-                pbar_sent.update(len(sentences))
-
-            before = len(sentences)
-            after = len(cleaned)
-            total_before += before
-            total_after += after
-
-            if cleaned != sentences:
-                changed_langs += 1
-                _write_sentence_parquet(path, cleaned)
-
-            cleaned_map[lang] = cleaned
-            cleanup_meta[lang] = {
-                "path": path,
-                "cleaned": True,
-                "input_fingerprint": fingerprint,
-                "input_sentence_count": before,
-                "cleaned_sentence_count": after,
-                "updated": cleaned != sentences,
-            }
-            pbar_langs.update(1)
-
-    _write_cleanup_meta(cleanup_meta)
-    print(
-        f"\nWiki post-clean: {changed_langs} languages updated | "
-        f"{total_before:,} -> {total_after:,} sentences"
-    )
-    return cleaned_map
 
 
 def prepare_wiki_paragraphs(text: str, lang: str, lang_to_group: dict[str, str]) -> list[str] | None:

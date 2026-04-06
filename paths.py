@@ -11,7 +11,6 @@ FINETRANS_CACHE_FILE = os.path.join(SENTENCES_DIR, "finetranslations_sentences.p
 FINETRANS_CACHE_META = os.path.join(SENTENCES_DIR, "finetranslations_sentences.meta.json")
 FINETRANS_TEMP_DIR = os.path.join(SENTENCES_DIR, "_finetrans_tmp")
 FINETRANS_TEMP_FILE = os.path.join(FINETRANS_TEMP_DIR, "finetranslations_sentences.parquet")
-WIKI_CLEANUP_META = os.path.join(SENTENCES_DIR, "wiki_cleanup.meta.json")
 SYNTHETIC_CACHE = os.path.join(SENTENCES_DIR, "synthetic_examples")
 SYNTHETIC_CACHE_META = os.path.join(SYNTHETIC_CACHE, "synthetic_examples.meta.json")
 SYNTHETIC_TEMP_DIR = os.path.join(SENTENCES_DIR, "_synthetic_tmp")
