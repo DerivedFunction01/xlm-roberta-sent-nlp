@@ -46,6 +46,9 @@ from huggingface_hub import login
 from tqdm.auto import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+from paths import SENTENCES_DIR
+from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS
+
 try:
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -70,8 +73,6 @@ MAX_COVERAGE_DOCS_PER_LANG = 5
 SMOL_RESERVE_FRACTION = 0.50
 SMOL_MIN_RESERVED_SENTENCES = 1
 SMOL_MAX_RESERVED_SENTENCES = MAX_RESERVED_SENTENCES
-SENTENCES_DIR = "./sentences_cache"
-os.makedirs(SENTENCES_DIR, exist_ok=True)
 USE_SYNTHETIC_CACHE = True
 FORCE_REBUILD_SYNTHETIC_CACHE = False
 USE_TOKENIZED_CACHE = True
@@ -89,23 +90,6 @@ coverage_plan: list[str] | None = None
 reserved_worker_pools: list[dict[str, deque[str]]] | None = None
 main_worker_pools: list[dict[str, deque[str]]] | None = None
 # %%
-# --- Language Configuration ---
-# Script groups and their ISO codes.
-# English gets its own tier so it does not have to compete with the rest of the Latin bucket.
-LANGUAGE_GROUPS = {
-    "English":      ["en"],
-    "LatinCore":    ["es", "fr", "de", "it", "pt", "nl"],
-    "LatinTier2":   ["vi", "tr", "la", "id", "ms", "af", "sq", "is", "no", "sv", "da", "fi", "hu", "pl", "cs", "ro"],
-    "Cyrillic":     ["ru", "bg", "uk", "sr", "be", "kk", "mk", "mn"],
-    "EastAsian":    ["zh", "ja", "ko"],
-    "Indic":        ["hi", "ur", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "as", "or"],
-    "ArabicScript": ["ar", "fa", "ps", "sd", "ug"],
-    "OtherScripts": ["el", "he", "hy", "ka", "am", "km", "lo", "my", "th"],
-}
-
-ALL_LANGS = [lang for langs in LANGUAGE_GROUPS.values() for lang in langs]
-LANG_TO_GROUP = {lang: group for group, langs in LANGUAGE_GROUPS.items() for lang in langs}
-
 # Build BIO label map  (O=0, B-XX=odd, I-XX=even starting at 2)
 label2id = {"O": 0}
 id2label = {0: "O"}

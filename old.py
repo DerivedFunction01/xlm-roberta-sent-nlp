@@ -113,8 +113,6 @@ coverage_plan: list[str] | None = None
 reserved_worker_pools: list[dict[str, deque[str]]] | None = None
 main_worker_pools: list[dict[str, deque[str]]] | None = None
 
-from google.colab import drive
-drive.mount('/content/drive')
 
 # --- Language Configuration ---
 # Script groups and their ISO codes.
@@ -2202,7 +2200,7 @@ if cached_tokenized is not None:
     train_dataset = cached_tokenized["train"]
     eval_dataset = cached_tokenized["eval"]
     # Reduce the eval size to 10% of it
-    eval_dataset = eval_dataset.select(range(len(eval_dataset) // 10))
+    eval_dataset = eval_dataset.select(range(len(eval_dataset) // 10)) # type: ignore
     print(f"Loaded tokenized dataset cache from {CACHE_DIR}")
 else:
     if synthetic_dataset is None:

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import traceback
+from pathlib import Path
 
 
 LATIN_GROUPS = {"English", "LatinCore", "LatinTier2"}
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
+SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
 BRACKET_NOTES = re.compile(r"\s*[\(\[【（][^\)\]】）]{0,60}[\)\]】）]\s*")
 WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
 WIKI_SPACES = re.compile(r"\s{2,}")
@@ -13,7 +17,6 @@ WIKI_PUNCT_REPEAT = re.compile(r"([,.;:!?…،。！？])\1+")
 WIKI_TRAILING_ORPHAN_LETTER = re.compile(r"[\s,.;:!?…،。！？]+([^\W\d_])$")
 WIKI_LEADING_ORPHAN_LETTER = re.compile(r"^[\"'“”‘’«»‹›\s,.;:!?…،。！？]+([^\W\d_])\s+")
 WIKI_BLOCKED_MARKERS = ("http",)
-WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
 WIKI_BLOCKED_CHARS = {"=", "<", ">", "|"}
 WIKI_OPENING_QUOTES = {"\"", "'", "“", "”", "‘", "’", "«", "»", "‹", "›"}
 WIKI_NON_CONTENT = re.compile(r"[\W_]+", flags=re.UNICODE)
@@ -21,6 +24,34 @@ WIKI_DIGITS = re.compile(r"\d")
 WIKI_WORDS = re.compile(r"\b\w+\b", flags=re.UNICODE)
 MAX_DIGIT_RATIO = 0.10
 MIN_LATIN_WORDS = 4
+
+PYSBD_SUPPORTED = {
+    "en", "hi", "mr", "bg", "es", "ru", "ar", "am", "hy", "fa",
+    "ur", "pl", "zh", "nl", "da", "fr", "it", "el", "my", "ja", "de", "kk",
+}
+PYSBD_FALLBACKS = {
+    "uk": "ru", "be": "ru", "sr": "ru", "mk": "ru", "mn": "ru",
+    "pt": "es", "ro": "fr", "la": "it", "sq": "it",
+    "sv": "da", "no": "da", "is": "da",
+    "fi": "en", "hu": "en", "cs": "pl",
+    "vi": "en", "id": "en", "ms": "en", "af": "nl", "tr": "en",
+    "he": "ar", "ps": "fa", "ug": "ar",
+    "bn": "hi", "ta": "hi", "te": "hi", "gu": "hi", "kn": "hi",
+    "ml": "hi", "pa": "hi", "as": "hi", "or": "hi", "sd": "hi",
+    "ka": "en", "km": "zh", "ko": "zh", "lo": "zh", "th": "zh",
+}
+
+SENT_BOUNDS: dict[str, tuple[int, int]] = {
+    "zh": (8, 180), "ja": (10, 180),
+    "ko": (15, 220), "th": (15, 250), "km": (15, 250), "lo": (15, 250), "my": (15, 250),
+    "ar": (25, 450), "fa": (25, 450), "he": (25, 400), "ur": (25, 450),
+    "hi": (30, 500), "bn": (30, 500), "ta": (30, 500), "te": (30, 500), "am": (25, 400),
+    "fi": (20, 450), "hu": (20, 450), "tr": (20, 450), "vi": (15, 300),
+    "de": (40, 600), "ru": (35, 650), "uk": (35, 650), "el": (35, 650),
+    "hy": (30, 500), "ka": (25, 450), "en": (24, 600),
+}
+DEFAULT_BOUNDS = (30, 600)
+_PROC_SEGMENTERS: dict[str, object] = {}
 
 
 def _non_punct_char_count(s: str) -> int:
@@ -98,9 +129,9 @@ def _is_valid_sentence(
     lang: str,
     lang_to_group: dict[str, str],
     sent_bounds: dict[str, tuple[int, int]] | None = None,
-    default_bounds: tuple[int, int] = (30, 600),
+    default_bounds: tuple[int, int] = DEFAULT_BOUNDS,
 ) -> bool:
-    sent_bounds = sent_bounds or {}
+    sent_bounds = sent_bounds or SENT_BOUNDS
     mn, mx = sent_bounds.get(lang, default_bounds)
     visible = _non_punct_char_count(s)
     if not (mn < visible < mx):
@@ -115,8 +146,8 @@ def post_clean_sentences(
     sentences: list[str],
     lang: str,
     lang_to_group: dict[str, str],
-    sent_bounds: dict[str, tuple[int, int]],
-    default_bounds: tuple[int, int],
+    sent_bounds: dict[str, tuple[int, int]] | None = None,
+    default_bounds: tuple[int, int] = DEFAULT_BOUNDS,
 ) -> list[str]:
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -140,3 +171,72 @@ def post_clean_sentences(
             seen.add(sentence)
             cleaned.append(sentence)
     return cleaned
+
+
+def _get_segmenter(lang: str):
+    if lang in _PROC_SEGMENTERS:
+        return _PROC_SEGMENTERS[lang]
+    try:
+        import pysbd as _pysbd
+        proxy = PYSBD_FALLBACKS.get(lang, lang if lang in PYSBD_SUPPORTED else None)
+        seg = _pysbd.Segmenter(language=proxy, clean=True) if proxy else None
+    except (ImportError, ValueError):
+        seg = None
+    _PROC_SEGMENTERS[lang] = seg
+    return seg
+
+
+def sanitize_paragraph_for_pysbd(paragraph: str) -> str:
+    if "\\" not in paragraph:
+        return paragraph
+    return paragraph.replace("\\", " ")
+
+
+def _article_min_chars(lang: str, lang_to_group: dict[str, str]) -> int:
+    group = lang_to_group.get(lang)
+    return {
+        "English": 2_000,
+        "LatinCore": 2_000,
+        "LatinTier2": 2_000,
+        "Cyrillic": 2_000,
+        "EastAsian": 1_200,
+        "Indic": 2_000,
+        "ArabicScript": 2_000,
+        "OtherScripts": 2_000,
+    }.get(group, 3_000)
+
+
+def _split_paragraphs(text: str, lang: str, lang_to_group: dict[str, str]) -> list[str] | None:
+    if len(text) < _article_min_chars(lang, lang_to_group):
+        return None
+    text = WIKI_MARKUP.sub("", text)
+    paragraphs = [p.strip() for p in WIKI_PARAGRAPH_SPLIT.split(text) if p.strip()]
+    return paragraphs or None
+
+
+def log_segmentation_failure(
+    log_path: str | Path,
+    *,
+    lang: str,
+    article_idx: int,
+    paragraph_idx: int,
+    paragraph: str,
+    exc: Exception,
+    article_title: str = "",
+) -> None:
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    snippet = paragraph[:800].replace("\n", " ")
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(
+            f"lang={lang} article_idx={article_idx} paragraph_idx={paragraph_idx}\n"
+            f"title={article_title!r}\n"
+            f"error={type(exc).__name__}: {exc}\n"
+            f"snippet={snippet}\n"
+            f"traceback={traceback.format_exc()}\n"
+            f"{'-' * 100}\n"
+        )
+    print(
+        f"  pysbd failed for lang={lang} article={article_idx} paragraph={paragraph_idx} "
+        f"-> {log_path}"
+    )

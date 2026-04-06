@@ -6,26 +6,21 @@ import os
 from typing import Any
 
 from datasets import Dataset, load_dataset
+from paths import (
+    CACHE_DIR,
+    CACHE_META,
+    CACHE_VERSION,
+    SENTENCES_DIR,
+    SYNTHETIC_CACHE,
+    SYNTHETIC_CACHE_META,
+    SYNTHETIC_TEMP_DIR,
+    TOKENIZED_CACHE_VERSION,
+)
 
 try:
     import pyarrow as pa
 except ImportError:
     pa = None
-
-
-SENTENCES_DIR = "./sentences_cache"
-SYNTHETIC_CACHE = os.path.join(SENTENCES_DIR, "synthetic_examples")
-SYNTHETIC_CACHE_META = os.path.join(SYNTHETIC_CACHE, "synthetic_examples.meta.json")
-SYNTHETIC_TEMP_DIR = os.path.join(SENTENCES_DIR, "_synthetic_tmp")
-CACHE_DIR = f"{SENTENCES_DIR}/tokenized_dataset"
-CACHE_META = f"{CACHE_DIR}/tokenized_dataset.meta.json"
-CACHE_VERSION = 2
-TOKENIZED_CACHE_VERSION = 2
-
-os.makedirs(SENTENCES_DIR, exist_ok=True)
-os.makedirs(SYNTHETIC_CACHE, exist_ok=True)
-os.makedirs(SYNTHETIC_TEMP_DIR, exist_ok=True)
-os.makedirs(CACHE_DIR, exist_ok=True)
 
 
 def _write_json_atomic(path: str, payload: dict) -> None:

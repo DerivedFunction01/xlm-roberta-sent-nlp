@@ -8,8 +8,8 @@ from typing import Callable
 from datasets import get_dataset_config_names, load_dataset
 from tqdm.auto import tqdm
 
-from text_utils import _collapse_spaces, _is_valid_sentence, _strip_bracket_notes
-from wiki_sources import _get_segmenter
+from paths import SENTENCES_DIR, SMOL_CACHE_FILE
+from text_utils import _collapse_spaces, _get_segmenter, _is_valid_sentence, _strip_bracket_notes
 
 
 SMOL_CODE_MAP: dict[str, str] = {
@@ -97,7 +97,7 @@ def _load_smolsent(accumulator: dict[str, list[str]], lang_to_group: dict[str, s
                 _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl, lang_to_group)  # type: ignore[arg-type]
             source_langs_seen.add(sl)
 
-        seg = _get_segmenter(mapped, lang_to_group)
+        seg = _get_segmenter(mapped)
         for row in ds:
             trg = row.get("trg") or ""  # type: ignore[assignment]
             if not isinstance(trg, str):
@@ -116,7 +116,7 @@ def load_smol_sentences(
     max_sentences_per_lang: int = MAX_SENTENCES_PER_LANG,
     uncapped_langs: set[str] | None = None,
 ) -> dict[str, list[str]]:
-    cache_file = os.path.join(sentences_dir, "smol_sentences.json")
+    cache_file = SMOL_CACHE_FILE if sentences_dir == SENTENCES_DIR else os.path.join(sentences_dir, "smol_sentences.json")
     uncapped_langs = uncapped_langs or UNCAPPED_LANGS
     if not force_rebuild and os.path.exists(cache_file):
         print(f"Loading SMOL cache from {cache_file}")

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+from collections import deque
 import json
 import os
-import random
 import re
-import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import pandas as pd
@@ -12,40 +11,16 @@ from datasets import load_dataset
 from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic as _write_json_atomic, write_sentence_parquet as _write_sentence_parquet
-from source_pools import (
-    chunk_list,
-    draw_sentence,
-    partition_sentence_pools,
-    remaining_sentence_count,
-)
+from paths import SENTENCES_DIR, WIKI_CLEANUP_META, WIKI_SEGMENTATION_DEBUG_DIR, WIKI_TEMP_DIR
 from text_utils import (
-    MAX_DIGIT_RATIO,
-    MIN_LATIN_WORDS,
-    WIKI_ASCII_WORDS,
-    WIKI_BLOCKED_CHARS,
-    WIKI_BLOCKED_MARKERS,
-    WIKI_LEADING_ORPHAN_LETTER,
-    WIKI_NON_CONTENT,
-    WIKI_OPENING_QUOTES,
-    WIKI_PARAGRAPH_SPLIT,
-    WIKI_PUNCT_REPEAT,
-    WIKI_SPACES,
-    WIKI_TRAILING_ORPHAN_LETTER,
-    WIKI_WORDS,
-    _collapse_repeated_punct,
-    _collapse_spaces,
-    _digit_count,
-    _has_blocked_artifact,
+    _article_min_chars,
+    _get_segmenter,
     _is_valid_sentence,
-    _non_punct_char_count,
-    _strip_ascii_for_lang,
-    _strip_bracket_notes,
-    _strip_leading_orphan_letter,
-    _strip_leading_punct,
-    _strip_trailing_orphan_letter,
-    _word_count,
-    clean_sentence as clean_wiki_sentence,
-    post_clean_sentences as post_clean_wiki_sentences,
+    _split_paragraphs,
+    clean_sentence,
+    log_segmentation_failure,
+    post_clean_sentences,
+    sanitize_paragraph_for_pysbd,
 )
 
 try:
@@ -56,78 +31,14 @@ except ImportError:
     pq = None
 
 
-SENTENCES_DIR = "./sentences_cache"
 MAX_WIKI_INDEX = 100_000
 MAX_WIKI_SENTENCES = 200_000
 MAX_WIKI_SENTENCES_BY_LANG = {
     "en": 300_000,
 }
 WIKI_ROLLING_STATS_WINDOW = 250
-WIKI_TEMP_DIR = os.path.join(SENTENCES_DIR, "_wiki_tmp")
-WIKI_SEGMENTATION_DEBUG_DIR = os.path.join(WIKI_TEMP_DIR, "segmentation_debug")
-
-os.makedirs(SENTENCES_DIR, exist_ok=True)
-os.makedirs(WIKI_TEMP_DIR, exist_ok=True)
-os.makedirs(WIKI_SEGMENTATION_DEBUG_DIR, exist_ok=True)
-
-
-LATIN_GROUPS = {"English", "LatinCore", "LatinTier2"}
-MIN_ARTICLE_CHARS_BY_GROUP: dict[str, int] = {
-    "English": 2_000,
-    "LatinCore": 2_000,
-    "LatinTier2": 2_000,
-    "Cyrillic": 2_000,
-    "EastAsian": 1_200,
-    "Indic": 2_000,
-    "ArabicScript": 2_000,
-    "OtherScripts": 2_000,
-}
-MIN_ARTICLE_CHARS_DEFAULT = 3_000
-
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
-WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
-BRACKET_NOTES = re.compile(r"\s*[\(\[【（][^\)\]】）]{0,60}[\)\]】）]\s*")
-WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
-WIKI_SPACES = re.compile(r"\s{2,}")
-WIKI_PUNCT_REPEAT = re.compile(r"([,.;:!?…،。！？])\1+")
-WIKI_TRAILING_ORPHAN_LETTER = re.compile(r"[\s,.;:!?…،。！？]+([^\W\d_])$")
-WIKI_LEADING_ORPHAN_LETTER = re.compile(r"^[\"'“”‘’«»‹›\s,.;:!?…،。！？]+([^\W\d_])\s+")
-WIKI_BLOCKED_MARKERS = ("http",)
-WIKI_BLOCKED_CHARS = {"=", "<", ">", "|"}
-WIKI_OPENING_QUOTES = {"\"", "'", "“", "”", "‘", "’", "«", "»", "‹", "›"}
-WIKI_NON_CONTENT = re.compile(r"[\W_]+", flags=re.UNICODE)
-WIKI_DIGITS = re.compile(r"\d")
-WIKI_WORDS = re.compile(r"\b\w+\b", flags=re.UNICODE)
-MAX_DIGIT_RATIO = 0.10
-MIN_LATIN_WORDS = 4
-
-PYSBD_SUPPORTED = {
-    "en", "hi", "mr", "bg", "es", "ru", "ar", "am", "hy", "fa",
-    "ur", "pl", "zh", "nl", "da", "fr", "it", "el", "my", "ja", "de", "kk",
-}
-PYSBD_FALLBACKS = {
-    "uk": "ru", "be": "ru", "sr": "ru", "mk": "ru", "mn": "ru",
-    "pt": "es", "ro": "fr", "la": "it", "sq": "it",
-    "sv": "da", "no": "da", "is": "da",
-    "fi": "en", "hu": "en", "cs": "pl",
-    "vi": "en", "id": "en", "ms": "en", "af": "nl", "tr": "en",
-    "he": "ar", "ps": "fa", "ug": "ar",
-    "bn": "hi", "ta": "hi", "te": "hi", "gu": "hi", "kn": "hi",
-    "ml": "hi", "pa": "hi", "as": "hi", "or": "hi", "sd": "hi",
-    "ka": "en", "km": "zh", "ko": "zh", "lo": "zh", "th": "zh",
-}
-
-_SENT_BOUNDS: dict[str, tuple[int, int]] = {
-    "zh": (8, 180), "ja": (10, 180),
-    "ko": (15, 220), "th": (15, 250), "km": (15, 250), "lo": (15, 250), "my": (15, 250),
-    "ar": (25, 450), "fa": (25, 450), "he": (25, 400), "ur": (25, 450),
-    "hi": (30, 500), "bn": (30, 500), "ta": (30, 500), "te": (30, 500), "am": (25, 400),
-    "fi": (20, 450), "hu": (20, 450), "tr": (20, 450), "vi": (15, 300),
-    "de": (40, 600), "ru": (35, 650), "uk": (35, 650), "el": (35, 650),
-    "hy": (30, 500), "ka": (25, 450), "en": (24, 600),
-}
-_DEFAULT_BOUNDS = (30, 600)
 LENGTH_PRIORITY_SCAN_LIMIT = int(MAX_WIKI_INDEX // 1.5)
 LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG = {
     "vi": 50_000,
@@ -141,10 +52,6 @@ LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG = {
 }
 LENGTH_PRIORITY_LANGS = set(LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG)
 LENGTH_PRIORITY_SENTENCE_CAP = 25_000
-
-_PROC_SEGMENTERS: dict[str, object] = {}
-WIKI_CLEANUP_META = os.path.join(SENTENCES_DIR, "wiki_cleanup.meta.json")
-
 
 def parquet_path(sentences_dir: str, lang: str) -> str:
     return os.path.join(sentences_dir, f"{lang}.parquet")
@@ -207,7 +114,7 @@ def finalize_wiki_sentence_cache(
                 if already_cleaned:
                     cleaned = sentences
                 else:
-                    cleaned = post_clean_wiki_sentences(sentences, lang, lang_to_group)
+                    cleaned = post_clean_sentences(sentences, lang, lang_to_group)
                 pbar_sent.update(len(sentences))
 
             before = len(sentences)
@@ -238,13 +145,8 @@ def finalize_wiki_sentence_cache(
     return cleaned_map
 
 
-def _article_min_chars(lang: str, lang_to_group: dict[str, str]) -> int:
-    group = lang_to_group.get(lang)
-    return MIN_ARTICLE_CHARS_BY_GROUP.get(group, MIN_ARTICLE_CHARS_DEFAULT)  # type: ignore[arg-type]
-
-
 def prepare_wiki_paragraphs(text: str, lang: str, lang_to_group: dict[str, str]) -> list[str] | None:
-    paragraphs = _split_wiki_paragraphs(text, lang, lang_to_group)
+    paragraphs = _split_paragraphs(text, lang, lang_to_group)
     if paragraphs is None:
         return None
 
@@ -253,37 +155,6 @@ def prepare_wiki_paragraphs(text: str, lang: str, lang_to_group: dict[str, str])
     selected = paragraphs[:cutoff]
     selected.sort(key=len, reverse=True)
     return selected
-
-
-def _log_segmentation_failure(
-    lang: str,
-    article_idx: int,
-    paragraph_idx: int,
-    paragraph: str,
-    exc: Exception,
-    article_title: str = "",
-) -> None:
-    snippet = paragraph[:800].replace("\n", " ")
-    log_path = os.path.join(WIKI_SEGMENTATION_DEBUG_DIR, f"{lang}.log")
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(
-            f"lang={lang} article_idx={article_idx} paragraph_idx={paragraph_idx}\n"
-            f"title={article_title!r}\n"
-            f"error={type(exc).__name__}: {exc}\n"
-            f"snippet={snippet}\n"
-            f"traceback={traceback.format_exc()}\n"
-            f"{'-' * 100}\n"
-        )
-    print(
-        f"  pysbd failed for lang={lang} article={article_idx} paragraph={paragraph_idx} "
-        f"-> {log_path}"
-    )
-
-
-def _sanitize_paragraph_for_pysbd(paragraph: str) -> str:
-    if "\\" not in paragraph:
-        return paragraph
-    return paragraph.replace("\\", " ")
 
 
 def _extract_article_sentences(
@@ -301,21 +172,22 @@ def _extract_article_sentences(
 
     article_batch: list[str] = []
     for paragraph_idx, paragraph in enumerate(paragraphs):
-        safe_paragraph = _sanitize_paragraph_for_pysbd(paragraph)
+        safe_paragraph = sanitize_paragraph_for_pysbd(paragraph)
         try:
             sents = segmenter.segment(safe_paragraph) if segmenter else SENT_SPLIT.split(safe_paragraph)  # type: ignore[attr-defined]
         except re.error as exc:
-            _log_segmentation_failure(
-                lang,
-                article_idx,
-                paragraph_idx,
-                paragraph,
-                exc,
+            log_segmentation_failure(
+                os.path.join(WIKI_SEGMENTATION_DEBUG_DIR, f"{lang}.log"),
+                lang=lang,
+                article_idx=article_idx,
+                paragraph_idx=paragraph_idx,
+                paragraph=paragraph,
+                exc=exc,
                 article_title=article_title,
             )
             sents = SENT_SPLIT.split(safe_paragraph)
         for s in sents:
-            s = clean_wiki_sentence(s, lang, lang_to_group)
+            s = clean_sentence(s, lang, lang_to_group)
             if _is_valid_sentence(s, lang, lang_to_group):
                 article_batch.append(s)
 
@@ -388,19 +260,6 @@ def _write_sentence_batch(writer, pa_module, batch: list[str]) -> None:
         return
     table = pa_module.table({"sentence": pa_module.array(batch, type=pa_module.string())})
     writer.write_table(table)
-
-
-def _get_segmenter(lang: str):
-    if lang in _PROC_SEGMENTERS:
-        return _PROC_SEGMENTERS[lang]
-    try:
-        import pysbd as _pysbd
-        proxy = PYSBD_FALLBACKS.get(lang, lang if lang in PYSBD_SUPPORTED else None)
-        seg = _pysbd.Segmenter(language=proxy, clean=True) if proxy else None
-    except (ImportError, ValueError):
-        seg = None
-    _PROC_SEGMENTERS[lang] = seg
-    return seg
 
 
 def extract_sentences_from_wiki(
@@ -487,7 +346,7 @@ def extract_sentences_from_wiki(
                     f"avgS {_rolling_avg(sentence_lengths_window):.0f}"
                 )
 
-        committed_sentences = post_clean_wiki_sentences(committed_sentences, lang, lang_to_group)
+        committed_sentences = post_clean_sentences(committed_sentences, lang, lang_to_group)
         _write_sentence_parquet(final_path, committed_sentences)
         return final_path
 
@@ -646,7 +505,7 @@ def extract_sentences_from_wiki(
                 if accepted_articles >= n_articles:
                     break
 
-        committed_sentences = post_clean_wiki_sentences(committed_sentences, lang, lang_to_group)
+        committed_sentences = post_clean_sentences(committed_sentences, lang, lang_to_group)
         _write_sentence_parquet(final_path, committed_sentences)
         completed_cleanly = True
     finally:
@@ -670,7 +529,7 @@ def load_or_extract(
     path = parquet_path(sentences_dir, lang)
     if os.path.exists(path):
         cached = pd.read_parquet(path)["sentence"].tolist()
-        cleaned = post_clean_wiki_sentences(cached, lang, lang_to_group)
+        cleaned = post_clean_sentences(cached, lang, lang_to_group)
         if cleaned != cached:
             _write_sentence_parquet(path, cleaned)
         return lang, path
