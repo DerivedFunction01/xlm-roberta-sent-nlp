@@ -21,10 +21,12 @@ from paths import (
 )
 from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3
 from source_config import (
+    FT_INCLUDE_TRANSLATED_ENGLISH,
     FT_MAX_MISS_STREAK,
     FT_MAX_ROW_INDEX,
     FT_MAX_SENTENCES_PER_LANG,
     FT_OVERFLOW_SENTENCES_PER_LANG,
+    FT_TRANSLATED_ENGLISH_LANGS,
 )
 from text_utils import (
     LATIN_GROUPS,
@@ -334,6 +336,10 @@ def _row_is_translated_en_acceptable(row: dict[str, Any]) -> bool:
     if edu is None:
         return True
     return edu >= 1.0
+
+
+def _include_translated_english_for_lang(lang: str, include_translated_english: bool) -> bool:
+    return include_translated_english and lang in FT_TRANSLATED_ENGLISH_LANGS
 
 
 def _compute_length_thresholds(records: list[dict[str, Any]]) -> tuple[int, int]:
@@ -694,7 +700,7 @@ def _process_finetrans_config(
                 )
                 break
 
-        if include_translated_english:
+        if _include_translated_english_for_lang(lang, include_translated_english):
             english_records = _sentence_records_from_row(
                 row,
                 lang="en",
@@ -749,7 +755,7 @@ def load_finetranslations_sentences(
     overflow_sentences_per_lang: int = FT_OVERFLOW_SENTENCES_PER_LANG,
     max_row_index: int = FT_MAX_ROW_INDEX,
     max_miss_streak: int = FT_MAX_MISS_STREAK,
-    include_translated_english: bool = False,
+    include_translated_english: bool = FT_INCLUDE_TRANSLATED_ENGLISH,
     max_workers: int | None = None,
 ) -> dict[str, list[str]]:
     configs = _matching_configs(lang_to_group)
