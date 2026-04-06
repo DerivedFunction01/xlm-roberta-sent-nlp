@@ -112,6 +112,14 @@ def _finetrans_english_config_shard_path(sentences_dir: str, config_idx: int, sh
     )
 
 
+def _finetrans_config_records_path(sentences_dir: str, config_idx: int) -> str:
+    return os.path.join(_finetrans_config_dir(sentences_dir, config_idx), "source.parquet")
+
+
+def _finetrans_english_records_path(sentences_dir: str, config_idx: int) -> str:
+    return os.path.join(_finetrans_english_config_dir(sentences_dir, config_idx), "en.parquet")
+
+
 def _config_name_to_lang(config_name: str, lang_to_group: dict[str, str]) -> str | None:
     config_name = config_name.rsplit("/", 1)[-1]
     if config_name == "all":
@@ -522,36 +530,15 @@ def _load_finetrans_checkpoint_meta(
     return None
 
 
-def _load_finetrans_records_from_shards(shard_dir: str) -> list[dict[str, Any]]:
+def _load_finetrans_records_from_configs(config_root: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    if not os.path.isdir(shard_dir):
+    if not os.path.isdir(config_root):
         return rows
-    parquet_paths: list[str] = []
-    for root, _, files in os.walk(shard_dir):
+    for root, _, files in os.walk(config_root):
         for name in files:
-            if name.endswith(".parquet"):
-                parquet_paths.append(os.path.join(root, name))
-    for path in sorted(parquet_paths):
-        rows.extend(_read_records_parquet(path))
+            if name in {"source.parquet", "en.parquet"}:
+                rows.extend(_read_records_parquet(os.path.join(root, name)))
     return rows
-
-
-def _clear_finetrans_shards(shard_dir: str) -> None:
-    if not os.path.isdir(shard_dir):
-        return
-    for root, dirs, files in os.walk(shard_dir, topdown=False):
-        for name in files:
-            path = os.path.join(root, name)
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-        for name in dirs:
-            path = os.path.join(root, name)
-            try:
-                os.rmdir(path)
-            except OSError:
-                pass
 
 
 def _clear_finetrans_config_dir(config_dir: str) -> None:
@@ -612,6 +599,8 @@ def _process_finetrans_config(
 ) -> dict[str, Any]:
     config_dir = _finetrans_config_dir(sentences_dir, config_idx)
     english_dir = _finetrans_english_config_dir(sentences_dir, config_idx)
+    config_records_path = _finetrans_config_records_path(sentences_dir, config_idx)
+    english_records_path = _finetrans_english_records_path(sentences_dir, config_idx)
     config_meta_path = _finetrans_config_meta_path(sentences_dir, config_idx)
     os.makedirs(config_dir, exist_ok=True)
     os.makedirs(english_dir, exist_ok=True)
@@ -631,13 +620,17 @@ def _process_finetrans_config(
         }
 
     checkpoint_meta = None if force_rebuild else _load_config_checkpoint_meta(config_meta_path, expected_meta)
+    if force_rebuild or checkpoint_meta is None:
+        _clear_finetrans_config_dir(config_dir)
+        os.makedirs(config_dir, exist_ok=True)
+        os.makedirs(english_dir, exist_ok=True)
     next_row_idx = int(checkpoint_meta.get("next_row_idx", 0)) if checkpoint_meta else 0
-    next_shard_idx = int(checkpoint_meta.get("next_shard_idx", 0)) if checkpoint_meta else 0
-    next_english_shard_idx = int(checkpoint_meta.get("next_english_shard_idx", 0)) if checkpoint_meta else 0
     english_seen_sentences = int(checkpoint_meta.get("english_seen_sentences", 0)) if checkpoint_meta else 0
 
-    pending_records: list[dict[str, Any]] = []
-    english_pending_records: list[dict[str, Any]] = []
+    pending_records: list[dict[str, Any]] = _read_records_parquet(config_records_path) if not force_rebuild else []
+    english_pending_records: list[dict[str, Any]] = (
+        _read_records_parquet(english_records_path) if not force_rebuild else []
+    )
     accepted_rows = int(checkpoint_meta.get("accepted_rows", 0)) if checkpoint_meta else 0
     accepted_sentences = int(checkpoint_meta.get("accepted_sentences", 0)) if checkpoint_meta else 0
     accepted_english_sentences = int(checkpoint_meta.get("accepted_english_sentences", 0)) if checkpoint_meta else 0
@@ -645,27 +638,14 @@ def _process_finetrans_config(
 
     if checkpoint_meta is not None:
         print(
-            f"  Resuming {config} ({lang}) from row {next_row_idx} shard {next_shard_idx}"
+            f"  Resuming {config} ({lang}) from row {next_row_idx}"
         )
 
     def _flush_pending(
         *,
         row_idx: int,
-        shard_idx: int,
-        english_shard_idx: int,
         status: str,
-    ) -> tuple[int, int]:
-        nonlocal pending_records, english_pending_records, accepted_rows, accepted_english_sentences
-        if pending_records:
-            shard_path = _finetrans_config_shard_path(sentences_dir, config_idx, shard_idx)
-            write_records_parquet(shard_path, pending_records)
-            shard_idx += 1
-            pending_records = []
-        if english_pending_records:
-            english_shard_path = _finetrans_english_config_shard_path(sentences_dir, config_idx, english_shard_idx)
-            write_records_parquet(english_shard_path, english_pending_records)
-            english_shard_idx += 1
-            english_pending_records = []
+    ) -> None:
         meta = dict(expected_meta)
         meta.update(
             {
@@ -678,13 +658,12 @@ def _process_finetrans_config(
                 "accepted_english_sentences": accepted_english_sentences,
                 "miss_streak": miss_streak,
                 "next_row_idx": row_idx,
-                "next_shard_idx": shard_idx,
-                "next_english_shard_idx": english_shard_idx,
                 "english_seen_sentences": english_seen_sentences,
             }
         )
+        write_records_parquet(config_records_path, pending_records)
+        write_records_parquet(english_records_path, english_pending_records)
         write_json_atomic(config_meta_path, meta)
-        return shard_idx, english_shard_idx
 
     try:
         ds = load_dataset(FINETRANS_DATASET, config, split="train", streaming=True)
@@ -764,19 +743,9 @@ def _process_finetrans_config(
             len(pending_records) >= FINETRANS_CHECKPOINT_EVERY_ROWS
             or len(english_pending_records) >= FINETRANS_CHECKPOINT_EVERY_ROWS
         ):
-            next_shard_idx, next_english_shard_idx = _flush_pending(
-                row_idx=row_idx + 1,
-                shard_idx=next_shard_idx,
-                english_shard_idx=next_english_shard_idx,
-                status="checkpoint",
-            )
+            _flush_pending(row_idx=row_idx + 1, status="checkpoint")
 
-    next_shard_idx, next_english_shard_idx = _flush_pending(
-        row_idx=0,
-        shard_idx=next_shard_idx,
-        english_shard_idx=next_english_shard_idx,
-        status="complete",
-    )
+    _flush_pending(row_idx=0, status="complete")
     meta = dict(expected_meta)
     meta.update(
         {
@@ -789,8 +758,6 @@ def _process_finetrans_config(
             "accepted_english_sentences": accepted_english_sentences,
             "miss_streak": miss_streak,
             "next_row_idx": 0,
-            "next_shard_idx": next_shard_idx,
-            "next_english_shard_idx": next_english_shard_idx,
             "english_seen_sentences": english_seen_sentences,
         }
     )
@@ -803,7 +770,6 @@ def _process_finetrans_config(
         "config_dir": config_dir,
         "accepted_rows": accepted_rows,
         "accepted_english_sentences": accepted_english_sentences,
-        "shards": next_shard_idx,
     }
 
 
@@ -863,7 +829,7 @@ def load_finetranslations_sentences(
     config_root = os.path.join(sentences_dir, "_finetrans_tmp", "configs")
     os.makedirs(config_root, exist_ok=True)
     if force_rebuild:
-        _clear_finetrans_shards(config_root)
+        _clear_finetrans_config_dir(config_root)
 
     max_workers = min(len(configs), max(1, max_workers or 1))
     print(f"Loading FineTranslations ({len(configs)} subsets) ...")
@@ -904,7 +870,7 @@ def load_finetranslations_sentences(
             elif status == "skipped":
                 print(f"  Skipping {config}: {outcome.get('error', 'unknown error')}")
 
-    rows = _load_finetrans_records_from_shards(config_root)
+    rows = _load_finetrans_records_from_configs(config_root)
     records_by_lang: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         lang = row.get("lang")
@@ -932,7 +898,7 @@ def load_finetranslations_sentences(
             "next_shard_idx": 0,
         },
     )
-    _clear_finetrans_shards(config_root)
+    _clear_finetrans_config_dir(config_root)
 
     total = sum(len(v) for v in result.values())
     print(f"\nFineTranslations sentences cached -> {cache_file}")
