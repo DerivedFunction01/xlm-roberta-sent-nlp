@@ -499,7 +499,12 @@ def _load_finetrans_meta(
             meta = json.load(f)
     except Exception:
         return None
-    return meta if meta == expected_meta else None
+    if not isinstance(meta, dict):
+        return None
+    for key, value in expected_meta.items():
+        if meta.get(key) != value:
+            return None
+    return meta
 
 
 def _load_finetrans_records_from_configs(config_root: str) -> list[dict[str, Any]]:
