@@ -47,7 +47,7 @@ FINETRANS_LATIN_MIN_TOKENS = 4
 FINETRANS_MIN_TOKEN_COUNT = 20
 FINETRANS_LATIN_LONGEST_CHUNKS = 2
 FINETRANS_MIN_QUALITY_SCORE = 0.80
-FINETRANS_CHECKPOINT_EVERY_ROWS = 2_500
+FINETRANS_CHECKPOINT_EVERY_ROWS = 250
 FINETRANS_WORKER_COLUMNS = [
     "lang",
     "sentence",
@@ -423,6 +423,11 @@ def _annotate_record(record: dict[str, Any], lang: str) -> dict[str, Any]:
     return annotated
 
 
+def _record_signature(record: dict[str, Any]) -> tuple[tuple[str, Any], ...]:
+    """Return a stable fingerprint for a cached record."""
+    return tuple(sorted(record.items()))
+
+
 def _records_to_rows(records_by_lang: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for lang, records in records_by_lang.items():
@@ -558,6 +563,17 @@ def _load_config_complete_meta(config_meta_path: str, expected_meta: dict[str, A
     return None
 
 
+def _load_config_meta_raw(config_meta_path: str) -> dict[str, Any] | None:
+    if not os.path.exists(config_meta_path):
+        return None
+    try:
+        with open(config_meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
 def _process_finetrans_config(
     *,
     config_idx: int,
@@ -594,24 +610,54 @@ def _process_finetrans_config(
         }
 
     checkpoint_meta = None if force_rebuild else _load_config_checkpoint_meta(config_meta_path, expected_meta)
-    if force_rebuild or checkpoint_meta is None:
+    raw_meta = None if force_rebuild else _load_config_meta_raw(config_meta_path)
+    source_buffer: list[dict[str, Any]] = _read_records_parquet(config_records_path)
+    english_buffer: list[dict[str, Any]] = _read_records_parquet(english_records_path)
+
+    if force_rebuild or (checkpoint_meta is None and not source_buffer and not english_buffer):
         _clear_finetrans_config_dir(config_dir)
         os.makedirs(config_dir, exist_ok=True)
         os.makedirs(english_dir, exist_ok=True)
+    if checkpoint_meta is None and raw_meta is not None:
+        if raw_meta.get("status") in {"checkpoint", "complete"}:
+            raw_config = raw_meta.get("config")
+            raw_lang = raw_meta.get("lang")
+            if raw_config == config and raw_lang == lang:
+                checkpoint_meta = raw_meta
+                print(f"  Recovering {config} ({lang}) from raw checkpoint metadata")
+
+    if checkpoint_meta is None and (source_buffer or english_buffer):
+        checkpoint_meta = {
+            **expected_meta,
+            "status": "checkpoint",
+            "config_idx": config_idx,
+            "config": config,
+            "lang": lang,
+            "accepted_rows": 0,
+            "accepted_sentences": len(source_buffer),
+            "accepted_english_sentences": len(english_buffer),
+            "miss_streak": 0,
+            "next_row_idx": 0,
+            "english_seen_sentences": len(english_buffer),
+        }
+        write_json_atomic(config_meta_path, checkpoint_meta)
+
     accepted_rows = int(checkpoint_meta.get("accepted_rows", 0)) if checkpoint_meta else 0
-    accepted_sentences = int(checkpoint_meta.get("accepted_sentences", 0)) if checkpoint_meta else 0
-    accepted_english_sentences = int(checkpoint_meta.get("accepted_english_sentences", 0)) if checkpoint_meta else 0
+    accepted_sentences = int(checkpoint_meta.get("accepted_sentences", 0)) if checkpoint_meta else len(source_buffer)
+    accepted_english_sentences = int(checkpoint_meta.get("accepted_english_sentences", 0)) if checkpoint_meta else len(english_buffer)
     miss_streak = int(checkpoint_meta.get("miss_streak", 0)) if checkpoint_meta else 0
-    english_seen_sentences = int(checkpoint_meta.get("english_seen_sentences", 0)) if checkpoint_meta else 0
+    english_seen_sentences = int(checkpoint_meta.get("english_seen_sentences", 0)) if checkpoint_meta else len(english_buffer)
     next_row_idx = int(checkpoint_meta.get("next_row_idx", 0)) if checkpoint_meta else 0
 
-    source_buffer: list[dict[str, Any]] = _read_records_parquet(config_records_path)
-    english_buffer: list[dict[str, Any]] = _read_records_parquet(english_records_path)
+    source_seen = {_record_signature(record) for record in source_buffer}
+    english_seen = {_record_signature(record) for record in english_buffer}
 
     if checkpoint_meta is not None:
         print(
             f"  Resuming {config} ({lang}) from row {next_row_idx}"
         )
+    elif source_buffer or english_buffer:
+        print(f"  Recovering partial {config} ({lang}) from cached temp files")
 
     def _flush_pending(*, row_idx: int, status: str) -> None:
         nonlocal source_buffer, english_buffer
@@ -679,10 +725,19 @@ def _process_finetrans_config(
             continue
 
         if source_records:
-            source_buffer.extend(_annotate_record(record, lang) for record in source_records)
-            accepted_rows += 1
-            accepted_sentences += len(source_records)
-            miss_streak = 0
+            new_source_records: list[dict[str, Any]] = []
+            for record in source_records:
+                annotated = _annotate_record(record, lang)
+                signature = _record_signature(annotated)
+                if signature in source_seen:
+                    continue
+                source_seen.add(signature)
+                new_source_records.append(annotated)
+            if new_source_records:
+                source_buffer.extend(new_source_records)
+                accepted_rows += 1
+                accepted_sentences += len(new_source_records)
+                miss_streak = 0
         else:
             miss_streak += 1
             if miss_streak >= max_miss_streak:
@@ -699,14 +754,22 @@ def _process_finetrans_config(
                 lang_to_group=lang_to_group,
                 translated=True,
             )
+            new_english_records: list[dict[str, Any]] = []
             for record in english_records:
                 english_seen_sentences += 1
                 if _row_is_translated_en_acceptable(row) and _should_keep_english_sentence(
                     english_seen_sentences,
                     english_accept_every,
                 ):
-                    english_buffer.append(_annotate_record(record, "en"))
-                    accepted_english_sentences += 1
+                    annotated = _annotate_record(record, "en")
+                    signature = _record_signature(annotated)
+                    if signature in english_seen:
+                        continue
+                    english_seen.add(signature)
+                    new_english_records.append(annotated)
+            if new_english_records:
+                english_buffer.extend(new_english_records)
+                accepted_english_sentences += len(new_english_records)
 
         if (
             len(source_buffer) >= FINETRANS_CHECKPOINT_EVERY_ROWS
@@ -795,14 +858,6 @@ def load_finetranslations_sentences(
             "Refusing to rebuild over the existing cache. "
             "Delete the cache files or set FT_FORCE_REBUILD=True to regenerate them."
         )
-
-    if force_rebuild:
-        for path in (cache_file, cache_meta):
-            if os.path.exists(path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
     config_root = os.path.join(sentences_dir, "_finetrans_tmp", "configs")
     os.makedirs(config_root, exist_ok=True)
     if force_rebuild:
@@ -915,6 +970,8 @@ def load_finetranslations_sentences(
         selected_records[lang] = kept_records
         result[lang] = [record["sentence"] for record in kept_records]
 
+    # Rebuilds are written atomically, so we keep any previous live cache in
+    # place until the new parquet and metadata are fully ready.
     write_records_parquet(cache_file, _records_to_rows(selected_records), columns=FINETRANS_FINAL_COLUMNS)
     write_json_atomic(
         cache_meta,
