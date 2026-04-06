@@ -67,6 +67,9 @@ MIN_RESERVED_SENTENCES = 4
 MAX_RESERVED_SENTENCES = 20_000
 MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
+SMOL_RESERVE_FRACTION = 0.50
+SMOL_MIN_RESERVED_SENTENCES = 1
+SMOL_MAX_RESERVED_SENTENCES = MAX_RESERVED_SENTENCES
 SENTENCES_DIR = "./sentences_cache"
 os.makedirs(SENTENCES_DIR, exist_ok=True)
 USE_SYNTHETIC_CACHE = True
@@ -129,16 +132,18 @@ if Path("hf_token").exists():
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Data Loading ---
-from wiki_sources import (
-    build_sentence_pools,
+from source_pools import (
+    build_source_sentence_pools,
     chunk_list,
     draw_sentence,
-    finalize_wiki_sentence_cache,
-    load_wiki_sentences,
     partition_sentence_pools,
     remaining_sentence_count,
 )
-from smol_sources import load_smol_sentences
+from wiki_sources import finalize_wiki_sentence_cache, load_wiki_sentences
+from smol_sources import (
+    load_smol_sentences,
+)
+from io_utils import write_json_atomic
 from neutral_sources import build_neutral_sources
 from synthetic_cache import (
     CACHE_DIR,
@@ -156,7 +161,6 @@ from synthetic_cache import (
     _synthetic_row_to_example,
     _synthetic_rows_to_table,
     _synthetic_worker_temp_path,
-    _write_json_atomic,
 )
 
 MAX_WIKI_WORKERS = min(mp.cpu_count() // 2, len(ALL_LANGS))
@@ -317,7 +321,7 @@ def generate_synthetic_examples_chunk(
     finally:
         writer.close()
 
-    _write_json_atomic(
+    write_json_atomic(
         temp_path.replace(".parquet", ".meta.json"),
         {
             "worker_idx": worker_idx,
@@ -563,32 +567,29 @@ synthetic_dataset = load_synthetic_examples_cache() if (USE_SYNTHETIC_CACHE and 
 if synthetic_dataset is not None:
     print(f"Loaded cached synthetic examples from {SYNTHETIC_CACHE}")
 else:
-    # Guarantee representation by reserving a fraction of each language's sentences,
-    # then building several guaranteed documents from that reserved pool.
-    reserved_sentence_pools, main_sentence_pools = build_sentence_pools(
-        lang_sentences,
-        reserve_fraction=RESERVE_FRACTION,
-        min_reserved=MIN_RESERVED_SENTENCES,
-        max_reserved=MAX_RESERVED_SENTENCES,
-    )
-    reserved_total = sum(len(pool) for pool in reserved_sentence_pools.values())
-    main_total = sum(len(pool) for pool in main_sentence_pools.values())
-
-    if smol_sentences:
-        smol_reserved_sentence_pools, smol_main_sentence_pools = build_sentence_pools(
-            smol_sentences,
-            reserve_fraction=0.5,
-            min_reserved=1,
-            max_reserved=MAX_RESERVED_SENTENCES,
-        )
-        for lang, pool in smol_reserved_sentence_pools.items():
-            reserved_sentence_pools.setdefault(lang, deque()).extend(pool)
-        for lang, pool in smol_main_sentence_pools.items():
-            main_sentence_pools.setdefault(lang, deque()).extend(pool)
-        smol_reserved_total = sum(len(pool) for pool in smol_reserved_sentence_pools.values())
-        smol_main_total = sum(len(pool) for pool in smol_main_sentence_pools.values())
+    source_specs = [
+        {
+            "name": "wiki",
+            "sentence_map": lang_sentences,
+            "reserve_fraction": RESERVE_FRACTION,
+            "min_reserved": MIN_RESERVED_SENTENCES,
+            "max_reserved": MAX_RESERVED_SENTENCES,
+        },
+        {
+            "name": "smol",
+            "sentence_map": smol_sentences,
+            "reserve_fraction": SMOL_RESERVE_FRACTION,
+            "min_reserved": SMOL_MIN_RESERVED_SENTENCES,
+            "max_reserved": SMOL_MAX_RESERVED_SENTENCES,
+        },
+    ]
+    reserved_sentence_pools, main_sentence_pools, source_summaries = build_source_sentence_pools(source_specs)
+    for summary in source_summaries:
+        if summary["skipped"]:
+            continue
         print(
-            f"SMOL split 50/50 -> reserved: {smol_reserved_total} | main: {smol_main_total}"
+            f"{summary['name'].upper()} split -> "
+            f"reserved: {summary['reserved']} | main: {summary['main']}"
         )
 
     reserved_total = sum(len(pool) for pool in reserved_sentence_pools.values())

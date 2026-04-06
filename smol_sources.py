@@ -8,7 +8,8 @@ from typing import Callable
 from datasets import get_dataset_config_names, load_dataset
 from tqdm.auto import tqdm
 
-from wiki_sources import _collapse_spaces, _get_segmenter, _is_valid_sentence, _strip_bracket_notes
+from text_utils import _collapse_spaces, _is_valid_sentence, _strip_bracket_notes
+from wiki_sources import _get_segmenter
 
 
 SMOL_CODE_MAP: dict[str, str] = {
@@ -33,7 +34,7 @@ def _smol_parse_config(config: str) -> tuple[str, str] | None:
         return None
 
 
-def _smol_add_sentences(bucket: list[str], raw_sentences: object, lang: str) -> None:
+def _smol_add_sentences(bucket: list[str], raw_sentences: object, lang: str, lang_to_group: dict[str, str]) -> None:
     if isinstance(raw_sentences, str):
         raw_sentences = [raw_sentences]
     if not isinstance(raw_sentences, list):
@@ -43,7 +44,7 @@ def _smol_add_sentences(bucket: list[str], raw_sentences: object, lang: str) -> 
             continue
         sent = _strip_bracket_notes(sent)
         sent = _collapse_spaces(sent)
-        if _is_valid_sentence(sent, lang):
+        if _is_valid_sentence(sent, lang, lang_to_group):
             bucket.append(sent)
 
 
@@ -66,11 +67,11 @@ def _load_smoldoc(accumulator: dict[str, list[str]], lang_to_group: dict[str, st
         if sl in lang_to_group and sl not in source_langs_seen:
             source_bucket = accumulator.setdefault(sl, [])
             for row in ds:
-                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl)  # type: ignore[arg-type]
+                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl, lang_to_group)  # type: ignore[arg-type]
             source_langs_seen.add(sl)
 
         for row in ds:
-            _smol_add_sentences(target_bucket, row.get("trgs"), mapped)  # type: ignore[arg-type]
+            _smol_add_sentences(target_bucket, row.get("trgs"), mapped, lang_to_group)  # type: ignore[arg-type]
     return source_langs_seen, target_langs_seen
 
 
@@ -93,7 +94,7 @@ def _load_smolsent(accumulator: dict[str, list[str]], lang_to_group: dict[str, s
         if sl in lang_to_group and sl not in source_langs_seen:
             source_bucket = accumulator.setdefault(sl, [])
             for row in ds:
-                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl)  # type: ignore[arg-type]
+                _smol_add_sentences(source_bucket, row.get("srcs") or row.get("src"), sl, lang_to_group)  # type: ignore[arg-type]
             source_langs_seen.add(sl)
 
         seg = _get_segmenter(mapped, lang_to_group)
@@ -102,7 +103,7 @@ def _load_smolsent(accumulator: dict[str, list[str]], lang_to_group: dict[str, s
             if not isinstance(trg, str):
                 continue
             sents = seg.segment(trg) if seg else [trg]  # type: ignore[union-attr]
-            _smol_add_sentences(target_bucket, sents, mapped)
+            _smol_add_sentences(target_bucket, sents, mapped, lang_to_group)
     return source_langs_seen, target_langs_seen
 
 

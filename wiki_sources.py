@@ -5,13 +5,48 @@ import os
 import random
 import re
 import traceback
-import unicodedata
-from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import pandas as pd
 from datasets import load_dataset
 from tqdm.auto import tqdm
+
+from io_utils import write_json_atomic as _write_json_atomic, write_sentence_parquet as _write_sentence_parquet
+from source_pools import (
+    chunk_list,
+    draw_sentence,
+    partition_sentence_pools,
+    remaining_sentence_count,
+)
+from text_utils import (
+    MAX_DIGIT_RATIO,
+    MIN_LATIN_WORDS,
+    WIKI_ASCII_WORDS,
+    WIKI_BLOCKED_CHARS,
+    WIKI_BLOCKED_MARKERS,
+    WIKI_LEADING_ORPHAN_LETTER,
+    WIKI_NON_CONTENT,
+    WIKI_OPENING_QUOTES,
+    WIKI_PARAGRAPH_SPLIT,
+    WIKI_PUNCT_REPEAT,
+    WIKI_SPACES,
+    WIKI_TRAILING_ORPHAN_LETTER,
+    WIKI_WORDS,
+    _collapse_repeated_punct,
+    _collapse_spaces,
+    _digit_count,
+    _has_blocked_artifact,
+    _is_valid_sentence,
+    _non_punct_char_count,
+    _strip_ascii_for_lang,
+    _strip_bracket_notes,
+    _strip_leading_orphan_letter,
+    _strip_leading_punct,
+    _strip_trailing_orphan_letter,
+    _word_count,
+    clean_sentence as clean_wiki_sentence,
+    post_clean_sentences as post_clean_wiki_sentences,
+)
 
 try:
     import pyarrow as pa
@@ -115,109 +150,6 @@ def parquet_path(sentences_dir: str, lang: str) -> str:
     return os.path.join(sentences_dir, f"{lang}.parquet")
 
 
-def _non_punct_char_count(s: str) -> int:
-    return len(WIKI_NON_CONTENT.sub("", s))
-
-
-def _digit_count(s: str) -> int:
-    return len(WIKI_DIGITS.findall(s))
-
-
-def _word_count(s: str) -> int:
-    return len(WIKI_WORDS.findall(s))
-
-
-def _strip_bracket_notes(text: str) -> str:
-    return BRACKET_NOTES.sub(" ", text)
-
-
-def _collapse_spaces(text: str) -> str:
-    return WIKI_SPACES.sub(" ", text)
-
-
-def _strip_leading_punct(sentence: str) -> str:
-    sentence = sentence.lstrip()
-    if not sentence or sentence[0] in WIKI_OPENING_QUOTES:
-        return sentence
-    idx = 0
-    while idx < len(sentence):
-        ch = sentence[idx]
-        if ch.isspace():
-            idx += 1
-            continue
-        if unicodedata.category(ch).startswith("P"):
-            idx += 1
-            continue
-        break
-    return sentence[idx:].lstrip()
-
-
-def _collapse_repeated_punct(sentence: str) -> str:
-    return WIKI_PUNCT_REPEAT.sub(r"\1", sentence)
-
-
-def _strip_trailing_orphan_letter(sentence: str, lang_to_group: dict[str, str], lang: str) -> str:
-    if lang_to_group.get(lang) in LATIN_GROUPS:
-        return sentence
-    return WIKI_TRAILING_ORPHAN_LETTER.sub("", sentence).rstrip()
-
-
-def _strip_leading_orphan_letter(sentence: str) -> str:
-    return WIKI_LEADING_ORPHAN_LETTER.sub("", sentence).lstrip()
-
-
-def _has_blocked_artifact(sentence: str) -> bool:
-    lower = sentence.lower()
-    return any(marker in lower for marker in WIKI_BLOCKED_MARKERS) or any(ch in sentence for ch in WIKI_BLOCKED_CHARS)
-
-
-def _strip_ascii_for_lang(lang: str, lang_to_group: dict[str, str]) -> bool:
-    return lang_to_group.get(lang) not in LATIN_GROUPS
-
-
-def clean_wiki_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> str:
-    if "\\" in sentence:
-        sentence = sentence.replace("\\", "")
-    sentence = _strip_bracket_notes(sentence)
-    if _strip_ascii_for_lang(lang, lang_to_group):
-        sentence = WIKI_ASCII_WORDS.sub("", sentence)
-    sentence = _collapse_spaces(sentence)
-    return sentence.strip()
-
-
-def _post_clean_wiki_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> str:
-    sentence = clean_wiki_sentence(sentence, lang, lang_to_group)
-    sentence = _strip_leading_punct(sentence)
-    sentence = _strip_leading_orphan_letter(sentence)
-    sentence = _collapse_repeated_punct(sentence)
-    sentence = _strip_trailing_orphan_letter(sentence, lang_to_group, lang)
-    sentence = _collapse_spaces(sentence)
-    return sentence.strip()
-
-
-def _is_post_clean_wiki_sentence_valid(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
-    return bool(sentence) and _is_valid_sentence(sentence, lang, lang_to_group)
-
-
-def post_clean_wiki_sentences(sentences: list[str], lang: str, lang_to_group: dict[str, str]) -> list[str]:
-    cleaned: list[str] = []
-    seen: set[str] = set()
-    for sentence in sentences:
-        if not isinstance(sentence, str):
-            continue
-        if _has_blocked_artifact(sentence):
-            continue
-        sentence = _post_clean_wiki_sentence(sentence, lang, lang_to_group)
-        if not sentence or _has_blocked_artifact(sentence):
-            continue
-        if sentence in seen:
-            continue
-        if _is_post_clean_wiki_sentence_valid(sentence, lang, lang_to_group):
-            seen.add(sentence)
-            cleaned.append(sentence)
-    return cleaned
-
-
 def _load_cleanup_meta() -> dict[str, dict]:
     if not os.path.exists(WIKI_CLEANUP_META):
         return {}
@@ -306,32 +238,9 @@ def finalize_wiki_sentence_cache(
     return cleaned_map
 
 
-def _is_valid_sentence(s: str, lang: str, lang_to_group: dict[str, str]) -> bool:
-    mn, mx = _SENT_BOUNDS.get(lang, _DEFAULT_BOUNDS)
-    visible = _non_punct_char_count(s)
-    if not (mn < visible < mx):
-        return False
-    if lang_to_group.get(lang) in LATIN_GROUPS and _word_count(s) < MIN_LATIN_WORDS:
-        return False
-    digits = _digit_count(s)
-    return digits <= visible * MAX_DIGIT_RATIO
-
-
 def _article_min_chars(lang: str, lang_to_group: dict[str, str]) -> int:
     group = lang_to_group.get(lang)
     return MIN_ARTICLE_CHARS_BY_GROUP.get(group, MIN_ARTICLE_CHARS_DEFAULT)  # type: ignore[arg-type]
-
-
-def _split_wiki_paragraphs(text: str, lang: str, lang_to_group: dict[str, str]) -> list[str] | None:
-    if len(text) < _article_min_chars(lang, lang_to_group):
-        return None
-    text = WIKI_MARKUP.sub("", text)
-    paragraphs = [
-        p.strip()
-        for p in WIKI_PARAGRAPH_SPLIT.split(text)
-        if p.strip()
-    ]
-    return paragraphs or None
 
 
 def prepare_wiki_paragraphs(text: str, lang: str, lang_to_group: dict[str, str]) -> list[str] | None:
@@ -474,29 +383,11 @@ def _wiki_checkpoint_payload(
     }
 
 
-def _write_sentence_parquet(path: str, sentences: list[str]) -> None:
-    if not sentences:
-        pd.DataFrame({"sentence": []}).to_parquet(path, index=False)
-        return
-    if pa is None or pq is None:
-        pd.DataFrame({"sentence": sentences}).to_parquet(path, index=False)
-        return
-    table = pa.table({"sentence": pa.array(sentences, type=pa.string())})
-    pq.write_table(table, path)
-
-
 def _write_sentence_batch(writer, pa_module, batch: list[str]) -> None:
     if not batch:
         return
     table = pa_module.table({"sentence": pa_module.array(batch, type=pa_module.string())})
     writer.write_table(table)
-
-
-def _write_json_atomic(path: str, payload: dict) -> None:
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, path)
 
 
 def _get_segmenter(lang: str):
@@ -824,74 +715,3 @@ def load_wiki_sentences(
             result[lang] = sentences
             tqdm.write(f"  {lang}: {len(sentences)} sentences -> {cache_path}")
     return result
-
-
-def build_sentence_pools(
-    sentence_map: dict[str, list[str]],
-    reserve_fraction: float = 0.15,
-    min_reserved: int = 4,
-    max_reserved: int = 20_000,
-) -> tuple[dict[str, deque[str]], dict[str, deque[str]]]:
-    reserved: dict[str, deque[str]] = {}
-    main: dict[str, deque[str]] = {}
-    for lang, sentences in sentence_map.items():
-        if not sentences:
-            continue
-        shuffled = sentences[:]
-        random.shuffle(shuffled)
-        reserve_target = int(round(len(shuffled) * reserve_fraction))
-        reserve_n = min(
-            len(shuffled),
-            max(
-                min_reserved,
-                min(reserve_target, max_reserved),
-            ),
-        )
-        reserved[lang] = deque(shuffled[:reserve_n])
-        main[lang] = deque(shuffled[reserve_n:])
-
-    return reserved, main
-
-
-def draw_sentence(
-    lang: str,
-    primary_pool: dict[str, deque[str]],
-    fallback_pool: dict[str, deque[str]] | None = None,
-) -> str | None:
-    if primary_pool.get(lang):
-        return primary_pool[lang].popleft()
-    if fallback_pool and fallback_pool.get(lang):
-        return fallback_pool[lang].popleft()
-    return None
-
-
-def remaining_sentence_count(
-    lang: str,
-    primary_pool: dict[str, deque[str]],
-    fallback_pool: dict[str, deque[str]] | None = None,
-) -> int:
-    total = len(primary_pool.get(lang, ()))
-    if fallback_pool is not None:
-        total += len(fallback_pool.get(lang, ()))
-    return total
-
-
-def chunk_list(items: list, n_chunks: int) -> list[list]:
-    if n_chunks <= 1:
-        return [items]
-    chunk_size = (len(items) + n_chunks - 1) // n_chunks
-    return [items[i : i + chunk_size] for i in range(0, len(items), chunk_size)]
-
-
-def partition_sentence_pools(
-    pools: dict[str, deque[str]],
-    n_workers: int,
-) -> list[dict[str, deque[str]]]:
-    worker_pools: list[dict[str, deque[str]]] = [dict() for _ in range(n_workers)]
-    for lang, dq in pools.items():
-        items = list(dq)
-        for worker_idx in range(n_workers):
-            shard = items[worker_idx::n_workers]
-            if shard:
-                worker_pools[worker_idx][lang] = deque(shard)
-    return worker_pools
