@@ -10,6 +10,7 @@ from typing import Any
 
 import pandas as pd
 from datasets import get_dataset_config_names, load_dataset
+from datasets.utils.logging import disable_progress_bar
 from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic, write_records_parquet
@@ -21,6 +22,7 @@ from paths import (
 )
 from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3
 from source_config import (
+    FT_ENGLISH_ACCEPT_EVERY,
     FT_INCLUDE_TRANSLATED_ENGLISH,
     FT_MAX_MISS_STREAK,
     FT_MAX_ROW_INDEX,
@@ -50,6 +52,8 @@ FINETRANS_CHECKPOINT_EVERY_ROWS = 2_500
 LATIN_TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 WIKIPEDIA_URL_RE = re.compile(r"wikipedia(?:\.org)?", flags=re.IGNORECASE)
 FT_ISO3_TO_LANG = {iso3: lang for lang, iso3 in LANG_ISO2_TO_ISO3.items()}
+
+disable_progress_bar()
 
 
 def _finetrans_cache_path(sentences_dir: str) -> str:
@@ -93,6 +97,17 @@ def _finetrans_config_meta_path(sentences_dir: str, config_idx: int) -> str:
 def _finetrans_config_shard_path(sentences_dir: str, config_idx: int, shard_idx: int) -> str:
     return os.path.join(
         _finetrans_config_dir(sentences_dir, config_idx),
+        f"part-{shard_idx:05d}.parquet",
+    )
+
+
+def _finetrans_english_config_dir(sentences_dir: str, config_idx: int) -> str:
+    return os.path.join(_finetrans_config_dir(sentences_dir, config_idx), "en")
+
+
+def _finetrans_english_config_shard_path(sentences_dir: str, config_idx: int, shard_idx: int) -> str:
+    return os.path.join(
+        _finetrans_english_config_dir(sentences_dir, config_idx),
         f"part-{shard_idx:05d}.parquet",
     )
 
@@ -338,6 +353,12 @@ def _row_is_translated_en_acceptable(row: dict[str, Any]) -> bool:
     return edu >= 1.0
 
 
+def _should_keep_english_sentence(english_sentence_idx: int, accept_every: int) -> bool:
+    if accept_every <= 1:
+        return True
+    return english_sentence_idx % accept_every == 0
+
+
 def _include_translated_english_for_lang(lang: str, include_translated_english: bool) -> bool:
     return include_translated_english and lang in FT_TRANSLATED_ENGLISH_LANGS
 
@@ -450,6 +471,7 @@ def _finetrans_cache_meta(
     overflow_sentences_per_lang: int,
     max_row_index: int,
     max_miss_streak: int,
+    english_accept_every: int,
     include_translated_english: bool,
     configs: list[tuple[str, str]],
 ) -> dict[str, Any]:
@@ -460,6 +482,7 @@ def _finetrans_cache_meta(
         "overflow_sentences_per_lang": overflow_sentences_per_lang,
         "max_row_index": max_row_index,
         "max_miss_streak": max_miss_streak,
+        "english_accept_every": english_accept_every,
         "include_translated_english": include_translated_english,
         "configs": [[config, lang] for config, lang in configs],
         "cache_format": "parquet_records_v1",
@@ -582,13 +605,16 @@ def _process_finetrans_config(
     max_row_index: int,
     max_miss_streak: int,
     overflow_sentences_per_lang: int,
+    english_accept_every: int,
     include_translated_english: bool,
     expected_meta: dict[str, Any],
     force_rebuild: bool = False,
 ) -> dict[str, Any]:
     config_dir = _finetrans_config_dir(sentences_dir, config_idx)
+    english_dir = _finetrans_english_config_dir(sentences_dir, config_idx)
     config_meta_path = _finetrans_config_meta_path(sentences_dir, config_idx)
     os.makedirs(config_dir, exist_ok=True)
+    os.makedirs(english_dir, exist_ok=True)
 
     if force_rebuild:
         _clear_finetrans_config_dir(config_dir)
@@ -607,10 +633,14 @@ def _process_finetrans_config(
     checkpoint_meta = None if force_rebuild else _load_config_checkpoint_meta(config_meta_path, expected_meta)
     next_row_idx = int(checkpoint_meta.get("next_row_idx", 0)) if checkpoint_meta else 0
     next_shard_idx = int(checkpoint_meta.get("next_shard_idx", 0)) if checkpoint_meta else 0
+    next_english_shard_idx = int(checkpoint_meta.get("next_english_shard_idx", 0)) if checkpoint_meta else 0
+    english_seen_sentences = int(checkpoint_meta.get("english_seen_sentences", 0)) if checkpoint_meta else 0
 
     pending_records: list[dict[str, Any]] = []
+    english_pending_records: list[dict[str, Any]] = []
     accepted_rows = int(checkpoint_meta.get("accepted_rows", 0)) if checkpoint_meta else 0
     accepted_sentences = int(checkpoint_meta.get("accepted_sentences", 0)) if checkpoint_meta else 0
+    accepted_english_sentences = int(checkpoint_meta.get("accepted_english_sentences", 0)) if checkpoint_meta else 0
     miss_streak = int(checkpoint_meta.get("miss_streak", 0)) if checkpoint_meta else 0
 
     if checkpoint_meta is not None:
@@ -618,13 +648,24 @@ def _process_finetrans_config(
             f"  Resuming {config} ({lang}) from row {next_row_idx} shard {next_shard_idx}"
         )
 
-    def _flush_pending(*, row_idx: int, shard_idx: int, status: str) -> int:
-        nonlocal pending_records, accepted_rows
+    def _flush_pending(
+        *,
+        row_idx: int,
+        shard_idx: int,
+        english_shard_idx: int,
+        status: str,
+    ) -> tuple[int, int]:
+        nonlocal pending_records, english_pending_records, accepted_rows, accepted_english_sentences
         if pending_records:
             shard_path = _finetrans_config_shard_path(sentences_dir, config_idx, shard_idx)
             write_records_parquet(shard_path, pending_records)
             shard_idx += 1
             pending_records = []
+        if english_pending_records:
+            english_shard_path = _finetrans_english_config_shard_path(sentences_dir, config_idx, english_shard_idx)
+            write_records_parquet(english_shard_path, english_pending_records)
+            english_shard_idx += 1
+            english_pending_records = []
         meta = dict(expected_meta)
         meta.update(
             {
@@ -634,13 +675,16 @@ def _process_finetrans_config(
                 "lang": lang,
                 "accepted_rows": accepted_rows,
                 "accepted_sentences": accepted_sentences,
+                "accepted_english_sentences": accepted_english_sentences,
                 "miss_streak": miss_streak,
                 "next_row_idx": row_idx,
                 "next_shard_idx": shard_idx,
+                "next_english_shard_idx": english_shard_idx,
+                "english_seen_sentences": english_seen_sentences,
             }
         )
         write_json_atomic(config_meta_path, meta)
-        return shard_idx
+        return shard_idx, english_shard_idx
 
     try:
         ds = load_dataset(FINETRANS_DATASET, config, split="train", streaming=True)
@@ -708,17 +752,31 @@ def _process_finetrans_config(
                 translated=True,
             )
             for record in english_records:
-                if _row_is_translated_en_acceptable(row):
-                    pending_records.append(_annotate_record(record, "en"))
+                english_seen_sentences += 1
+                if _row_is_translated_en_acceptable(row) and _should_keep_english_sentence(
+                    english_seen_sentences,
+                    english_accept_every,
+                ):
+                    english_pending_records.append(_annotate_record(record, "en"))
+                    accepted_english_sentences += 1
 
-        if len(pending_records) >= FINETRANS_CHECKPOINT_EVERY_ROWS:
-            next_shard_idx = _flush_pending(
+        if (
+            len(pending_records) >= FINETRANS_CHECKPOINT_EVERY_ROWS
+            or len(english_pending_records) >= FINETRANS_CHECKPOINT_EVERY_ROWS
+        ):
+            next_shard_idx, next_english_shard_idx = _flush_pending(
                 row_idx=row_idx + 1,
                 shard_idx=next_shard_idx,
+                english_shard_idx=next_english_shard_idx,
                 status="checkpoint",
             )
 
-    next_shard_idx = _flush_pending(row_idx=0, shard_idx=next_shard_idx, status="complete")
+    next_shard_idx, next_english_shard_idx = _flush_pending(
+        row_idx=0,
+        shard_idx=next_shard_idx,
+        english_shard_idx=next_english_shard_idx,
+        status="complete",
+    )
     meta = dict(expected_meta)
     meta.update(
         {
@@ -728,9 +786,12 @@ def _process_finetrans_config(
             "lang": lang,
             "accepted_rows": accepted_rows,
             "accepted_sentences": accepted_sentences,
+            "accepted_english_sentences": accepted_english_sentences,
             "miss_streak": miss_streak,
             "next_row_idx": 0,
             "next_shard_idx": next_shard_idx,
+            "next_english_shard_idx": next_english_shard_idx,
+            "english_seen_sentences": english_seen_sentences,
         }
     )
     write_json_atomic(config_meta_path, meta)
@@ -741,6 +802,7 @@ def _process_finetrans_config(
         "status": "complete",
         "config_dir": config_dir,
         "accepted_rows": accepted_rows,
+        "accepted_english_sentences": accepted_english_sentences,
         "shards": next_shard_idx,
     }
 
@@ -756,6 +818,7 @@ def load_finetranslations_sentences(
     max_row_index: int = FT_MAX_ROW_INDEX,
     max_miss_streak: int = FT_MAX_MISS_STREAK,
     include_translated_english: bool = FT_INCLUDE_TRANSLATED_ENGLISH,
+    english_accept_every: int = FT_ENGLISH_ACCEPT_EVERY,
     max_workers: int | None = None,
 ) -> dict[str, list[str]]:
     configs = _matching_configs(lang_to_group)
@@ -772,6 +835,7 @@ def load_finetranslations_sentences(
         overflow_sentences_per_lang=overflow_sentences_per_lang,
         max_row_index=max_row_index,
         max_miss_streak=max_miss_streak,
+        english_accept_every=english_accept_every,
         include_translated_english=include_translated_english,
         configs=configs,
     )
@@ -819,6 +883,7 @@ def load_finetranslations_sentences(
                 max_row_index=max_row_index,
                 max_miss_streak=max_miss_streak,
                 overflow_sentences_per_lang=overflow_sentences_per_lang,
+                english_accept_every=english_accept_every,
                 include_translated_english=include_translated_english,
                 expected_meta=expected_meta,
                 force_rebuild=force_rebuild,
