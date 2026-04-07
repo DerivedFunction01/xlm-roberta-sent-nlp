@@ -177,9 +177,9 @@ LANGUAGE_BUCKETS = {
 
 POOL = {
     "wiki": {
-        "reserve": 0.50,
+        "reserve": 0.60,
         "min": 4,
-        "max": 75_000,
+        "max": 120_000,
     },
     "smol": {
         "reserve": 0.95,
@@ -187,9 +187,9 @@ POOL = {
         "max": 1_000,
     },
     "ft": {
-        "reserve": 0.50,
+        "reserve": 0.60,
         "min": 1,
-        "max": 25_000,
+        "max": 30_000,
     },
 }
 
