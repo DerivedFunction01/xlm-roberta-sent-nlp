@@ -504,6 +504,26 @@ def _write_finetrans_cache_map(cache_dir: str, sentence_map: dict[str, list[str]
     return lang_counts
 
 
+def _dedupe_sentence_list(sentences: list[str]) -> tuple[list[str], int]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    removed = 0
+    for sentence in sentences:
+        if not isinstance(sentence, str):
+            removed += 1
+            continue
+        cleaned = sentence.strip()
+        if not cleaned:
+            removed += 1
+            continue
+        if cleaned in seen:
+            removed += 1
+            continue
+        seen.add(cleaned)
+        deduped.append(cleaned)
+    return deduped, removed
+
+
 def _read_records_parquet(path: str) -> list[dict[str, Any]]:
     if not os.path.exists(path):
         return []
@@ -1052,12 +1072,26 @@ def load_finetranslations_sentences(
 
     selected_records: dict[str, list[dict[str, Any]]] = {}
     result: dict[str, list[str]] = {}
+    dedup_summary: dict[str, dict[str, int]] = {}
+    total_before = 0
+    total_after = 0
+    total_removed = 0
     rng = random.Random(seed)
     for lang, records in sorted(records_by_lang.items()):
         kept_records = _select_bucketed_records(records, max_sentences_per_lang)
         rng.shuffle(kept_records)
         selected_records[lang] = kept_records
-        result[lang] = [record["sentence"] for record in kept_records]
+        raw_sentences = [record["sentence"] for record in kept_records]
+        deduped_sentences, removed = _dedupe_sentence_list(raw_sentences)
+        result[lang] = deduped_sentences
+        dedup_summary[lang] = {
+            "before": len(raw_sentences),
+            "after": len(deduped_sentences),
+            "removed": removed,
+        }
+        total_before += len(raw_sentences)
+        total_after += len(deduped_sentences)
+        total_removed += removed
 
     # Rebuilds are written atomically, so we keep any previous live cache in
     # place until the new parquet and metadata are fully ready.
@@ -1067,7 +1101,12 @@ def load_finetranslations_sentences(
         {
             **expected_meta,
             "status": "complete",
+            "deduped": True,
+            "dedup_summary": dedup_summary,
             "lang_counts": {lang: len(sentences) for lang, sentences in result.items()},
+            "total_before": total_before,
+            "total_after": total_after,
+            "total_removed": total_removed,
             "next_config_idx": len(configs),
             "next_row_idx": 0,
             "next_shard_idx": 0,
