@@ -116,9 +116,9 @@ def generate_synthetic_examples_chunk(
     sample_code_span: Callable[[], str],
 ) -> str:
     """Generate a chunk of synthetic examples in one worker."""
-    seed = seed + (worker_idx * 10_000)
-    random.seed(seed)
-    np.random.seed(seed % (2**32 - 1))
+    worker_seed = seed + (worker_idx * 10_000)
+    random.seed(worker_seed)
+    np.random.seed(worker_seed % (2**32 - 1))
 
     worker_desc = f"Worker {worker_idx}"
     temp_path = _synthetic_worker_temp_path(synthetic_temp_dir, worker_idx)
@@ -198,7 +198,7 @@ def generate_synthetic_examples_chunk(
         temp_path.replace(".parquet", ".meta.json"),
         {
             "worker_idx": worker_idx,
-            "seed": seed,
+            "seed": worker_seed,
             "job_count": len(coverage_langs) + random_count,
             "coverage_count": coverage_count,
             "random_count": random_written,
@@ -640,10 +640,10 @@ def build_synthetic_dataset(
                 future_to_worker = {}
                 for worker_idx in range(generation_workers):
                     coverage_langs = coverage_chunks[worker_idx] if worker_idx < len(coverage_chunks) else []
-                future = pool.submit(
-                    generate_synthetic_examples_chunk,
-                    seed=seed,
-                    worker_idx=worker_idx,
+                    future = pool.submit(
+                        generate_synthetic_examples_chunk,
+                        seed=seed,
+                        worker_idx=worker_idx,
                         coverage_langs=coverage_langs,
                         random_count=random_counts[worker_idx],
                         primary_pool=reserved_worker_pools[worker_idx],
