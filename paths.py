@@ -10,19 +10,22 @@ PATHS: dict[str, Any] = {
 }
 
 PATHS["wiki"] = {
-    "cache_dir": os.path.join(PATHS["sentences_dir"], "wiki.parquet"),
-    "cache_meta": os.path.join(PATHS["sentences_dir"], "wiki_cleanup.meta.json"),
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "wiki"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "wiki", "wiki_cleanup.meta.json"),
     "temp_dir": os.path.join(PATHS["sentences_dir"], "_wiki_tmp"),
-    "seg_debug_dir": os.path.join(PATHS["sentences_dir"], "_wiki_tmp", "segmentation_debug"),
+    "seg_debug_dir": os.path.join(
+        PATHS["sentences_dir"], "_wiki_tmp", "segmentation_debug"
+    ),
 }
 PATHS["smol"] = {
-    "cache_file": os.path.join(PATHS["sentences_dir"], "smol_sentences.json"),
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "smol_sentences"),
+    "cache_file": os.path.join(
+        PATHS["sentences_dir"], "smol_sentences", "smol_sentences.json"
+    ),
 }
 PATHS["finetrans"] = {
-    "cache_file": os.path.join(PATHS["sentences_dir"], "finetranslations_sentences.parquet"),
-    "cache_meta": os.path.join(PATHS["sentences_dir"], "finetranslations_sentences.meta.json"),
     "cache_dir": os.path.join(PATHS["sentences_dir"], "finetranslations"),
-    "cache_dir_meta": os.path.join(PATHS["sentences_dir"], "finetranslations", "finetranslations.meta.json"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "finetranslations", "finetranslations.meta.json"),
     "temp_dir": os.path.join(PATHS["sentences_dir"], "_finetrans_tmp"),
     "temp_file": os.path.join(PATHS["sentences_dir"], "_finetrans_tmp", "finetranslations_sentences.parquet"),
 }

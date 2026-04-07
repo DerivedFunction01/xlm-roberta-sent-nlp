@@ -58,17 +58,9 @@ FT_ISO3_TO_LANG = {iso3: lang for lang, iso3 in LANG_ISO2_TO_ISO3.items()}
 disable_progress_bar()
 
 
-def _finetrans_cache_path(sentences_dir: str) -> str:
-    return (
-        PATHS["finetrans"]["cache_file"]
-        if sentences_dir == PATHS["sentences_dir"]
-        else os.path.join(sentences_dir, "finetranslations_sentences.parquet")
-    )
-
-
 def _finetrans_meta_path(sentences_dir: str) -> str:
     return (
-        PATHS["finetrans"]["cache_dir_meta"]
+        PATHS["finetrans"]["cache_meta"]
         if sentences_dir == PATHS["sentences_dir"]
         else os.path.join(sentences_dir, "finetranslations", "finetranslations.meta.json")
     )
@@ -80,11 +72,6 @@ def _finetrans_cache_dir(sentences_dir: str) -> str:
         if sentences_dir == PATHS["sentences_dir"]
         else os.path.join(sentences_dir, "finetranslations")
     )
-
-
-def _finetrans_lang_path(sentences_dir: str, lang: str) -> str:
-    return os.path.join(_finetrans_cache_dir(sentences_dir), f"{lang}.parquet")
-
 
 def _finetrans_config_dir(sentences_dir: str, config_idx: int) -> str:
     return os.path.join(sentences_dir, "_finetrans_tmp", f"config_{config_idx:05d}")
