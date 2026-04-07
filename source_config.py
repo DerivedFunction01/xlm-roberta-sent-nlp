@@ -135,23 +135,51 @@ LANGUAGE_BUCKETS = {
     },
 }
 
-RESERVE_FRACTION = 0.15
-MIN_RESERVED_SENTENCES = 4
-MAX_RESERVED_SENTENCES = 20_000
-SMOL_RESERVE_FRACTION = 0.95
-SMOL_MIN_RESERVED_SENTENCES = 1
-SMOL_MAX_RESERVED_SENTENCES = MAX_RESERVED_SENTENCES
-FT_RESERVE_FRACTION = 0.15
-FT_MIN_RESERVED_SENTENCES = 1
-FT_MAX_RESERVED_SENTENCES = MAX_RESERVED_SENTENCES
-FT_MAX_SENTENCES_PER_LANG = 50_000
-FT_OVERFLOW_SENTENCES_PER_LANG = 75_000
-FT_MAX_ROW_INDEX = 50_000
-FT_MAX_MISS_STREAK = 1_000
-FT_INCLUDE_TRANSLATED_ENGLISH = True
-FT_TRANSLATED_ENGLISH_LANGS = {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms"}
-FT_ENGLISH_ACCEPT_EVERY = len(FT_TRANSLATED_ENGLISH_LANGS)
-USE_SMOL_AUGMENTATION = True
-USE_FINETRANS_AUGMENTATION = True
-SMOL_FORCE_REBUILD = False
-FT_FORCE_REBUILD = False
+POOL = {
+    "wiki": {
+        "reserve": 0.15,
+        "min": 4,
+        "max": 20_000,
+    },
+    "smol": {
+        "reserve": 0.95,
+        "min": 1,
+        "max": 20_000,
+    },
+    "ft": {
+        "reserve": 0.15,
+        "min": 1,
+        "max": 20_000,
+    },
+}
+
+SMOL = {
+    "use": True,
+    "rebuild": False,
+}
+
+FT = {
+    "use": True,
+    "rebuild": False,
+    "max_lang": 50_000,
+    "overflow_lang": 75_000,
+    "max_row": 50_000,
+    "miss": 1_000,
+    "include_en": True,
+    "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms"},
+}
+FT["every"] = len(FT["langs"])
+
+RUN = {
+    "len": 512,
+    "target": 2_500_000,  # synthetic mixed-language training examples to generate
+    "cov_min": 2,
+    "cov_max": 5,
+    "syn_cache": True,
+    "syn_rebuild": False,
+    "tok_cache": True,
+    "tok_rebuild": False,
+    "tok_skip_check": False,
+    "retry": 8,
+    "preview": 2_000,
+}

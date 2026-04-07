@@ -434,9 +434,9 @@ def load_or_extract(
     lang: str,
     *,
     lang_to_group: dict[str, str],
-    seed: int,
-    sentences_dir: str,
-    articles_per_lang: int,
+    seed: int = 42,
+    sentences_dir: str = SENTENCES_DIR,
+    articles_per_lang: int = ARTICLES_PER_LANG,
 ) -> tuple[str, str]:
     path = parquet_path(sentences_dir, lang)
     if os.path.exists(path):
@@ -459,10 +459,10 @@ def load_wiki_sentences(
     langs: list[str],
     *,
     lang_to_group: dict[str, str],
-    seed: int,
-    sentences_dir: str,
-    articles_per_lang: int,
+    seed: int = 42,
+    articles_per_lang: int = ARTICLES_PER_LANG,
     max_workers: int,
+    sentences_dir: str = SENTENCES_DIR,
 ) -> dict[str, list[str]]:
     os.makedirs(sentences_dir, exist_ok=True)
     result: dict[str, list[str]] = {}

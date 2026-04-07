@@ -24,6 +24,7 @@ from paths import (
 )
 from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3
 from source_config import (
+    FT,
     FT_ENGLISH_ACCEPT_EVERY,
     FT_INCLUDE_TRANSLATED_ENGLISH,
     FT_MAX_MISS_STREAK,
@@ -911,18 +912,31 @@ def _process_finetrans_config(
 
 def load_finetranslations_sentences(
     *,
-    sentences_dir: str,
+    sentences_dir: str = SENTENCES_DIR,
     lang_to_group: dict[str, str],
-    force_rebuild: bool = False,
-    seed: int = 42,
-    max_sentences_per_lang: int = FT_MAX_SENTENCES_PER_LANG,
-    overflow_sentences_per_lang: int = FT_OVERFLOW_SENTENCES_PER_LANG,
-    max_row_index: int = FT_MAX_ROW_INDEX,
-    max_miss_streak: int = FT_MAX_MISS_STREAK,
-    include_translated_english: bool = FT_INCLUDE_TRANSLATED_ENGLISH,
-    english_accept_every: int = FT_ENGLISH_ACCEPT_EVERY,
+    use: bool | None = None,
+    force_rebuild: bool | None = None,
+    seed: int | None = None,
+    max_sentences_per_lang: int | None = None,
+    overflow_sentences_per_lang: int | None = None,
+    max_row_index: int | None = None,
+    max_miss_streak: int | None = None,
+    include_translated_english: bool | None = None,
+    english_accept_every: int | None = None,
     max_workers: int | None = None,
-) -> dict[str, list[str]]:
+) -> dict[str, list[str]] | None:
+    use = FT["use"] if use is None else use
+    if not use:
+        return None
+    force_rebuild = FT["rebuild"] if force_rebuild is None else force_rebuild
+    seed = 42 if seed is None else seed
+    max_sentences_per_lang = FT["max_lang"] if max_sentences_per_lang is None else max_sentences_per_lang
+    overflow_sentences_per_lang = FT_OVERFLOW_SENTENCES_PER_LANG if overflow_sentences_per_lang is None else overflow_sentences_per_lang
+    max_row_index = FT["max_row"] if max_row_index is None else max_row_index
+    max_miss_streak = FT["miss"] if max_miss_streak is None else max_miss_streak
+    include_translated_english = FT["include_en"] if include_translated_english is None else include_translated_english
+    english_accept_every = FT["every"] if english_accept_every is None else english_accept_every
+
     configs = _matching_configs(lang_to_group)
     if not configs:
         print("No FineTranslations subsets matched the current language set.")

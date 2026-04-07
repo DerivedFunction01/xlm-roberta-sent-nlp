@@ -109,13 +109,16 @@ def _load_smolsent(accumulator: dict[str, list[str]], lang_to_group: dict[str, s
 
 def load_smol_sentences(
     *,
-    sentences_dir: str,
+    sentences_dir: str = SENTENCES_DIR,
     lang_to_group: dict[str, str],
-    force_rebuild: bool = False,
-    seed: int = 42,
-    max_sentences_per_lang: int = MAX_SENTENCES_PER_LANG,
+    force_rebuild: bool | None = None,
+    seed: int | None = None,
+    max_sentences_per_lang: int | None = None,
     uncapped_langs: set[str] | None = None,
 ) -> dict[str, list[str]]:
+    force_rebuild = False if force_rebuild is None else force_rebuild
+    seed = 42 if seed is None else seed
+    max_sentences_per_lang = MAX_SENTENCES_PER_LANG if max_sentences_per_lang is None else max_sentences_per_lang
     cache_file = SMOL_CACHE_FILE if sentences_dir == SENTENCES_DIR else os.path.join(sentences_dir, "smol_sentences.json")
     uncapped_langs = uncapped_langs or UNCAPPED_LANGS
     if not force_rebuild and os.path.exists(cache_file):
