@@ -69,9 +69,8 @@ with open("all_langs.json", encoding="utf-8") as f:
 # %%
 # --- Project Imports ---
 from language import ALL_LANGS, LANG_TO_GROUP
-from wiki_sources import load_wiki_sentences
-from smol_sources import load_smol_sentences
-from finetranslations_sources import load_finetranslations_sentences
+from paths import PATHS
+from source_pools import load_language_sentences_from_parquet
 from neutral_sources import build_neutral_sources
 from synthetic_build import build_synthetic_dataset
 from tokenization_cache import build_tokenized_dataset
@@ -104,35 +103,15 @@ if Path("hf_token").exists():
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Data Loading ---
-lang_sentences = load_wiki_sentences(
-    seed=SEED,
-    max_workers=get_workers(2),
-)
-# %%
-smol_sentences = load_smol_sentences(seed=SEED)
-if smol_sentences is not None:
-    total_smol_sentences = sum(len(v) for v in smol_sentences.values())
-    print(
-        f"\nSMOL kept separate for pool split: "
-        f"{len(smol_sentences)} languages | {total_smol_sentences} sentences"
-    )
-# %%
-ft_sentences = load_finetranslations_sentences(
-    lang_to_group=LANG_TO_GROUP,
-    seed=SEED,
-    max_workers=get_workers(4),
-)
-if ft_sentences is not None:
-    total_ft_sentences = sum(len(v) for v in ft_sentences.values())
-    print(
-        f"\nFineTranslations kept separate for pool split: "
-        f"{len(ft_sentences)} languages | {total_ft_sentences} sentences"
-    )
+wiki_english_seed_sentences = load_language_sentences_from_parquet(PATHS["wiki"]["cache_dir"], "en")
+ft_english_seed_sentences = load_language_sentences_from_parquet(PATHS["finetrans"]["cache_dir"], "en")
+print(f"Wiki English seed sentences: {len(wiki_english_seed_sentences):,}")
+print(f"FineTranslations English seed sentences: {len(ft_english_seed_sentences):,}")
 # %%
 neutral_sources = build_neutral_sources(
     english_seed_sentences=(
-        lang_sentences.get("en", [])
-        + (ft_sentences.get("en", []) if ft_sentences else [])
+        wiki_english_seed_sentences
+        + ft_english_seed_sentences
     ),
     seed=SEED,
 )
@@ -152,9 +131,6 @@ else:
     synthetic_dataset = build_synthetic_dataset(
         seed=SEED,
         tokenizer=tokenizer,
-        coverage_sentence_map=lang_sentences,
-        smol_sentence_map=smol_sentences,
-        ft_sentence_map=ft_sentences,
         label2id=label2id,
         id2label=id2label,
         sample_o_span=sample_o_span,

@@ -35,6 +35,10 @@ PATHS["synthetic"] = {
     "cache_meta": os.path.join(PATHS["sentences_dir"], "synthetic_examples", "synthetic_examples.meta.json"),
     "temp_dir": os.path.join(PATHS["sentences_dir"], "_synthetic_tmp"),
 }
+PATHS["source_pools"] = {
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "source_pools"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "source_pools", "sentence_pools.meta.json"),
+}
 PATHS["tokenized"] = {
     "cache_dir": os.path.join(PATHS["sentences_dir"], "tokenized_dataset"),
     "cache_meta": os.path.join(PATHS["sentences_dir"], "tokenized_dataset", "tokenized_dataset.meta.json"),
@@ -53,6 +57,7 @@ for path in [
     PATHS["finetrans"]["cache_dir"],
     PATHS["synthetic"]["cache_dir"],
     PATHS["synthetic"]["temp_dir"],
+    PATHS["source_pools"]["cache_dir"],
     PATHS["tokenized"]["cache_dir"],
 ]:
     os.makedirs(path, exist_ok=True)

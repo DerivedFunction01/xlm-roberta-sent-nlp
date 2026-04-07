@@ -45,10 +45,10 @@ FT_MAX_RESERVED_SENTENCES = POOL["ft"]["max"]
 USE_SMOL_AUGMENTATION = SMOL["use"]
 USE_FINETRANS_AUGMENTATION = FT["use"]
 from source_pools import (
-    build_source_sentence_pools,
+    build_disk_sentence_pool_shards,
     chunk_list,
     draw_sentence,
-    partition_sentence_pools,
+    load_worker_sentence_pool,
     remaining_sentence_count,
 )
 from synthetic_cache import (
@@ -107,8 +107,8 @@ def generate_synthetic_examples_chunk(
     worker_idx: int,
     coverage_langs: list[str],
     random_count: int,
-    primary_pool: dict[str, deque[str]],
-    fallback_pool: dict[str, deque[str]] | None,
+    primary_pool_path: str,
+    fallback_pool_path: str | None,
     synthetic_temp_dir: str,
     tokenizer,
     all_langs: list[str],
@@ -123,6 +123,9 @@ def generate_synthetic_examples_chunk(
     worker_seed = seed + (worker_idx * 10_000)
     random.seed(worker_seed)
     np.random.seed(worker_seed % (2**32 - 1))
+
+    primary_pool = load_worker_sentence_pool(primary_pool_path)
+    fallback_pool = load_worker_sentence_pool(fallback_pool_path) if fallback_pool_path else None
 
     worker_desc = f"Worker {worker_idx}"
     temp_path = _synthetic_worker_temp_path(synthetic_temp_dir, worker_idx)
@@ -524,9 +527,6 @@ def build_synthetic_dataset(
     *,
     seed: int,
     tokenizer,
-    coverage_sentence_map: dict[str, list[str]],
-    smol_sentence_map: dict[str, list[str]] | None,
-    ft_sentence_map: dict[str, list[str]] | None,
     label2id: dict[str, int],
     id2label: dict[int, str],
     sample_o_span: Callable[[], str],
@@ -546,7 +546,7 @@ def build_synthetic_dataset(
         source_specs: list[dict[str, Any]] = [
             {
                 "name": "wiki",
-                "sentence_map": coverage_sentence_map,
+                "cache_dir": PATHS["wiki"]["cache_dir"],
                 "reserve_fraction": RESERVE_FRACTION,
                 "min_reserved": MIN_RESERVED_SENTENCES,
                 "max_reserved": MAX_RESERVED_SENTENCES,
@@ -556,7 +556,7 @@ def build_synthetic_dataset(
             source_specs.append(
                 {
                     "name": "smol",
-                    "sentence_map": smol_sentence_map,
+                    "cache_dir": PATHS["smol"]["cache_dir"],
                     "reserve_fraction": SMOL_RESERVE_FRACTION,
                     "min_reserved": SMOL_MIN_RESERVED_SENTENCES,
                     "max_reserved": SMOL_MAX_RESERVED_SENTENCES,
@@ -566,38 +566,45 @@ def build_synthetic_dataset(
             source_specs.append(
                 {
                     "name": "finetranslations",
-                    "sentence_map": ft_sentence_map,
+                    "cache_dir": PATHS["finetrans"]["cache_dir"],
                     "reserve_fraction": FT_RESERVE_FRACTION,
                     "min_reserved": FT_MIN_RESERVED_SENTENCES,
                     "max_reserved": FT_MAX_RESERVED_SENTENCES,
                 }
             )
 
-        reserved_sentence_pools, main_sentence_pools, source_summaries = build_source_sentence_pools(source_specs)
+        source_pool_manifest = build_disk_sentence_pool_shards(
+            source_specs,
+            n_workers=generation_workers,
+            seed=seed,
+            pool_cache_dir=PATHS["source_pools"]["cache_dir"],
+            force_rebuild=FORCE_REBUILD_SYNTHETIC_CACHE,
+        )
+        source_summaries = source_pool_manifest.get("source_summaries", [])
         for summary in source_summaries:
-            if summary["skipped"]:
-                continue
             print(
                 f"{summary['name'].upper()} split -> "
                 f"reserved: {summary['reserved']} | main: {summary['main']}"
             )
 
-        reserved_total = sum(len(pool) for pool in reserved_sentence_pools.values())
-        main_total = sum(len(pool) for pool in main_sentence_pools.values())
+        reserved_total = int(source_pool_manifest.get("total_reserved", 0))
+        main_total = int(source_pool_manifest.get("total_main", 0))
         print(
             f"Reserved sentence bags: {reserved_total} total | "
             f"Main sentence bags: {main_total} total"
         )
 
-        missing_coverage_langs = [lang for lang in all_langs if not coverage_sentence_map.get(lang)]
+        language_stats = source_pool_manifest.get("language_stats", {})
+        missing_coverage_langs = [lang for lang in all_langs if int(language_stats.get(lang, {}).get("total", 0)) == 0]
         if missing_coverage_langs:
             print("WARNING: no extracted sentences for:", ", ".join(missing_coverage_langs))
 
         coverage_plan: list[str] = []
         for lang in all_langs:
-            if not coverage_sentence_map.get(lang):
+            lang_stats = language_stats.get(lang)
+            if not lang_stats:
                 continue
-            reserved_n = len(reserved_sentence_pools.get(lang, []))
+            reserved_n = int(lang_stats.get("reserved", 0))
             coverage_docs_for_lang = max(
                 1,
                 min(MAX_COVERAGE_DOCS_PER_LANG, max(MIN_COVERAGE_DOCS_PER_LANG, (reserved_n + 3) // 4)),
@@ -620,8 +627,8 @@ def build_synthetic_dataset(
                 worker_idx=0,
                 coverage_langs=coverage_plan,
                 random_count=random_job_count,
-                primary_pool=reserved_sentence_pools,
-                fallback_pool=main_sentence_pools,
+                primary_pool_path=source_pool_manifest["reserved_shards"][0],
+                fallback_pool_path=source_pool_manifest["main_shards"][0],
                 synthetic_temp_dir=SYNTHETIC_TEMP_DIR,
                 tokenizer=tokenizer,
                 all_langs=all_langs,
@@ -638,9 +645,6 @@ def build_synthetic_dataset(
                 meta = json.load(f)
             synthetic_total_examples += int(meta.get("coverage_count", 0)) + int(meta.get("random_count", 0))
         else:
-            reserved_worker_pools = partition_sentence_pools(reserved_sentence_pools, generation_workers)
-            main_worker_pools = partition_sentence_pools(main_sentence_pools, generation_workers)
-
             with ProcessPoolExecutor(max_workers=generation_workers) as pool:
                 future_to_worker = {}
                 for worker_idx in range(generation_workers):
@@ -651,8 +655,8 @@ def build_synthetic_dataset(
                         worker_idx=worker_idx,
                         coverage_langs=coverage_langs,
                         random_count=random_counts[worker_idx],
-                        primary_pool=reserved_worker_pools[worker_idx],
-                        fallback_pool=main_worker_pools[worker_idx],
+                        primary_pool_path=source_pool_manifest["reserved_shards"][worker_idx],
+                        fallback_pool_path=source_pool_manifest["main_shards"][worker_idx],
                         synthetic_temp_dir=SYNTHETIC_TEMP_DIR,
                         tokenizer=tokenizer,
                         all_langs=all_langs,
