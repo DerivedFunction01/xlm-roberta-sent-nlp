@@ -9,7 +9,9 @@ PATHS: dict[str, Any] = {
     "sentences_dir": "./sentences_cache",
 }
 
-PATHS["wiki"]  = {
+PATHS["wiki"] = {
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "wiki.parquet"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "wiki_cleanup.meta.json"),
     "temp_dir": os.path.join(PATHS["sentences_dir"], "_wiki_tmp"),
     "seg_debug_dir": os.path.join(PATHS["sentences_dir"], "_wiki_tmp", "segmentation_debug"),
 }

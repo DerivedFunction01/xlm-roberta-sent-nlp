@@ -121,12 +121,12 @@ def _collect_priority_articles(dataset, lang: str, scan_limit: int, *, lang_to_g
     return candidates
 
 
-def temp_parquet_path(sentences_dir: str, lang: str) -> str:
-    return os.path.join(sentences_dir, "_wiki_tmp", f"{lang}.parquet")
+def temp_parquet_path(lang: str) -> str:
+    return os.path.join(PATHS["wiki"]["temp_dir"], f"{lang}.parquet")
 
 
-def temp_meta_path(sentences_dir: str, lang: str) -> str:
-    return os.path.join(sentences_dir, "_wiki_tmp", f"{lang}.meta.json")
+def temp_meta_path(lang: str) -> str:
+    return os.path.join(PATHS["wiki"]["temp_dir"], f"{lang}.meta.json")
 
 
 def max_wiki_sentences_for_lang(lang: str) -> int:
@@ -182,13 +182,13 @@ def extract_sentences_from_wiki(
     *,
     lang_to_group: dict[str, str],
     seed: int = 42,
-    sentences_dir: str = PATHS["sentences_dir"],
+    sentences_dir: str = PATHS["wiki"]["cache_dir"],
 ) -> str:
     segmenter = _get_segmenter(lang)
     fetch_target = n_articles * 20
     final_path = parquet_path(sentences_dir, lang)
-    temp_path = temp_parquet_path(sentences_dir, lang)
-    meta_path = temp_meta_path(sentences_dir, lang)
+    temp_path = temp_parquet_path(lang)
+    meta_path = temp_meta_path(lang)
 
     if lang in LENGTH_PRIORITY_LANGS:
         scan_limit = min(fetch_target, LENGTH_PRIORITY_SCAN_LIMIT)
@@ -464,7 +464,7 @@ def load_wiki_sentences(
     seed: int = 42,
     articles_per_lang: int = ARTICLES_PER_LANG,
     max_workers: int,
-    sentences_dir: str = PATHS["sentences_dir"],
+    sentences_dir: str = PATHS["wiki"]["cache_dir"],
 ) -> dict[str, list[str]]:
     os.makedirs(sentences_dir, exist_ok=True)
     result: dict[str, list[str]] = {}
