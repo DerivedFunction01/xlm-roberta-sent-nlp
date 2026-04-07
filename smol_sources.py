@@ -111,11 +111,17 @@ def load_smol_sentences(
     *,
     sentences_dir: str = SENTENCES_DIR,
     lang_to_group: dict[str, str],
+    use: bool | None = None,
     force_rebuild: bool | None = None,
     seed: int | None = None,
     max_sentences_per_lang: int | None = None,
     uncapped_langs: set[str] | None = None,
-) -> dict[str, list[str]]:
+) -> dict[str, list[str]] | None:
+    from source_config import SMOL
+
+    use = SMOL["use"] if use is None else use
+    if not use:
+        return None
     force_rebuild = False if force_rebuild is None else force_rebuild
     seed = 42 if seed is None else seed
     max_sentences_per_lang = MAX_SENTENCES_PER_LANG if max_sentences_per_lang is None else max_sentences_per_lang
