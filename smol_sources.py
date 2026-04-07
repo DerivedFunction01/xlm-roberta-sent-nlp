@@ -8,6 +8,7 @@ from typing import Callable
 from datasets import get_dataset_config_names, load_dataset
 from tqdm.auto import tqdm
 
+from language import LANG_TO_GROUP
 from paths import SENTENCES_DIR, SMOL_CACHE_FILE
 from text_utils import _collapse_spaces, _get_segmenter, _is_valid_sentence, _strip_bracket_notes
 
@@ -110,7 +111,7 @@ def _load_smolsent(accumulator: dict[str, list[str]], lang_to_group: dict[str, s
 def load_smol_sentences(
     *,
     sentences_dir: str = SENTENCES_DIR,
-    lang_to_group: dict[str, str],
+    lang_to_group: dict[str, str] = LANG_TO_GROUP,
     use: bool | None = None,
     force_rebuild: bool | None = None,
     seed: int | None = None,

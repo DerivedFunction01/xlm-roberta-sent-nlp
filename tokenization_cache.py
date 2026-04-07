@@ -16,6 +16,25 @@ FORCE_REBUILD_TOKENIZED_CACHE = RUN["tok_rebuild"]
 SKIP_TOKENIZED_CACHE_VALIDATION = RUN["tok_skip_check"]
 
 
+def _load_dataset_dict_from_cache_dir(cache_dir: str):
+    """Load a DatasetDict from a saved cache directory or its Arrow shards."""
+    try:
+        return load_from_disk(cache_dir)
+    except Exception:
+        split_names = ["train", "eval"]
+        loaded_splits = {}
+        for split_name in split_names:
+            split_dir = os.path.join(cache_dir, split_name)
+            arrow_files = sorted(glob.glob(os.path.join(split_dir, "*.arrow")))
+            if not arrow_files:
+                return None
+            split_parts = [Dataset.from_file(path) for path in arrow_files]
+            loaded_splits[split_name] = (
+                split_parts[0] if len(split_parts) == 1 else concatenate_datasets(split_parts)
+            )
+        return DatasetDict(loaded_splits)
+
+
 def tokenize_and_align(
     example: dict,
     *,
@@ -95,21 +114,7 @@ def load_tokenized_dataset_cache(
         return None
 
     if SKIP_TOKENIZED_CACHE_VALIDATION:
-        try:
-            return load_from_disk(CACHE_DIR)
-        except Exception:
-            split_names = ["train", "eval"]
-            loaded_splits = {}
-            for split_name in split_names:
-                split_dir = os.path.join(CACHE_DIR, split_name)
-                arrow_files = sorted(glob.glob(os.path.join(split_dir, "*.arrow")))
-                if not arrow_files:
-                    return None
-                split_parts = [Dataset.from_file(path) for path in arrow_files]
-                loaded_splits[split_name] = (
-                    split_parts[0] if len(split_parts) == 1 else concatenate_datasets(split_parts)
-                )
-            return DatasetDict(loaded_splits)
+        return _load_dataset_dict_from_cache_dir(CACHE_DIR)
 
     with open(CACHE_META, encoding="utf-8") as f:
         meta = json.load(f)
@@ -129,21 +134,14 @@ def load_tokenized_dataset_cache(
     if meta != expected_meta:
         return None
 
-    try:
-        return load_from_disk(CACHE_DIR)
-    except Exception:
-        split_names = ["train", "eval"]
-        loaded_splits = {}
-        for split_name in split_names:
-            split_dir = os.path.join(CACHE_DIR, split_name)
-            arrow_files = sorted(glob.glob(os.path.join(split_dir, "*.arrow")))
-            if not arrow_files:
-                return None
-            split_parts = [Dataset.from_file(path) for path in arrow_files]
-            loaded_splits[split_name] = (
-                split_parts[0] if len(split_parts) == 1 else concatenate_datasets(split_parts)
-            )
-        return DatasetDict(loaded_splits)
+    return _load_dataset_dict_from_cache_dir(CACHE_DIR)
+
+
+def load_tokenized_dataset_splits() -> Any | None:
+    """Load the cached tokenized train/eval split without validating metadata."""
+    if not os.path.exists(CACHE_DIR):
+        return None
+    return _load_dataset_dict_from_cache_dir(CACHE_DIR)
 
 
 def build_tokenized_dataset(
@@ -162,6 +160,8 @@ def build_tokenized_dataset(
         if (USE_TOKENIZED_CACHE and not FORCE_REBUILD_TOKENIZED_CACHE)
         else None
     )
+    if cached_tokenized is None and USE_TOKENIZED_CACHE and not FORCE_REBUILD_TOKENIZED_CACHE:
+        cached_tokenized = load_tokenized_dataset_splits()
     if cached_tokenized is not None:
         print(f"Loaded tokenized dataset cache from {CACHE_DIR}")
         return cached_tokenized["train"], cached_tokenized["eval"]

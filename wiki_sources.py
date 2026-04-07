@@ -11,6 +11,7 @@ from datasets import load_dataset
 from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic as _write_json_atomic, write_sentence_parquet as _write_sentence_parquet
+from language import ALL_LANGS, LANG_TO_GROUP
 from paths import SENTENCES_DIR, WIKI_SEGMENTATION_DEBUG_DIR, WIKI_TEMP_DIR
 from text_utils import (
     _article_min_chars,
@@ -457,9 +458,9 @@ def load_or_extract(
 
 
 def load_wiki_sentences(
-    langs: list[str],
+    langs: list[str] = ALL_LANGS,
     *,
-    lang_to_group: dict[str, str],
+    lang_to_group: dict[str, str] = LANG_TO_GROUP,
     seed: int = 42,
     articles_per_lang: int = ARTICLES_PER_LANG,
     max_workers: int,

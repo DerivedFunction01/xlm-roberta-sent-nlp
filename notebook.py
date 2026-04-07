@@ -34,12 +34,38 @@ torch.manual_seed(SEED)
 def get_workers(split: int = 1):
     return mp.cpu_count() // split
 
+def load_tokenized_dataset_splits(cache_dir: str = "./sentences_cache/tokenized_dataset"):
+    """Load a cached train/eval tokenized split without helper modules."""
+    cache_path = Path(cache_dir)
+    if not cache_path.exists():
+        return None
+    try:
+        from datasets import Dataset, DatasetDict, concatenate_datasets, load_from_disk
+    except ImportError as exc:
+        raise RuntimeError("datasets is required to load the tokenized cache") from exc
+
+    try:
+        return load_from_disk(str(cache_path))
+    except Exception:
+        split_names = ["train", "eval"]
+        loaded_splits = {}
+        for split_name in split_names:
+            split_dir = cache_path / split_name
+            arrow_files = sorted(split_dir.glob("*.arrow"))
+            if not arrow_files:
+                return None
+            split_parts = [Dataset.from_file(str(path)) for path in arrow_files]
+            loaded_splits[split_name] = (
+                split_parts[0] if len(split_parts) == 1 else concatenate_datasets(split_parts)
+            )
+        return DatasetDict(loaded_splits)
+
 with open("all_langs.json", encoding="utf-8") as f:
     _ALL_LANGS = json.load(f)
 
 # %%
 # --- Project Imports ---
-from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, LANGUAGE_GROUP_WEIGHTS
+from language import ALL_LANGS, LANG_TO_GROUP
 from wiki_sources import load_wiki_sentences
 from smol_sources import load_smol_sentences
 from finetranslations_sources import load_finetranslations_sentences
@@ -76,13 +102,11 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Data Loading ---
 lang_sentences = load_wiki_sentences(
-    _ALL_LANGS,
-    lang_to_group=LANG_TO_GROUP,
     seed=SEED,
     max_workers=get_workers(2),
 )
 # %%
-smol_sentences = load_smol_sentences(lang_to_group=LANG_TO_GROUP, seed=SEED)
+smol_sentences = load_smol_sentences(seed=SEED)
 if smol_sentences is not None:
     total_smol_sentences = sum(len(v) for v in smol_sentences.values())
     print(
@@ -113,33 +137,36 @@ sample_o_span = neutral_sources.sample_o_span
 sample_code_span = neutral_sources.sample_code_span
 
 # %%
-# --- Synthetic Dataset Build ---
-synthetic_dataset = build_synthetic_dataset(
-    seed=SEED,
-    tokenizer=tokenizer,
-    coverage_sentence_map=lang_sentences,
-    smol_sentence_map=smol_sentences,
-    ft_sentence_map=ft_sentences,
-    all_langs=_ALL_LANGS,
-    lang_to_group=LANG_TO_GROUP,
-    language_groups=LANGUAGE_GROUPS, # type: ignore
-    language_group_weights=LANGUAGE_GROUP_WEIGHTS,
-    label2id=label2id,
-    id2label=id2label,
-    sample_o_span=sample_o_span,
-    sample_code_span=sample_code_span,
-    generation_workers=get_workers(4),
-)
+# --- Tokenized Dataset Load ---
+cached_tokenized = load_tokenized_dataset_splits()
+# %%
+if cached_tokenized is not None:
+    train_dataset = cached_tokenized["train"]
+    eval_dataset = cached_tokenized["eval"]
+    print("Loaded tokenized dataset cache from ./sentences_cache/tokenized_dataset")
+else:
+    # --- Synthetic Dataset Build ---
+    synthetic_dataset = build_synthetic_dataset(
+        seed=SEED,
+        tokenizer=tokenizer,
+        coverage_sentence_map=lang_sentences,
+        smol_sentence_map=smol_sentences,
+        ft_sentence_map=ft_sentences,
+        label2id=label2id,
+        id2label=id2label,
+        sample_o_span=sample_o_span,
+        sample_code_span=sample_code_span,
+    )
 
-train_dataset, eval_dataset = build_tokenized_dataset(
-    synthetic_dataset,
-    seed=SEED,
-    model_checkpoint=MODEL_CHECKPOINT,
-    tokenizer=tokenizer,
-    label2id=label2id,
-    id2label=id2label,
-    max_length=512,
-)
+    train_dataset, eval_dataset = build_tokenized_dataset(
+        synthetic_dataset,
+        seed=SEED,
+        model_checkpoint=MODEL_CHECKPOINT,
+        tokenizer=tokenizer,
+        label2id=label2id,
+        id2label=id2label,
+        max_length=512,
+    )
 
 print(f"Train: {len(train_dataset)} | Eval: {len(eval_dataset)}")
 

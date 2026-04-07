@@ -4,6 +4,7 @@ import gc
 import json
 import os
 import random
+import multiprocessing as mp
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any, Callable
@@ -14,6 +15,7 @@ from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic
 from source_config import FT, POOL, RUN, SMOL
+from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, LANGUAGE_GROUP_WEIGHTS
 
 MAX_LENGTH = RUN["len"]
 EXAMPLES_TARGET = RUN["target"]
@@ -523,17 +525,18 @@ def build_synthetic_dataset(
     coverage_sentence_map: dict[str, list[str]],
     smol_sentence_map: dict[str, list[str]] | None,
     ft_sentence_map: dict[str, list[str]] | None,
-    all_langs: list[str],
-    lang_to_group: dict[str, str],
-    language_groups: list[str],
-    language_group_weights: dict[str, float],
     label2id: dict[str, int],
     id2label: dict[int, str],
     sample_o_span: Callable[[], str],
     sample_code_span: Callable[[], str],
-    generation_workers: int,
 ) -> Dataset:
     """Build or load the synthetic mixed-language dataset."""
+    all_langs = ALL_LANGS
+    lang_to_group = LANG_TO_GROUP
+    language_groups = LANGUAGE_GROUPS
+    language_group_weights = LANGUAGE_GROUP_WEIGHTS
+    generation_workers = max(1, mp.cpu_count() // 4)
+
     synthetic_dataset = load_synthetic_examples_cache() if (USE_SYNTHETIC_CACHE and not FORCE_REBUILD_SYNTHETIC_CACHE) else None
     if synthetic_dataset is not None:
         print(f"Loaded cached synthetic examples from {SYNTHETIC_CACHE}")
