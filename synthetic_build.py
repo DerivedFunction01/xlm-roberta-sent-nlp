@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic
 from paths import PATHS
-from source_config import FT, POOL, RUN, SMOL
+from source_config import DOC_MIX, FT, POOL, RUN, SMOL
 from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, LANGUAGE_GROUP_WEIGHTS
 
 MAX_LENGTH = RUN["len"]
@@ -42,6 +42,9 @@ FT_MAX_RESERVED_SENTENCES = POOL["ft"]["max"]
 
 USE_SMOL_AUGMENTATION = SMOL["use"]
 USE_FINETRANS_AUGMENTATION = FT["use"]
+PURE_DOC_MIX = DOC_MIX["pure"]
+HOMOGENEOUS_DOC_MIX = DOC_MIX["homogeneous"]
+MIXED_DOC_MIX = DOC_MIX["mixed"]
 from source_pools import (
     build_disk_sentence_pool_shards,
     chunk_list,
@@ -64,6 +67,49 @@ try:
     import pyarrow.parquet as pq
 except ImportError:
     pq = None
+
+
+def _build_language_doc_plan(
+    language_stats: dict[str, dict[str, int]],
+    *,
+    source_key: str,
+    target_docs: int,
+    docs_per_sentence_estimate: int,
+    seed: int,
+) -> list[str]:
+    """Build a deterministic per-language doc plan bounded by available sentence supply."""
+    capacities: dict[str, int] = {}
+    for lang, stats in language_stats.items():
+        available = int(stats.get(source_key, 0))
+        if available <= 0:
+            continue
+        capacities[lang] = max(1, available // max(1, docs_per_sentence_estimate))
+
+    if not capacities or target_docs <= 0:
+        return []
+
+    rng = random.Random(seed)
+    plan: list[str] = []
+
+    for lang in sorted(capacities):
+        if len(plan) >= target_docs:
+            break
+        plan.append(lang)
+        capacities[lang] -= 1
+        if capacities[lang] <= 0:
+            del capacities[lang]
+
+    while len(plan) < target_docs and capacities:
+        candidates = list(capacities)
+        weights = [capacities[lang] for lang in candidates]
+        lang = rng.choices(candidates, weights=weights, k=1)[0]
+        plan.append(lang)
+        capacities[lang] -= 1
+        if capacities[lang] <= 0:
+            del capacities[lang]
+
+    rng.shuffle(plan)
+    return plan
 
 
 def bio_label_tokens(tokens: list[str], lang: str, is_first: bool, label2id: dict[str, int]) -> list[int]:
@@ -103,8 +149,9 @@ def generate_synthetic_examples_chunk(
     *,
     seed: int,
     worker_idx: int,
-    coverage_langs: list[str],
-    random_count: int,
+    pure_langs: list[str],
+    homogeneous_langs: list[str],
+    mixed_count: int,
     primary_pool_path: str,
     fallback_pool_path: str | None,
     synthetic_temp_dir: str,
@@ -128,8 +175,9 @@ def generate_synthetic_examples_chunk(
     worker_desc = f"Worker {worker_idx}"
     temp_path = _synthetic_worker_temp_path(synthetic_temp_dir, worker_idx)
     batch_rows: list[dict] = []
-    coverage_count = 0
-    random_written = 0
+    pure_written = 0
+    homogeneous_written = 0
+    mixed_written = 0
 
     if pq is None:
         raise RuntimeError("pyarrow is required for streaming synthetic shard writes")
@@ -148,17 +196,18 @@ def generate_synthetic_examples_chunk(
         ).schema,
     )
     try:
-        total_jobs = len(coverage_langs) + random_count
+        total_jobs = len(pure_langs) + len(homogeneous_langs) + mixed_count
         with tqdm(total=total_jobs, desc=worker_desc, position=worker_idx, leave=False) as pbar:
-            for lang in coverage_langs:
+            for lang in pure_langs:
                 example = build_synthetic_doc_with_retry(
                     primary_pool=primary_pool,
                     fallback_pool=None,
                     required_langs=[lang],
                     pure=True,
                     pure_lang=lang,
-                    n_segments=1,
-                    strip_punct_prob=0.10,
+                    min_sentences=PURE_DOC_MIX["min_sentences"],
+                    max_sentences=PURE_DOC_MIX["max_sentences"],
+                    strip_punct_prob=PURE_DOC_MIX["strip_punct_prob"],
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -169,24 +218,57 @@ def generate_synthetic_examples_chunk(
                     sample_o_span=sample_o_span,
                     sample_code_span=sample_code_span,
                 )
-                batch_rows.append(_synthetic_example_to_row("coverage", example))
-                coverage_count += 1
+                batch_rows.append(_synthetic_example_to_row("pure", example))
+                pure_written += 1
                 pbar.update(1)
-                pbar.set_postfix_str(f"coverage={coverage_count} random={random_written}")
+                pbar.set_postfix_str(
+                    f"pure={pure_written} homogeneous={homogeneous_written} mixed={mixed_written}"
+                )
                 if len(batch_rows) >= 64:
                     _append_synthetic_rows(writer, batch_rows)
                     batch_rows.clear()
 
-            for _ in range(random_count):
+            for lang in homogeneous_langs:
                 example = build_synthetic_doc_with_retry(
-                    primary_pool=primary_pool,
-                    fallback_pool=fallback_pool,
+                    primary_pool=fallback_pool or primary_pool,
+                    fallback_pool=None,
+                    required_langs=[lang],
+                    pure=True,
+                    pure_lang=lang,
+                    min_sentences=HOMOGENEOUS_DOC_MIX["min_sentences"],
+                    max_sentences=HOMOGENEOUS_DOC_MIX["max_sentences"],
+                    strip_punct_prob=HOMOGENEOUS_DOC_MIX["strip_punct_prob"],
                     worker_idx=worker_idx,
-                    n_segments=2,
-                    strip_punct_prob=0.25,
-                    swap_prob=0.06,
-                    o_inject_prob=0.06,
-                    allow_repeated_langs=True,
+                    tokenizer=tokenizer,
+                    all_langs=all_langs,
+                    lang_to_group=lang_to_group,
+                    language_group_weights=language_group_weights,
+                    max_length=max_length,
+                    label2id=label2id,
+                    sample_o_span=sample_o_span,
+                    sample_code_span=sample_code_span,
+                    n_segments=1,
+                )
+                batch_rows.append(_synthetic_example_to_row("homogeneous", example))
+                homogeneous_written += 1
+                pbar.update(1)
+                pbar.set_postfix_str(
+                    f"pure={pure_written} homogeneous={homogeneous_written} mixed={mixed_written}"
+                )
+                if len(batch_rows) >= 64:
+                    _append_synthetic_rows(writer, batch_rows)
+                    batch_rows.clear()
+
+            for _ in range(mixed_count):
+                example = build_synthetic_doc_with_retry(
+                    primary_pool=fallback_pool or primary_pool,
+                    fallback_pool=None,
+                    worker_idx=worker_idx,
+                    n_segments=random.randint(MIXED_DOC_MIX["min_segments"], MIXED_DOC_MIX["max_segments"]),
+                    strip_punct_prob=MIXED_DOC_MIX["strip_punct_prob"],
+                    swap_prob=MIXED_DOC_MIX["swap_prob"],
+                    o_inject_prob=MIXED_DOC_MIX["o_inject_prob"],
+                    allow_repeated_langs=MIXED_DOC_MIX["allow_repeated_langs"],
                     tokenizer=tokenizer,
                     all_langs=all_langs,
                     lang_to_group=lang_to_group,
@@ -196,10 +278,12 @@ def generate_synthetic_examples_chunk(
                     sample_o_span=sample_o_span,
                     sample_code_span=sample_code_span,
                 )
-                batch_rows.append(_synthetic_example_to_row("random", example))
-                random_written += 1
+                batch_rows.append(_synthetic_example_to_row("mixed", example))
+                mixed_written += 1
                 pbar.update(1)
-                pbar.set_postfix_str(f"coverage={coverage_count} random={random_written}")
+                pbar.set_postfix_str(
+                    f"pure={pure_written} homogeneous={homogeneous_written} mixed={mixed_written}"
+                )
                 if len(batch_rows) >= 64:
                     _append_synthetic_rows(writer, batch_rows)
                     batch_rows.clear()
@@ -208,16 +292,17 @@ def generate_synthetic_examples_chunk(
     finally:
         writer.close()
 
-    write_json_atomic(
-        temp_path.replace(".parquet", ".meta.json"),
-        {
-            "worker_idx": worker_idx,
-            "seed": worker_seed,
-            "job_count": len(coverage_langs) + random_count,
-            "coverage_count": coverage_count,
-            "random_count": random_written,
-        },
-    )
+        write_json_atomic(
+            temp_path.replace(".parquet", ".meta.json"),
+            {
+                "worker_idx": worker_idx,
+                "seed": worker_seed,
+                "job_count": total_jobs,
+                "pure_count": len(pure_langs),
+                "homogeneous_count": len(homogeneous_langs),
+                "mixed_count": mixed_count,
+            },
+        )
     return temp_path
 
 
@@ -234,6 +319,7 @@ def save_synthetic_examples_cache(
                 "reserve_fraction": RESERVE_FRACTION,
                 "min_reserved_sentences": MIN_RESERVED_SENTENCES,
                 "max_reserved_sentences": MAX_RESERVED_SENTENCES,
+                "doc_mix": DOC_MIX,
                 "total_examples": total_examples,
                 "shards": [os.path.basename(p) for p in shard_paths],
             },
@@ -256,6 +342,7 @@ def load_synthetic_examples_cache():
         "reserve_fraction": RESERVE_FRACTION,
         "min_reserved_sentences": MIN_RESERVED_SENTENCES,
         "max_reserved_sentences": MAX_RESERVED_SENTENCES,
+        "doc_mix": DOC_MIX,
     }
     for key, expected_value in expected_fields.items():
         if meta.get(key) != expected_value:
@@ -299,8 +386,10 @@ def create_synthetic_doc(
         candidates = [
             lang
             for lang in all_langs
-            if remaining_sentence_count(lang, primary_pool, fallback_pool) > 0 and lang not in seen_langs
+            if remaining_sentence_count(lang, primary_pool, fallback_pool) > 0
         ]
+        if not allow_repeated_langs:
+            candidates = [lang for lang in candidates if lang not in seen_langs]
         return candidates
 
     def _sample_language(candidates: list[str]) -> str | None:
@@ -436,6 +525,8 @@ def build_synthetic_doc_with_retry(
     required_langs: list[str] | None = None,
     pure: bool = False,
     pure_lang: str | None = None,
+    min_sentences: int = 1,
+    max_sentences: int = 4,
     n_segments: int = 4,
     strip_punct_prob: float = 0.35,
     swap_prob: float = 0.12,
@@ -462,8 +553,8 @@ def build_synthetic_doc_with_retry(
                 primary_pool=primary_pool,
                 lang=lang,
                 label2id=label2id,
-                min_sentences=1,
-                max_sentences=4,
+                min_sentences=min_sentences,
+                max_sentences=max_sentences,
                 strip_punct_prob=strip_punct_prob,
             )
         else:
@@ -572,13 +663,13 @@ def release_generation_memory() -> None:
     for name in [
         "synthetic_dataset",
         "preview_examples",
-        "coverage_dataset",
-        "random_dataset",
+        "pure_dataset",
+        "homogeneous_dataset",
+        "mixed_dataset",
         "reserved_sentence_pools",
         "main_sentence_pools",
         "reserved_worker_pools",
         "main_worker_pools",
-        "coverage_plan",
     ]:
         globals()[name] = None
 
@@ -668,22 +759,33 @@ def build_synthetic_dataset(
         if missing_coverage_langs:
             print("WARNING: no extracted sentences for:", ", ".join(missing_coverage_langs))
 
-        coverage_plan: list[str] = []
-        for lang in all_langs:
-            lang_stats = language_stats.get(lang)
-            if not lang_stats:
-                continue
-            reserved_n = int(lang_stats.get("reserved", 0))
-            coverage_docs_for_lang = max(1, reserved_n // 3)
-            coverage_plan.extend([lang] * coverage_docs_for_lang)
+        pure_target = int(round(EXAMPLES_TARGET * PURE_DOC_MIX["fraction"]))
+        homogeneous_target = int(round(EXAMPLES_TARGET * HOMOGENEOUS_DOC_MIX["fraction"]))
+        mixed_target = max(0, EXAMPLES_TARGET - pure_target - homogeneous_target)
+
+        pure_plan = _build_language_doc_plan(
+            language_stats,
+            source_key="reserved",
+            target_docs=pure_target,
+            docs_per_sentence_estimate=3,
+            seed=seed + 101,
+        )
+        homogeneous_plan = _build_language_doc_plan(
+            language_stats,
+            source_key="main",
+            target_docs=homogeneous_target,
+            docs_per_sentence_estimate=4,
+            seed=seed + 202,
+        )
+        mixed_target = max(0, EXAMPLES_TARGET - len(pure_plan) - len(homogeneous_plan))
 
         _clear_synthetic_cache_dir(SYNTHETIC_CACHE)
-        random_job_count = max(0, EXAMPLES_TARGET - len(coverage_plan))
         shard_paths: list[str] = []
         synthetic_total_examples = 0
-        coverage_chunks = chunk_list(coverage_plan, generation_workers)
-        random_counts = [
-            random_job_count // generation_workers + (1 if i < (random_job_count % generation_workers) else 0)
+        pure_chunks = chunk_list(pure_plan, generation_workers)
+        homogeneous_chunks = chunk_list(homogeneous_plan, generation_workers)
+        mixed_counts = [
+            mixed_target // generation_workers + (1 if i < (mixed_target % generation_workers) else 0)
             for i in range(generation_workers)
         ]
 
@@ -691,8 +793,9 @@ def build_synthetic_dataset(
             temp_path = generate_synthetic_examples_chunk(
                 seed=seed,
                 worker_idx=0,
-                coverage_langs=coverage_plan,
-                random_count=random_job_count,
+                pure_langs=pure_plan,
+                homogeneous_langs=homogeneous_plan,
+                mixed_count=mixed_target,
                 primary_pool_path=source_pool_manifest["reserved_shards"][0],
                 fallback_pool_path=source_pool_manifest["main_shards"][0],
                 synthetic_temp_dir=SYNTHETIC_TEMP_DIR,
@@ -709,18 +812,20 @@ def build_synthetic_dataset(
             shard_paths.append(final_path)
             with open(final_path.replace(".parquet", ".meta.json"), encoding="utf-8") as f:
                 meta = json.load(f)
-            synthetic_total_examples += int(meta.get("coverage_count", 0)) + int(meta.get("random_count", 0))
+            synthetic_total_examples += int(meta.get("pure_count", 0)) + int(meta.get("homogeneous_count", 0)) + int(meta.get("mixed_count", 0))
         else:
             with ProcessPoolExecutor(max_workers=generation_workers) as pool:
                 future_to_worker = {}
                 for worker_idx in range(generation_workers):
-                    coverage_langs = coverage_chunks[worker_idx] if worker_idx < len(coverage_chunks) else []
+                    pure_langs = pure_chunks[worker_idx] if worker_idx < len(pure_chunks) else []
+                    homogeneous_langs = homogeneous_chunks[worker_idx] if worker_idx < len(homogeneous_chunks) else []
                     future = pool.submit(
                         generate_synthetic_examples_chunk,
                         seed=seed,
                         worker_idx=worker_idx,
-                        coverage_langs=coverage_langs,
-                        random_count=random_counts[worker_idx],
+                        pure_langs=pure_langs,
+                        homogeneous_langs=homogeneous_langs,
+                        mixed_count=mixed_counts[worker_idx],
                         primary_pool_path=source_pool_manifest["reserved_shards"][worker_idx],
                         fallback_pool_path=source_pool_manifest["main_shards"][worker_idx],
                         synthetic_temp_dir=SYNTHETIC_TEMP_DIR,
@@ -742,7 +847,7 @@ def build_synthetic_dataset(
                     shard_paths.append(final_path)
                     with open(final_path.replace(".parquet", ".meta.json"), encoding="utf-8") as f:
                         meta = json.load(f)
-                    synthetic_total_examples += int(meta.get("coverage_count", 0)) + int(meta.get("random_count", 0))
+                    synthetic_total_examples += int(meta.get("pure_count", 0)) + int(meta.get("homogeneous_count", 0)) + int(meta.get("mixed_count", 0))
 
         if USE_SYNTHETIC_CACHE:
             save_synthetic_examples_cache(shard_paths, synthetic_total_examples)

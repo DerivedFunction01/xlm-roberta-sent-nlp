@@ -185,12 +185,12 @@ def build_tokenized_dataset(
             "ner_tags": json.loads(example["ner_tags"]),
         }
 
-    coverage_dataset = synthetic_dataset.filter(lambda ex: ex["kind"] == "coverage").map(  # type: ignore
+    coverage_dataset = synthetic_dataset.filter(lambda ex: ex["kind"] in {"coverage", "pure", "homogeneous"}).map(  # type: ignore
         _decode_synthetic_example,
         batched=False,
         remove_columns=["kind"],
     )
-    random_dataset = synthetic_dataset.filter(lambda ex: ex["kind"] == "random").map(  # type: ignore
+    random_dataset = synthetic_dataset.filter(lambda ex: ex["kind"] in {"random", "mixed"}).map(  # type: ignore
         _decode_synthetic_example,
         batched=False,
         remove_columns=["kind"],

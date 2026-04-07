@@ -177,19 +177,46 @@ LANGUAGE_BUCKETS = {
 
 POOL = {
     "wiki": {
-        "reserve": 0.15,
+        "reserve": 0.50,
         "min": 4,
-        "max": 20_000,
+        "max": 75_000,
     },
     "smol": {
         "reserve": 0.95,
         "min": 1,
-        "max": 20_000,
+        "max": 1_000,
     },
     "ft": {
-        "reserve": 0.15,
+        "reserve": 0.50,
         "min": 1,
-        "max": 20_000,
+        "max": 25_000,
+    },
+}
+
+DOC_MIX = {
+    "pure": {
+        "fraction": 0.60,
+        "pool": "reserve",
+        "min_sentences": 1,
+        "max_sentences": 4,
+        "strip_punct_prob": 0.10,
+    },
+    "homogeneous": {
+        "fraction": 0.30,
+        "pool": "main",
+        "min_sentences": 2,
+        "max_sentences": 6,
+        "strip_punct_prob": 0.15,
+    },
+    "mixed": {
+        "fraction": 0.10,
+        "pool": "main",
+        "min_segments": 2,
+        "max_segments": 4,
+        "strip_punct_prob": 0.25,
+        "swap_prob": 0.06,
+        "o_inject_prob": 0.06,
+        "allow_repeated_langs": True,
     },
 }
 
