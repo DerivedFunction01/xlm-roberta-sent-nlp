@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
+
 from source_config import LANGUAGE_BUCKETS
 
 LANGUAGE_GROUPS = {group: cfg["langs"] for group, cfg in LANGUAGE_BUCKETS.items()}
 LANGUAGE_GROUP_WEIGHTS = {group: float(cfg["weight"]) for group, cfg in LANGUAGE_BUCKETS.items()}
 LANGUAGE_GROUP_MIN_CHARS = {group: int(cfg["min_chars"]) for group, cfg in LANGUAGE_BUCKETS.items()}
 LATIN_GROUPS = {group for group, cfg in LANGUAGE_BUCKETS.items() if cfg.get("latin")}
+
+LANGS_JSON = Path(__file__).with_name("all_langs.json")
 
 LANG_ISO2_TO_ISO3 = {
     "en": "eng",
@@ -71,6 +77,27 @@ LANG_ISO2_TO_ISO3 = {
 }
 ALL_LANGS = [lang for langs in LANGUAGE_GROUPS.values() for lang in langs]
 LANG_TO_GROUP = {lang: group for group, langs in LANGUAGE_GROUPS.items() for lang in langs}
+
+
+def write_all_langs_json(path: str | os.PathLike[str] = LANGS_JSON) -> None:
+    """Write the canonical ALL_LANGS list to JSON if it is missing."""
+    path = Path(path)
+    if path.exists():
+        return
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(ALL_LANGS, f, ensure_ascii=False, indent=2)
+
+
+def load_all_langs(path: str | os.PathLike[str] = LANGS_JSON) -> list[str]:
+    """Load ALL_LANGS from JSON, falling back to the in-repo constant."""
+    path = Path(path)
+    if path.exists():
+        with path.open(encoding="utf-8") as f:
+            langs = json.load(f)
+        if isinstance(langs, list) and all(isinstance(lang, str) for lang in langs):
+            return langs
+    write_all_langs_json(path)
+    return ALL_LANGS[:]
 
 ENGLISH_STOP_WORDS = [
     "able",

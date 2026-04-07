@@ -34,9 +34,9 @@ torch.manual_seed(SEED)
 def get_workers(split: int = 1):
     return mp.cpu_count() // split
 
-lang_sentences: dict[str, list[str]] | None = None
-smol_sentences: dict[str, list[str]] | None = None
-ft_sentences: dict[str, list[str]] | None = None
+with open("all_langs.json", encoding="utf-8") as f:
+    _ALL_LANGS = json.load(f)
+
 # %%
 # --- Project Imports ---
 from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, LANGUAGE_GROUP_WEIGHTS
@@ -46,11 +46,13 @@ from finetranslations_sources import load_finetranslations_sentences
 from neutral_sources import build_neutral_sources
 from synthetic_build import build_synthetic_dataset
 from tokenization_cache import build_tokenized_dataset
+
+_ALL_LANGS = ALL_LANGS
 # %%
 # Build BIO label map  (O=0, B-XX=odd, I-XX=even starting at 2)
 label2id = {"O": 0}
 id2label = {0: "O"}
-for idx, lang in enumerate(ALL_LANGS):
+for idx, lang in enumerate(_ALL_LANGS):
     b_id = 2 * idx + 1
     i_id = 2 * idx + 2
     label2id[f"B-{lang.upper()}"] = b_id
@@ -60,7 +62,7 @@ for idx, lang in enumerate(ALL_LANGS):
 
 NUM_LABELS = len(label2id)
 print(f"Total labels: {NUM_LABELS}")
-print(f"Total languages: {len(ALL_LANGS)}")
+print(f"Total languages: {len(_ALL_LANGS)}")
 print("Sample:", dict(list(id2label.items())[:7]))
 # %%
 if Path("hf_token").exists():
@@ -74,12 +76,12 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Data Loading ---
 lang_sentences = load_wiki_sentences(
-    ALL_LANGS,
+    _ALL_LANGS,
     lang_to_group=LANG_TO_GROUP,
     seed=SEED,
     max_workers=get_workers(2),
 )
-#%%
+# %%
 smol_sentences = load_smol_sentences(lang_to_group=LANG_TO_GROUP, seed=SEED)
 if smol_sentences is not None:
     total_smol_sentences = sum(len(v) for v in smol_sentences.values())
@@ -87,23 +89,19 @@ if smol_sentences is not None:
         f"\nSMOL kept separate for pool split: "
         f"{len(smol_sentences)} languages | {total_smol_sentences} sentences"
     )
-#%%
-ft_sentences = None
-try:
-    ft_sentences = load_finetranslations_sentences(
-        lang_to_group=LANG_TO_GROUP,
-        seed=SEED,
-        max_workers=get_workers(4),
+# %%
+ft_sentences = load_finetranslations_sentences(
+    lang_to_group=LANG_TO_GROUP,
+    seed=SEED,
+    max_workers=get_workers(4),
+)
+if ft_sentences is not None:
+    total_ft_sentences = sum(len(v) for v in ft_sentences.values())
+    print(
+        f"\nFineTranslations kept separate for pool split: "
+        f"{len(ft_sentences)} languages | {total_ft_sentences} sentences"
     )
-    if ft_sentences is not None:
-        total_ft_sentences = sum(len(v) for v in ft_sentences.values())
-        print(
-            f"\nFineTranslations kept separate for pool split: "
-            f"{len(ft_sentences)} languages | {total_ft_sentences} sentences"
-        )
-except Exception as exc:
-    print(f"\nFineTranslations augmentation skipped: {exc}")
-#%%
+# %%
 neutral_sources = build_neutral_sources(
     english_seed_sentences=(
         lang_sentences.get("en", [])
@@ -122,7 +120,7 @@ synthetic_dataset = build_synthetic_dataset(
     coverage_sentence_map=lang_sentences,
     smol_sentence_map=smol_sentences,
     ft_sentence_map=ft_sentences,
-    all_langs=ALL_LANGS,
+    all_langs=_ALL_LANGS,
     lang_to_group=LANG_TO_GROUP,
     language_groups=LANGUAGE_GROUPS, # type: ignore
     language_group_weights=LANGUAGE_GROUP_WEIGHTS,
