@@ -26,6 +26,9 @@ PATHS["finetrans"] = {
     "temp_dir": os.path.join(PATHS["sentences_dir"], "_finetrans_tmp"),
     "temp_file": os.path.join(PATHS["sentences_dir"], "_finetrans_tmp", "finetranslations_sentences.parquet"),
 }
+PATHS["neutral"] = {
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "neutral_sentences"),
+}
 PATHS["synthetic"] = {
     "cache_dir": os.path.join(PATHS["sentences_dir"], "synthetic_examples"),
     "cache_meta": os.path.join(PATHS["sentences_dir"], "synthetic_examples", "synthetic_examples.meta.json"),

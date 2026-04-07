@@ -61,7 +61,7 @@ def _clean_formula(f: str) -> str:
     return _LATEX_WRAP.sub("", f).strip()
 
 
-def load_latex_formulas(sentences_dir: str = PATHS["sentences_dir"]) -> list[str]:
+def load_latex_formulas(sentences_dir: str = PATHS["neutral"]["cache_dir"]) -> list[str]:
     cache = os.path.join(sentences_dir, "latex_formulas.parquet")
     if os.path.exists(cache):
         return pd.read_parquet(cache)["formula"].tolist()
@@ -123,7 +123,7 @@ class NeutralSources:
 
 def build_neutral_sources(
     *,
-    sentences_dir: str = PATHS["sentences_dir"],
+    sentences_dir: str = PATHS["neutral"]["cache_dir"],
     english_seed_sentences: list[str] | None = None,
     seed: int = 42,
 ) -> NeutralSources:
