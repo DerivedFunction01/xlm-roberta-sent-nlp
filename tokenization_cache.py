@@ -9,14 +9,13 @@ from datasets import Dataset, DatasetDict, concatenate_datasets, load_from_disk
 
 from source_config import RUN
 from paths import PATHS
-from synthetic_cache import SYNTHETIC_CACHE_META
 
 MAX_LENGTH = RUN["len"]
 USE_TOKENIZED_CACHE = RUN["tok_cache"]
 FORCE_REBUILD_TOKENIZED_CACHE = RUN["tok_rebuild"]
 SKIP_TOKENIZED_CACHE_VALIDATION = RUN["tok_skip_check"]
 TOKENIZED_CACHE_VERSION = PATHS["versions"]["tokenized"]
-
+SYNTHETIC_CACHE_META = PATHS["synthetic"]["cache_meta"]
 
 def _load_dataset_dict_from_cache_dir(cache_dir: str):
     """Load a DatasetDict from a saved cache directory or its Arrow shards."""
