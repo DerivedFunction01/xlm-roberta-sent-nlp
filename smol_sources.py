@@ -65,7 +65,7 @@ def _load_smoldoc(accumulator: dict[str, list[str]], lang_to_group: dict[str, st
         if mapped not in lang_to_group:
             continue
 
-        ds = load_dataset("google/smol", config, split="train", trust_remote_code=True)
+        ds = load_dataset("google/smol", config, split="train")
         target_bucket = accumulator.setdefault(mapped, [])
         target_langs_seen.add(mapped)
         if sl in lang_to_group and sl not in source_langs_seen:
