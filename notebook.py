@@ -59,9 +59,12 @@ def load_tokenized_dataset_splits(cache_dir: str = "./sentences_cache/tokenized_
                 split_parts[0] if len(split_parts) == 1 else concatenate_datasets(split_parts)
             )
         return DatasetDict(loaded_splits)
-
+    
+_ALL_LANGS = []
 with open("all_langs.json", encoding="utf-8") as f:
-    _ALL_LANGS = json.load(f)
+    data = json.load(f)
+    # read the keys only
+    _ALL_LANGS = list(data.keys())
 
 # %%
 # --- Project Imports ---
