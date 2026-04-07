@@ -14,8 +14,10 @@ from datasets import get_dataset_config_names, load_dataset
 from datasets.utils.logging import disable_progress_bar
 from tqdm.auto import tqdm
 
-from io_utils import write_json_atomic, write_records_parquet
+from io_utils import write_json_atomic, write_records_parquet, write_sentence_parquet
 from paths import (
+    FINETRANS_CACHE_DIR,
+    FINETRANS_CACHE_DIR_META,
     FINETRANS_CACHE_FILE,
     FINETRANS_CACHE_META,
     SENTENCES_DIR,
@@ -76,10 +78,22 @@ def _finetrans_cache_path(sentences_dir: str) -> str:
 
 
 def _finetrans_meta_path(sentences_dir: str) -> str:
-    return FINETRANS_CACHE_META if sentences_dir == SENTENCES_DIR else os.path.join(
+    return FINETRANS_CACHE_DIR_META if sentences_dir == SENTENCES_DIR else os.path.join(
         sentences_dir,
-        "finetranslations_sentences.meta.json",
+        "finetranslations",
+        "finetranslations.meta.json",
     )
+
+
+def _finetrans_cache_dir(sentences_dir: str) -> str:
+    return FINETRANS_CACHE_DIR if sentences_dir == SENTENCES_DIR else os.path.join(
+        sentences_dir,
+        "finetranslations",
+    )
+
+
+def _finetrans_lang_path(sentences_dir: str, lang: str) -> str:
+    return os.path.join(_finetrans_cache_dir(sentences_dir), f"{lang}.parquet")
 
 
 def _finetrans_config_dir(sentences_dir: str, config_idx: int) -> str:
@@ -458,6 +472,38 @@ def _rows_to_sentence_map(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
     return result
 
 
+def _load_finetrans_cache_map(cache_dir: str) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    if not os.path.isdir(cache_dir):
+        return result
+    for name in sorted(os.listdir(cache_dir)):
+        if not name.endswith(".parquet"):
+            continue
+        lang = name[:-8]
+        path = os.path.join(cache_dir, name)
+        rows = _read_records_parquet(path)
+        sentences = [
+            row.get("sentence")
+            for row in rows
+            if isinstance(row, dict) and isinstance(row.get("sentence"), str) and row["sentence"].strip()
+        ]
+        if sentences:
+            result[lang] = sentences
+        else:
+            result[lang] = []
+    return result
+
+
+def _write_finetrans_cache_map(cache_dir: str, sentence_map: dict[str, list[str]]) -> dict[str, int]:
+    os.makedirs(cache_dir, exist_ok=True)
+    lang_counts: dict[str, int] = {}
+    for lang, sentences in sorted(sentence_map.items()):
+        path = os.path.join(cache_dir, f"{lang}.parquet")
+        write_sentence_parquet(path, sentences)
+        lang_counts[lang] = len(sentences)
+    return lang_counts
+
+
 def _read_records_parquet(path: str) -> list[dict[str, Any]]:
     if not os.path.exists(path):
         return []
@@ -489,6 +535,7 @@ def _finetrans_cache_meta(
 ) -> dict[str, Any]:
     return {
         "dataset": FINETRANS_DATASET,
+        "cache_layout": "per_language_parquet_v1",
         "seed": seed,
         "max_sentences_per_lang": max_sentences_per_lang,
         "overflow_sentences_per_lang": overflow_sentences_per_lang,
@@ -545,6 +592,15 @@ def _load_finetrans_records_from_configs(config_root: str) -> list[dict[str, Any
             if name in {"source.parquet", "en.parquet"}:
                 rows.extend(_read_records_parquet(os.path.join(root, name)))
     return rows
+
+
+def _has_finetrans_temp_shards(config_root: str) -> bool:
+    if not os.path.isdir(config_root):
+        return False
+    for root, _, files in os.walk(config_root):
+        if "source.parquet" in files or "en.parquet" in files:
+            return True
+    return False
 
 
 def _clear_finetrans_config_dir(config_dir: str) -> None:
@@ -852,7 +908,7 @@ def load_finetranslations_sentences(
         print("No FineTranslations subsets matched the current language set.")
         return {}
 
-    cache_file = _finetrans_cache_path(sentences_dir)
+    cache_dir = _finetrans_cache_dir(sentences_dir)
     cache_meta = _finetrans_meta_path(sentences_dir)
     expected_meta = _finetrans_cache_meta(
         seed=seed,
@@ -866,120 +922,125 @@ def load_finetranslations_sentences(
     )
 
     final_meta = _load_finetrans_meta(
-        cache_file=cache_file,
+        cache_file=cache_dir,
         cache_meta=cache_meta,
         expected_meta=expected_meta,
     )
     if not force_rebuild and final_meta is not None and final_meta.get("status") == "complete":
-        print(f"Loading FineTranslations cache from {cache_file}")
-        rows = _read_records_parquet(cache_file)
-        result = _rows_to_sentence_map(rows)
-        total = sum(len(v) for v in result.values())
-        print(f"  {len(result)} languages | {total:,} sentences total")
-        return result
+        print(f"Loading FineTranslations cache from {cache_dir}")
+        result = _load_finetrans_cache_map(cache_dir)
+        if result:
+            total = sum(len(v) for v in result.values())
+            print(f"  {len(result)} languages | {total:,} sentences total")
+            return result
+
+    config_root = os.path.join(sentences_dir, "_finetrans_tmp")
+    os.makedirs(config_root, exist_ok=True)
+    recover_from_temp = _has_finetrans_temp_shards(config_root)
 
     if not force_rebuild and (
-        os.path.exists(cache_file) or os.path.exists(cache_meta)
-    ):
+        os.path.exists(cache_dir) or os.path.exists(cache_meta)
+    ) and not recover_from_temp:
         raise RuntimeError(
             "FineTranslations cache metadata does not match the current config. "
             "Refusing to rebuild over the existing cache. "
             "Delete the cache files or set FT_FORCE_REBUILD=True to regenerate them."
         )
-    config_root = os.path.join(sentences_dir, "_finetrans_tmp", "configs")
-    os.makedirs(config_root, exist_ok=True)
     if force_rebuild:
         _clear_finetrans_config_dir(config_root)
 
     max_workers = min(len(configs), max(1, max_workers or 1))
-    print(f"Loading FineTranslations ({len(configs)} subsets) ...")
-    print(f"(Workers: {max_workers} processes | matched configs only)\n")
+    if recover_from_temp and not force_rebuild:
+        print("Recovering FineTranslations cache from existing temp shards ...")
+    else:
+        print(f"Loading FineTranslations ({len(configs)} subsets) ...")
+        print(f"(Workers: {max_workers} processes | matched configs only)\n")
 
-    futures = {}
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
-        for config_idx, (config, lang) in enumerate(configs):
-            futures[pool.submit(
-                _process_finetrans_config,
-                config_idx=config_idx,
-                config=config,
-                lang=lang,
-                sentences_dir=sentences_dir,
-                lang_to_group=lang_to_group,
-                seed=seed,
-                max_row_index=max_row_index,
-                max_miss_streak=max_miss_streak,
-                overflow_sentences_per_lang=overflow_sentences_per_lang,
-                english_accept_every=english_accept_every,
-                include_translated_english=include_translated_english,
-                expected_meta=expected_meta,
-                force_rebuild=force_rebuild,
-            )] = (config_idx, config, lang)
+        futures = {}
+        with ProcessPoolExecutor(max_workers=max_workers) as pool:
+            for config_idx, (config, lang) in enumerate(configs):
+                futures[pool.submit(
+                    _process_finetrans_config,
+                    config_idx=config_idx,
+                    config=config,
+                    lang=lang,
+                    sentences_dir=sentences_dir,
+                    lang_to_group=lang_to_group,
+                    seed=seed,
+                    max_row_index=max_row_index,
+                    max_miss_streak=max_miss_streak,
+                    overflow_sentences_per_lang=overflow_sentences_per_lang,
+                    english_accept_every=english_accept_every,
+                    include_translated_english=include_translated_english,
+                    expected_meta=expected_meta,
+                    force_rebuild=force_rebuild,
+                )] = (config_idx, config, lang)
 
-        bars: dict[int, Any] = {}
-        pending_futures = dict(futures)
-        try:
-            for future, (config_idx, config, lang) in futures.items():
-                bars[config_idx] = tqdm(
-                    total=max_row_index,
-                    desc=f"{config:<16} -> {lang}",
-                    position=config_idx,
-                    leave=False,
-                    dynamic_ncols=True,
-                )
-
-            while pending_futures:
-                done_futures = [future for future in pending_futures if future.done()]
-                for future in done_futures:
-                    config_idx, config, lang = pending_futures.pop(future)
-                    try:
-                        outcome = future.result()
-                    except Exception as exc:
-                        tqdm.write(f"  Skipping {config}: {exc}")
-                        continue
-                    status = outcome.get("status", "unknown")
-                    if status == "complete":
-                        tqdm.write(
-                            f"  {config:<16} -> {lang}: +{int(outcome.get('accepted_rows', 0)):,} rows accepted"
-                        )
-                    elif status == "skipped":
-                        tqdm.write(f"  Skipping {config}: {outcome.get('error', 'unknown error')}")
-                    bar = bars.get(config_idx)
-                    if bar is not None:
-                        bar.n = max(bar.n, bar.total or 0)
-                        bar.refresh()
-                        bar.close()
-                        bars.pop(config_idx, None)
-
-                for future, (config_idx, config, lang) in pending_futures.items():
-                    bar = bars.get(config_idx)
-                    if bar is None:
-                        continue
-                    config_meta_path = _finetrans_config_meta_path(sentences_dir, config_idx)
-                    if not os.path.exists(config_meta_path):
-                        continue
-                    try:
-                        with open(config_meta_path, encoding="utf-8") as f:
-                            meta = json.load(f)
-                    except Exception:
-                        continue
-                    next_row_idx = int(meta.get("next_row_idx", 0))
-                    accepted_rows = int(meta.get("accepted_rows", 0))
-                    accepted_sentences = int(meta.get("accepted_sentences", 0))
-                    accepted_english_sentences = int(meta.get("accepted_english_sentences", 0))
-                    bar.total = max(bar.total or 0, max_row_index)
-                    bar.n = min(next_row_idx, bar.total or next_row_idx)
-                    bar.set_postfix_str(
-                        f"rows {accepted_rows:,} | sent {accepted_sentences:,} | en {accepted_english_sentences:,}"
+            bars: dict[int, Any] = {}
+            pending_futures = dict(futures)
+            try:
+                for future, (config_idx, config, lang) in futures.items():
+                    bars[config_idx] = tqdm(
+                        total=max_row_index,
+                        desc=f"{config:<16} -> {lang}",
+                        position=config_idx,
+                        leave=False,
+                        dynamic_ncols=True,
                     )
-                    bar.refresh()
 
-                time.sleep(1.0)
-        finally:
-            for bar in bars.values():
-                try:
-                    bar.close()
-                except Exception:
-                    pass
+                while pending_futures:
+                    done_futures = [future for future in pending_futures if future.done()]
+                    for future in done_futures:
+                        config_idx, config, lang = pending_futures.pop(future)
+                        try:
+                            outcome = future.result()
+                        except Exception as exc:
+                            tqdm.write(f"  Skipping {config}: {exc}")
+                            continue
+                        status = outcome.get("status", "unknown")
+                        if status == "complete":
+                            tqdm.write(
+                                f"  {config:<16} -> {lang}: +{int(outcome.get('accepted_rows', 0)):,} rows accepted"
+                            )
+                        elif status == "skipped":
+                            tqdm.write(f"  Skipping {config}: {outcome.get('error', 'unknown error')}")
+                        bar = bars.get(config_idx)
+                        if bar is not None:
+                            bar.n = max(bar.n, bar.total or 0)
+                            bar.refresh()
+                            bar.close()
+                            bars.pop(config_idx, None)
+
+                    for future, (config_idx, config, lang) in pending_futures.items():
+                        bar = bars.get(config_idx)
+                        if bar is None:
+                            continue
+                        config_meta_path = _finetrans_config_meta_path(sentences_dir, config_idx)
+                        if not os.path.exists(config_meta_path):
+                            continue
+                        try:
+                            with open(config_meta_path, encoding="utf-8") as f:
+                                meta = json.load(f)
+                        except Exception:
+                            continue
+                        next_row_idx = int(meta.get("next_row_idx", 0))
+                        accepted_rows = int(meta.get("accepted_rows", 0))
+                        accepted_sentences = int(meta.get("accepted_sentences", 0))
+                        accepted_english_sentences = int(meta.get("accepted_english_sentences", 0))
+                        bar.total = max(bar.total or 0, max_row_index)
+                        bar.n = min(next_row_idx, bar.total or next_row_idx)
+                        bar.set_postfix_str(
+                            f"rows {accepted_rows:,} | sent {accepted_sentences:,} | en {accepted_english_sentences:,}"
+                        )
+                        bar.refresh()
+
+                    time.sleep(1.0)
+            finally:
+                for bar in bars.values():
+                    try:
+                        bar.close()
+                    except Exception:
+                        pass
 
     rows = _load_finetrans_records_from_configs(config_root)
     records_by_lang: dict[str, list[dict[str, Any]]] = {}
@@ -1000,12 +1061,13 @@ def load_finetranslations_sentences(
 
     # Rebuilds are written atomically, so we keep any previous live cache in
     # place until the new parquet and metadata are fully ready.
-    write_records_parquet(cache_file, _records_to_rows(selected_records), columns=FINETRANS_FINAL_COLUMNS)
+    _write_finetrans_cache_map(cache_dir, result)
     write_json_atomic(
         cache_meta,
         {
             **expected_meta,
             "status": "complete",
+            "lang_counts": {lang: len(sentences) for lang, sentences in result.items()},
             "next_config_idx": len(configs),
             "next_row_idx": 0,
             "next_shard_idx": 0,
@@ -1014,7 +1076,7 @@ def load_finetranslations_sentences(
     _clear_finetrans_config_dir(config_root)
 
     total = sum(len(v) for v in result.values())
-    print(f"\nFineTranslations sentences cached -> {cache_file}")
+    print(f"\nFineTranslations sentences cached -> {cache_dir}/")
     print(f"  {len(result)} languages | {total:,} sentences total")
     for lang in sorted(result):
         print(f"  {lang:<6}  {len(result[lang]):>5} sentences")
