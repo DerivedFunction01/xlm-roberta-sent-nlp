@@ -13,68 +13,12 @@ LATIN_GROUPS = {group for group, cfg in LANGUAGE_BUCKETS.items() if cfg.get("lat
 
 LANGS_JSON = Path(__file__).with_name("all_langs.json")
 
-LANG_ISO2_TO_ISO3 = {
-    "en": "eng",
-    "es": "spa",
-    "fr": "fra",
-    "de": "deu",
-    "it": "ita",
-    "pt": "por",
-    "nl": "nld",
-    "vi": "vie",
-    "tr": "tur",
-    "la": "lat",
-    "id": "ind",
-    "ms": "msa",
-    "af": "afr",
-    "sq": "sqi",
-    "is": "isl",
-    "no": "nor",
-    "sv": "swe",
-    "da": "dan",
-    "fi": "fin",
-    "hu": "hun",
-    "pl": "pol",
-    "cs": "ces",
-    "ro": "ron",
-    "ru": "rus",
-    "bg": "bul",
-    "uk": "ukr",
-    "sr": "srp",
-    "be": "bel",
-    "kk": "kaz",
-    "mk": "mkd",
-    "mn": "mon",
-    "zh": "zho",
-    "ja": "jpn",
-    "ko": "kor",
-    "hi": "hin",
-    "ur": "urd",
-    "bn": "ben",
-    "ta": "tam",
-    "te": "tel",
-    "mr": "mar",
-    "gu": "guj",
-    "kn": "kan",
-    "ml": "mal",
-    "pa": "pan",
-    "as": "asm",
-    "or": "ori",
-    "ar": "ara",
-    "fa": "fas",
-    "ps": "pus",
-    "sd": "snd",
-    "ug": "uig",
-    "el": "ell",
-    "he": "heb",
-    "hy": "hye",
-    "ka": "kat",
-    "am": "amh",
-    "km": "khm",
-    "lo": "lao",
-    "my": "mya",
-    "th": "tha",
-}
+# Read from file to load the key-value pairs
+LANG_ISO2_TO_ISO3 = {}
+with open(LANGS_JSON) as f:
+    # Parse the file as a json string
+    LANG_ISO2_TO_ISO3 = json.load(f)
+
 ALL_LANGS = [lang for langs in LANGUAGE_GROUPS.values() for lang in langs]
 LANG_TO_GROUP = {lang: group for group, langs in LANGUAGE_GROUPS.items() for lang in langs}
 
