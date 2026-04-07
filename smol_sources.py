@@ -5,9 +5,11 @@ import os
 import random
 from typing import Callable
 
+import pandas as pd
 from datasets import get_dataset_config_names, load_dataset
 from tqdm.auto import tqdm
 
+from io_utils import write_json_atomic, write_sentence_parquet
 from language import LANG_TO_GROUP
 from paths import PATHS
 from text_utils import _collapse_spaces, _get_segmenter, _is_valid_sentence, _strip_bracket_notes
@@ -24,6 +26,7 @@ SMOL_CODE_MAP: dict[str, str] = {
 }
 MAX_SENTENCES_PER_LANG = 5_000
 UNCAPPED_LANGS: set[str] = set()
+SMOL_CACHE_VERSION = 2
 
 
 def _smol_parse_config(config: str) -> tuple[str, str] | None:
@@ -108,6 +111,60 @@ def _load_smolsent(accumulator: dict[str, list[str]], lang_to_group: dict[str, s
     return source_langs_seen, target_langs_seen
 
 
+def _smol_cache_dir(sentences_dir: str) -> str:
+    return PATHS["smol"]["cache_dir"] if sentences_dir == PATHS["sentences_dir"] else os.path.join(sentences_dir, "smol_sentences")
+
+
+def _smol_cache_meta_path(sentences_dir: str) -> str:
+    return PATHS["smol"]["cache_meta"] if sentences_dir == PATHS["sentences_dir"] else os.path.join(sentences_dir, "smol_sentences", "smol_sentences.meta.json")
+
+
+def _smol_cache_path(cache_dir: str, lang: str) -> str:
+    return os.path.join(cache_dir, f"{lang}.parquet")
+
+
+def _smol_legacy_cache_file(sentences_dir: str) -> str:
+    return os.path.join(sentences_dir, "smol_sentences.json")
+
+
+def _load_smol_cache_map(cache_dir: str) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for name in tqdm(sorted(os.listdir(cache_dir)), desc="SMOL cache load"):
+        if not name.endswith(".parquet"):
+            continue
+        path = os.path.join(cache_dir, name)
+        frame = pd.read_parquet(path)
+        if "sentence" not in frame.columns:
+            continue
+        lang = name[:-8]
+        result[lang] = frame["sentence"].astype(str).tolist()
+    return result
+
+
+def _write_smol_cache_map(cache_dir: str, sentence_map: dict[str, list[str]]) -> dict[str, int]:
+    os.makedirs(cache_dir, exist_ok=True)
+    counts: dict[str, int] = {}
+    for lang in tqdm(sorted(sentence_map), desc="SMOL cache write"):
+        sentences = sentence_map[lang]
+        path = _smol_cache_path(cache_dir, lang)
+        write_sentence_parquet(path, sentences)
+        counts[lang] = len(sentences)
+    return counts
+
+
+def _load_smol_meta(cache_meta: str, expected_meta: dict[str, object]) -> dict[str, object] | None:
+    if not os.path.exists(cache_meta):
+        return None
+    with open(cache_meta, encoding="utf-8") as f:
+        meta = json.load(f)
+    if not isinstance(meta, dict):
+        return None
+    for key, value in expected_meta.items():
+        if meta.get(key) != value:
+            return None
+    return meta
+
+
 def load_smol_sentences(
     *,
     sentences_dir: str = PATHS["sentences_dir"],
@@ -126,18 +183,42 @@ def load_smol_sentences(
     force_rebuild = False if force_rebuild is None else force_rebuild
     seed = 42 if seed is None else seed
     max_sentences_per_lang = MAX_SENTENCES_PER_LANG if max_sentences_per_lang is None else max_sentences_per_lang
-    cache_file = (
-        PATHS["smol"]["cache_file"]
-        if sentences_dir == PATHS["sentences_dir"]
-        else os.path.join(sentences_dir, "smol_sentences.json")
-    )
+    cache_dir = _smol_cache_dir(sentences_dir)
+    cache_meta = _smol_cache_meta_path(sentences_dir)
+    legacy_cache_file = _smol_legacy_cache_file(sentences_dir)
     uncapped_langs = uncapped_langs or UNCAPPED_LANGS
-    if not force_rebuild and os.path.exists(cache_file):
-        print(f"Loading SMOL cache from {cache_file}")
-        with open(cache_file, encoding="utf-8") as f:
-            cached: dict[str, list[str]] = json.load(f)
-        print(f"  {len(cached)} languages | {sum(len(v) for v in cached.values()):,} sentences total")
-        return cached
+    expected_meta = {
+        "cache_version": SMOL_CACHE_VERSION,
+        "cache_layout": "per_language_parquet_v1",
+        "seed": seed,
+        "max_sentences_per_lang": max_sentences_per_lang,
+        "uncapped_langs": sorted(uncapped_langs),
+    }
+    if not force_rebuild:
+        cached_meta = _load_smol_meta(cache_meta, expected_meta)
+        cache_paths = [name for name in os.listdir(cache_dir)] if os.path.isdir(cache_dir) else []
+        parquet_paths = [name for name in cache_paths if name.endswith(".parquet")]
+        if cached_meta is not None and parquet_paths:
+            print(f"Loading SMOL cache from {cache_dir}")
+            cached = _load_smol_cache_map(cache_dir)
+            total = sum(len(v) for v in cached.values())
+            print(f"  {len(cached)} languages | {total:,} sentences total")
+            return cached
+        if os.path.exists(legacy_cache_file):
+            print(f"Converting legacy SMOL cache from {legacy_cache_file} to parquet")
+            with open(legacy_cache_file, encoding="utf-8") as f:
+                cached: dict[str, list[str]] = json.load(f)
+            _write_smol_cache_map(cache_dir, cached)
+            write_json_atomic(
+                cache_meta,
+                {
+                    **expected_meta,
+                    "total_sentences": sum(len(v) for v in cached.values()),
+                    "languages": len(cached),
+                },
+            )
+            print(f"  {len(cached)} languages | {sum(len(v) for v in cached.values()):,} sentences total")
+            return cached
 
     accumulator: dict[str, list[str]] = {}
     print("Loading SmolDoc ...")
@@ -160,11 +241,18 @@ def load_smol_sentences(
         cap = None if lang in uncapped_langs else max_sentences_per_lang
         result[lang] = deduped if cap is None else deduped[:cap]
 
-    with open(cache_file, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+    _write_smol_cache_map(cache_dir, result)
+    write_json_atomic(
+        cache_meta,
+        {
+            **expected_meta,
+            "total_sentences": sum(len(v) for v in result.values()),
+            "languages": len(result),
+        },
+    )
 
     total = sum(len(v) for v in result.values())
-    print(f"\nSMOL sentences cached -> {cache_file}")
+    print(f"\nSMOL sentences cached -> {cache_dir}/")
     print(f"  {len(result)} languages | {total:,} sentences total")
     for lang in sorted(result):
         print(f"  {lang:<6}  {len(result[lang]):>5} sentences")
