@@ -102,14 +102,24 @@ def _finetrans_english_records_path(sentences_dir: str, config_idx: int) -> str:
     return os.path.join(_finetrans_english_config_dir(sentences_dir, config_idx), "en.parquet")
 
 
-def _config_name_to_lang(config_name: str, lang_to_group: dict[str, str]) -> str | None:
+def _config_name_to_lang(
+    config_name: str,
+    lang_to_group: dict[str, str],
+) -> str | None:
     config_name = config_name.rsplit("/", 1)[-1]
     if config_name == "all":
         return None
     base = config_name.split("_", 1)[0]
     if len(base) == 2 and base in lang_to_group:
+        if lang_to_group.get(base) not in LATIN_GROUPS and config_name.endswith("_Latn"):
+            return None
         return base
-    return FT_ISO3_TO_LANG.get(base) if FT_ISO3_TO_LANG.get(base) in lang_to_group else None
+    lang = FT_ISO3_TO_LANG.get(base)
+    if lang in lang_to_group:
+        if lang_to_group.get(lang) not in LATIN_GROUPS and config_name.endswith("_Latn"):
+            return None
+        return lang
+    return None
 
 
 def _matching_configs(
@@ -506,7 +516,21 @@ def _load_finetrans_meta(
         return None
     if not isinstance(meta, dict):
         return None
+    def _normalize_configs(value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        normalized: list[list[Any]] = []
+        for item in value:
+            if isinstance(item, list) and len(item) >= 2:
+                normalized.append([item[0], item[1]])
+            else:
+                normalized.append(item)
+        return normalized
+    if _normalize_configs(meta.get("configs")) != _normalize_configs(expected_meta.get("configs")):
+        return None
     for key, value in expected_meta.items():
+        if key == "configs":
+            continue
         if meta.get(key) != value:
             return None
     return meta
@@ -712,7 +736,11 @@ def _process_finetrans_config(
             continue
         if _row_is_wikipedia(row):
             continue
-        source_records = _sentence_records_from_row(row, lang=lang, lang_to_group=lang_to_group)
+        source_records = _sentence_records_from_row(
+            row,
+            lang=lang,
+            lang_to_group=lang_to_group,
+        )
         _lang_score = _row_language_score(row) or 0
         if _lang_score < FINETRANS_MIN_LANGUAGE_SCORE:
             continue
