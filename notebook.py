@@ -51,7 +51,7 @@ torch.manual_seed(SEED)
 
 MODEL_CHECKPOINT = "xlm-roberta-base"
 MAX_LENGTH = 512
-EXAMPLES_TARGET = 2_000_000  # synthetic mixed-language training examples to generate
+EXAMPLES_TARGET = 2_500_000  # synthetic mixed-language training examples to generate
 MIN_COVERAGE_DOCS_PER_LANG = 2
 MAX_COVERAGE_DOCS_PER_LANG = 5
 USE_SYNTHETIC_CACHE = True
@@ -944,9 +944,9 @@ else:
         remove_columns=["tokens", "ner_tags"],
     )
 
-    # Train / validation split (90 / 10).
+    # Train / validation split.
     # Keep the coverage set in train so every language is guaranteed to appear there.
-    split = random_dataset.train_test_split(test_size=0.1, seed=SEED)
+    split = random_dataset.train_test_split(test_size=0.05, seed=SEED)
     train_dataset = concatenate_datasets([coverage_dataset, split["train"]])
     eval_dataset = split["test"]
     if USE_TOKENIZED_CACHE:
