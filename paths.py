@@ -2,30 +2,50 @@ from __future__ import annotations
 
 import os
 
+from transformers import Any
 
-SENTENCES_DIR = "./sentences_cache"
-WIKI_TEMP_DIR = os.path.join(SENTENCES_DIR, "_wiki_tmp")
-WIKI_SEGMENTATION_DEBUG_DIR = os.path.join(WIKI_TEMP_DIR, "segmentation_debug")
-SMOL_CACHE_FILE = os.path.join(SENTENCES_DIR, "smol_sentences.json")
-FINETRANS_CACHE_FILE = os.path.join(SENTENCES_DIR, "finetranslations_sentences.parquet")
-FINETRANS_CACHE_META = os.path.join(SENTENCES_DIR, "finetranslations_sentences.meta.json")
-FINETRANS_CACHE_DIR = os.path.join(SENTENCES_DIR, "finetranslations")
-FINETRANS_CACHE_DIR_META = os.path.join(FINETRANS_CACHE_DIR, "finetranslations.meta.json")
-FINETRANS_TEMP_DIR = os.path.join(SENTENCES_DIR, "_finetrans_tmp")
-FINETRANS_TEMP_FILE = os.path.join(FINETRANS_TEMP_DIR, "finetranslations_sentences.parquet")
-SYNTHETIC_CACHE = os.path.join(SENTENCES_DIR, "synthetic_examples")
-SYNTHETIC_CACHE_META = os.path.join(SYNTHETIC_CACHE, "synthetic_examples.meta.json")
-SYNTHETIC_TEMP_DIR = os.path.join(SENTENCES_DIR, "_synthetic_tmp")
-CACHE_DIR = f"{SENTENCES_DIR}/tokenized_dataset"
-CACHE_META = f"{CACHE_DIR}/tokenized_dataset.meta.json"
-CACHE_VERSION = 2
-TOKENIZED_CACHE_VERSION = 2
 
-os.makedirs(SENTENCES_DIR, exist_ok=True)
-os.makedirs(WIKI_TEMP_DIR, exist_ok=True)
-os.makedirs(WIKI_SEGMENTATION_DEBUG_DIR, exist_ok=True)
-os.makedirs(FINETRANS_TEMP_DIR, exist_ok=True)
-os.makedirs(FINETRANS_CACHE_DIR, exist_ok=True)
-os.makedirs(SYNTHETIC_CACHE, exist_ok=True)
-os.makedirs(SYNTHETIC_TEMP_DIR, exist_ok=True)
-os.makedirs(CACHE_DIR, exist_ok=True)
+PATHS: dict[str, Any] = {
+    "sentences_dir": "./sentences_cache",
+}
+
+PATHS["wiki"]  = {
+    "temp_dir": os.path.join(PATHS["sentences_dir"], "_wiki_tmp"),
+    "seg_debug_dir": os.path.join(PATHS["sentences_dir"], "_wiki_tmp", "segmentation_debug"),
+}
+PATHS["smol"] = {
+    "cache_file": os.path.join(PATHS["sentences_dir"], "smol_sentences.json"),
+}
+PATHS["finetrans"] = {
+    "cache_file": os.path.join(PATHS["sentences_dir"], "finetranslations_sentences.parquet"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "finetranslations_sentences.meta.json"),
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "finetranslations"),
+    "cache_dir_meta": os.path.join(PATHS["sentences_dir"], "finetranslations", "finetranslations.meta.json"),
+    "temp_dir": os.path.join(PATHS["sentences_dir"], "_finetrans_tmp"),
+    "temp_file": os.path.join(PATHS["sentences_dir"], "_finetrans_tmp", "finetranslations_sentences.parquet"),
+}
+PATHS["synthetic"] = {
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "synthetic_examples"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "synthetic_examples", "synthetic_examples.meta.json"),
+    "temp_dir": os.path.join(PATHS["sentences_dir"], "_synthetic_tmp"),
+}
+PATHS["tokenized"] = {
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "tokenized_dataset"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "tokenized_dataset", "tokenized_dataset.meta.json"),
+}
+PATHS["versions"] = {
+    "cache": 2,
+    "tokenized": 2,
+}
+
+for path in [
+    PATHS["sentences_dir"],
+    PATHS["wiki"]["temp_dir"],
+    PATHS["wiki"]["seg_debug_dir"],
+    PATHS["finetrans"]["temp_dir"],
+    PATHS["finetrans"]["cache_dir"],
+    PATHS["synthetic"]["cache_dir"],
+    PATHS["synthetic"]["temp_dir"],
+    PATHS["tokenized"]["cache_dir"],
+]:
+    os.makedirs(path, exist_ok=True)

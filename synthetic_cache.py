@@ -6,16 +6,7 @@ import os
 from typing import Any
 
 from datasets import Dataset, load_dataset
-from paths import (
-    CACHE_DIR,
-    CACHE_META,
-    CACHE_VERSION,
-    SENTENCES_DIR,
-    SYNTHETIC_CACHE,
-    SYNTHETIC_CACHE_META,
-    SYNTHETIC_TEMP_DIR,
-    TOKENIZED_CACHE_VERSION,
-)
+from paths import PATHS
 
 try:
     import pyarrow as pa

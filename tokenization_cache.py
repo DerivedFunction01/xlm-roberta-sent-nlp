@@ -8,12 +8,14 @@ from typing import Any
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_from_disk
 
 from source_config import RUN
-from synthetic_cache import CACHE_DIR, CACHE_META, SYNTHETIC_CACHE_META, TOKENIZED_CACHE_VERSION
+from paths import PATHS
+from synthetic_cache import SYNTHETIC_CACHE_META
 
 MAX_LENGTH = RUN["len"]
 USE_TOKENIZED_CACHE = RUN["tok_cache"]
 FORCE_REBUILD_TOKENIZED_CACHE = RUN["tok_rebuild"]
 SKIP_TOKENIZED_CACHE_VALIDATION = RUN["tok_skip_check"]
+TOKENIZED_CACHE_VERSION = PATHS["versions"]["tokenized"]
 
 
 def _load_dataset_dict_from_cache_dir(cache_dir: str):
@@ -88,8 +90,10 @@ def save_tokenized_dataset_cache(
         with open(SYNTHETIC_CACHE_META, encoding="utf-8") as f:
             synthetic_meta = json.load(f)
 
-    DatasetDict({"train": train_dataset, "eval": eval_dataset}).save_to_disk(CACHE_DIR)
-    with open(CACHE_META, "w", encoding="utf-8") as f:
+    cache_dir = PATHS["tokenized"]["cache_dir"]
+    cache_meta = PATHS["tokenized"]["cache_meta"]
+    DatasetDict({"train": train_dataset, "eval": eval_dataset}).save_to_disk(cache_dir)
+    with open(cache_meta, "w", encoding="utf-8") as f:
         json.dump(
             {
                 "cache_version": TOKENIZED_CACHE_VERSION,
@@ -110,13 +114,15 @@ def load_tokenized_dataset_cache(
     max_length: int = MAX_LENGTH,
 ) -> Any | None:
     """Load tokenized train/eval split if the metadata matches the current config."""
-    if not (os.path.exists(CACHE_DIR) and os.path.exists(CACHE_META)):
+    cache_dir = PATHS["tokenized"]["cache_dir"]
+    cache_meta = PATHS["tokenized"]["cache_meta"]
+    if not (os.path.exists(cache_dir) and os.path.exists(cache_meta)):
         return None
 
     if SKIP_TOKENIZED_CACHE_VALIDATION:
-        return _load_dataset_dict_from_cache_dir(CACHE_DIR)
+        return _load_dataset_dict_from_cache_dir(cache_dir)
 
-    with open(CACHE_META, encoding="utf-8") as f:
+    with open(cache_meta, encoding="utf-8") as f:
         meta = json.load(f)
 
     synthetic_meta = None
@@ -134,14 +140,15 @@ def load_tokenized_dataset_cache(
     if meta != expected_meta:
         return None
 
-    return _load_dataset_dict_from_cache_dir(CACHE_DIR)
+    return _load_dataset_dict_from_cache_dir(cache_dir)
 
 
 def load_tokenized_dataset_splits() -> Any | None:
     """Load the cached tokenized train/eval split without validating metadata."""
-    if not os.path.exists(CACHE_DIR):
+    cache_dir = PATHS["tokenized"]["cache_dir"]
+    if not os.path.exists(cache_dir):
         return None
-    return _load_dataset_dict_from_cache_dir(CACHE_DIR)
+    return _load_dataset_dict_from_cache_dir(cache_dir)
 
 
 def build_tokenized_dataset(
@@ -163,7 +170,7 @@ def build_tokenized_dataset(
     if cached_tokenized is None and USE_TOKENIZED_CACHE and not FORCE_REBUILD_TOKENIZED_CACHE:
         cached_tokenized = load_tokenized_dataset_splits()
     if cached_tokenized is not None:
-        print(f"Loaded tokenized dataset cache from {CACHE_DIR}")
+        print(f"Loaded tokenized dataset cache from {PATHS['tokenized']['cache_dir']}")
         return cached_tokenized["train"], cached_tokenized["eval"]
 
     if synthetic_dataset is None:

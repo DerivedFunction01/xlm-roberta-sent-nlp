@@ -15,23 +15,10 @@ from datasets.utils.logging import disable_progress_bar
 from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic, write_records_parquet, write_sentence_parquet
-from paths import (
-    FINETRANS_CACHE_DIR,
-    FINETRANS_CACHE_DIR_META,
-    FINETRANS_CACHE_FILE,
-    FINETRANS_CACHE_META,
-    SENTENCES_DIR,
-)
+from paths import PATHS
 from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3
 from source_config import (
     FT,
-    FT_ENGLISH_ACCEPT_EVERY,
-    FT_INCLUDE_TRANSLATED_ENGLISH,
-    FT_MAX_MISS_STREAK,
-    FT_MAX_ROW_INDEX,
-    FT_MAX_SENTENCES_PER_LANG,
-    FT_OVERFLOW_SENTENCES_PER_LANG,
-    FT_TRANSLATED_ENGLISH_LANGS,
 )
 from text_utils import (
     LATIN_GROUPS,
@@ -72,24 +59,26 @@ disable_progress_bar()
 
 
 def _finetrans_cache_path(sentences_dir: str) -> str:
-    return FINETRANS_CACHE_FILE if sentences_dir == SENTENCES_DIR else os.path.join(
-        sentences_dir,
-        "finetranslations_sentences.parquet",
+    return (
+        PATHS["finetrans"]["cache_file"]
+        if sentences_dir == PATHS["sentences_dir"]
+        else os.path.join(sentences_dir, "finetranslations_sentences.parquet")
     )
 
 
 def _finetrans_meta_path(sentences_dir: str) -> str:
-    return FINETRANS_CACHE_DIR_META if sentences_dir == SENTENCES_DIR else os.path.join(
-        sentences_dir,
-        "finetranslations",
-        "finetranslations.meta.json",
+    return (
+        PATHS["finetrans"]["cache_dir_meta"]
+        if sentences_dir == PATHS["sentences_dir"]
+        else os.path.join(sentences_dir, "finetranslations", "finetranslations.meta.json")
     )
 
 
 def _finetrans_cache_dir(sentences_dir: str) -> str:
-    return FINETRANS_CACHE_DIR if sentences_dir == SENTENCES_DIR else os.path.join(
-        sentences_dir,
-        "finetranslations",
+    return (
+        PATHS["finetrans"]["cache_dir"]
+        if sentences_dir == PATHS["sentences_dir"]
+        else os.path.join(sentences_dir, "finetranslations")
     )
 
 
@@ -375,7 +364,7 @@ def _should_keep_english_sentence(english_sentence_idx: int, accept_every: int) 
 
 
 def _include_translated_english_for_lang(lang: str, include_translated_english: bool) -> bool:
-    return include_translated_english and lang in FT_TRANSLATED_ENGLISH_LANGS
+    return include_translated_english and lang in FT["langs"]
 
 
 def _compute_length_thresholds(records: list[dict[str, Any]]) -> tuple[int, int]:
@@ -912,7 +901,7 @@ def _process_finetrans_config(
 
 def load_finetranslations_sentences(
     *,
-    sentences_dir: str = SENTENCES_DIR,
+    sentences_dir: str = PATHS["sentences_dir"],
     lang_to_group: dict[str, str],
     use: bool | None = None,
     force_rebuild: bool | None = None,
@@ -931,7 +920,7 @@ def load_finetranslations_sentences(
     force_rebuild = FT["rebuild"] if force_rebuild is None else force_rebuild
     seed = 42 if seed is None else seed
     max_sentences_per_lang = FT["max_lang"] if max_sentences_per_lang is None else max_sentences_per_lang
-    overflow_sentences_per_lang = FT_OVERFLOW_SENTENCES_PER_LANG if overflow_sentences_per_lang is None else overflow_sentences_per_lang
+    overflow_sentences_per_lang = FT["overflow_lang"] if overflow_sentences_per_lang is None else overflow_sentences_per_lang
     max_row_index = FT["max_row"] if max_row_index is None else max_row_index
     max_miss_streak = FT["miss"] if max_miss_streak is None else max_miss_streak
     include_translated_english = FT["include_en"] if include_translated_english is None else include_translated_english

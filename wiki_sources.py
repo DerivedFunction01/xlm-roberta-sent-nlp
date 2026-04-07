@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic as _write_json_atomic, write_sentence_parquet as _write_sentence_parquet
 from language import ALL_LANGS, LANG_TO_GROUP
-from paths import SENTENCES_DIR, WIKI_SEGMENTATION_DEBUG_DIR, WIKI_TEMP_DIR
+from paths import PATHS
 from text_utils import (
     _article_min_chars,
     _get_segmenter,
@@ -91,7 +91,7 @@ def _extract_article_sentences(
             sents = segmenter.segment(safe_paragraph) if segmenter else SENT_SPLIT.split(safe_paragraph)  # type: ignore[attr-defined]
         except re.error as exc:
             log_segmentation_failure(
-                os.path.join(WIKI_SEGMENTATION_DEBUG_DIR, f"{lang}.log"),
+                os.path.join(PATHS["wiki"]["seg_debug_dir"], f"{lang}.log"),
                 lang=lang,
                 article_idx=article_idx,
                 paragraph_idx=paragraph_idx,
@@ -182,7 +182,7 @@ def extract_sentences_from_wiki(
     *,
     lang_to_group: dict[str, str],
     seed: int = 42,
-    sentences_dir: str = SENTENCES_DIR,
+    sentences_dir: str = PATHS["sentences_dir"],
 ) -> str:
     segmenter = _get_segmenter(lang)
     fetch_target = n_articles * 20
@@ -437,7 +437,7 @@ def load_or_extract(
     *,
     lang_to_group: dict[str, str],
     seed: int = 42,
-    sentences_dir: str = SENTENCES_DIR,
+    sentences_dir: str = PATHS["sentences_dir"],
     articles_per_lang: int = ARTICLES_PER_LANG,
 ) -> tuple[str, str]:
     path = parquet_path(sentences_dir, lang)
@@ -464,7 +464,7 @@ def load_wiki_sentences(
     seed: int = 42,
     articles_per_lang: int = ARTICLES_PER_LANG,
     max_workers: int,
-    sentences_dir: str = SENTENCES_DIR,
+    sentences_dir: str = PATHS["sentences_dir"],
 ) -> dict[str, list[str]]:
     os.makedirs(sentences_dir, exist_ok=True)
     result: dict[str, list[str]] = {}
