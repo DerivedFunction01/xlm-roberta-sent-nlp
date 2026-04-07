@@ -14,6 +14,7 @@ from datasets import Dataset
 from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic
+from paths import PATHS
 from source_config import FT, POOL, RUN, SMOL
 from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, LANGUAGE_GROUP_WEIGHTS
 
@@ -25,6 +26,11 @@ USE_SYNTHETIC_CACHE = RUN["syn_cache"]
 FORCE_REBUILD_SYNTHETIC_CACHE = RUN["syn_rebuild"]
 SYNTHETIC_DOC_RETRY_LIMIT = RUN["retry"]
 SYNTHETIC_PREVIEW_ROWS = RUN["preview"]
+
+CACHE_VERSION = PATHS["versions"]["cache"]
+SYNTHETIC_CACHE = PATHS["synthetic"]["cache_dir"]
+SYNTHETIC_CACHE_META = PATHS["synthetic"]["cache_meta"]
+SYNTHETIC_TEMP_DIR = PATHS["synthetic"]["temp_dir"]
 
 RESERVE_FRACTION = POOL["wiki"]["reserve"]
 MIN_RESERVED_SENTENCES = POOL["wiki"]["min"]
@@ -46,10 +52,6 @@ from source_pools import (
     remaining_sentence_count,
 )
 from synthetic_cache import (
-    CACHE_VERSION,
-    SYNTHETIC_CACHE,
-    SYNTHETIC_CACHE_META,
-    SYNTHETIC_TEMP_DIR,
     _append_synthetic_rows,
     _clear_synthetic_cache_dir,
     _load_synthetic_examples_dataset,
