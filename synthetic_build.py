@@ -20,8 +20,6 @@ from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, LANGUAGE_GROUP_W
 
 MAX_LENGTH = RUN["len"]
 EXAMPLES_TARGET = RUN["target"]
-MIN_COVERAGE_DOCS_PER_LANG = RUN["cov_min"]
-MAX_COVERAGE_DOCS_PER_LANG = RUN["cov_max"]
 USE_SYNTHETIC_CACHE = RUN["syn_cache"]
 FORCE_REBUILD_SYNTHETIC_CACHE = RUN["syn_rebuild"]
 SYNTHETIC_DOC_RETRY_LIMIT = RUN["retry"]
@@ -155,8 +153,12 @@ def generate_synthetic_examples_chunk(
             for lang in coverage_langs:
                 example = build_synthetic_doc_with_retry(
                     primary_pool=primary_pool,
-                    fallback_pool=fallback_pool,
+                    fallback_pool=None,
                     required_langs=[lang],
+                    pure=True,
+                    pure_lang=lang,
+                    n_segments=1,
+                    strip_punct_prob=0.10,
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -180,6 +182,11 @@ def generate_synthetic_examples_chunk(
                     primary_pool=primary_pool,
                     fallback_pool=fallback_pool,
                     worker_idx=worker_idx,
+                    n_segments=2,
+                    strip_punct_prob=0.25,
+                    swap_prob=0.06,
+                    o_inject_prob=0.06,
+                    allow_repeated_langs=True,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
                     lang_to_group=lang_to_group,
@@ -227,8 +234,6 @@ def save_synthetic_examples_cache(
                 "reserve_fraction": RESERVE_FRACTION,
                 "min_reserved_sentences": MIN_RESERVED_SENTENCES,
                 "max_reserved_sentences": MAX_RESERVED_SENTENCES,
-                "min_coverage_docs_per_lang": MIN_COVERAGE_DOCS_PER_LANG,
-                "max_coverage_docs_per_lang": MAX_COVERAGE_DOCS_PER_LANG,
                 "total_examples": total_examples,
                 "shards": [os.path.basename(p) for p in shard_paths],
             },
@@ -251,8 +256,6 @@ def load_synthetic_examples_cache():
         "reserve_fraction": RESERVE_FRACTION,
         "min_reserved_sentences": MIN_RESERVED_SENTENCES,
         "max_reserved_sentences": MAX_RESERVED_SENTENCES,
-        "min_coverage_docs_per_lang": MIN_COVERAGE_DOCS_PER_LANG,
-        "max_coverage_docs_per_lang": MAX_COVERAGE_DOCS_PER_LANG,
     }
     for key, expected_value in expected_fields.items():
         if meta.get(key) != expected_value:
@@ -275,10 +278,11 @@ def create_synthetic_doc(
     primary_pool: dict[str, deque[str]],
     fallback_pool: dict[str, deque[str]] | None = None,
     required_langs: list[str] | None = None,
-    o_inject_prob: float = 0.4,
     n_segments: int = 4,
-    strip_punct_prob: float = 0.5,
-    swap_prob: float = 0.3,
+    strip_punct_prob: float = 0.35,
+    swap_prob: float = 0.12,
+    o_inject_prob: float = 0.12,
+    allow_repeated_langs: bool = False,
     all_langs: list[str],
     lang_to_group: dict[str, str],
     language_group_weights: dict[str, float],
@@ -319,7 +323,7 @@ def create_synthetic_doc(
         lang = _sample_language(_candidate_langs())
         if lang is None:
             break
-        if lang not in seen_langs:
+        if allow_repeated_langs or lang not in seen_langs:
             chosen_langs.append(lang)
             seen_langs.add(lang)
 
@@ -343,7 +347,7 @@ def create_synthetic_doc(
 
         labels = bio_label_tokens(tokens, lang, is_first=(len(all_tokens) == 0), label2id=label2id)
 
-        if random.random() < swap_prob:
+        if swap_prob > 0 and random.random() < swap_prob:
             tokens, labels = swap_random_tokens(tokens[:], labels[:])
 
         remaining = max_length - 2 - total_tokens
@@ -366,7 +370,7 @@ def create_synthetic_doc(
             all_labels = all_labels[:insert_pos] + [0] * len(code_tokens) + all_labels[insert_pos:]
             total_tokens += len(code_tokens)
 
-    if random.random() < o_inject_prob and total_tokens < max_length - 20:
+    if o_inject_prob > 0 and random.random() < o_inject_prob and total_tokens < max_length - 20:
         n_injections = random.choices([1, 2, 3], weights=[0.6, 0.3, 0.1])[0]
         for _ in range(n_injections):
             if total_tokens >= max_length - 10:
@@ -385,12 +389,58 @@ def create_synthetic_doc(
     return {"original_text": " ".join(original_text_parts).strip(), "tokens": all_tokens, "ner_tags": all_labels}
 
 
+def create_pure_synthetic_doc(
+    *,
+    tokenizer,
+    primary_pool: dict[str, deque[str]],
+    lang: str,
+    label2id: dict[str, int],
+    min_sentences: int = 1,
+    max_sentences: int = 4,
+    strip_punct_prob: float = 0.15,
+) -> dict:
+    """Build one mostly homogeneous single-language synthetic example."""
+    sent_count = random.randint(min_sentences, max_sentences)
+    all_tokens, all_labels = [], []
+    original_text_parts: list[str] = []
+    total_tokens = 0
+
+    for _ in range(sent_count):
+        if total_tokens >= MAX_LENGTH - 20:
+            break
+        sent = draw_sentence(lang, primary_pool, None)
+        if sent is None:
+            break
+        original_text_parts.append(sent)
+        tokens = tokenizer.tokenize(sent)
+        if not tokens:
+            continue
+        if strip_punct_prob > 0 and random.random() < strip_punct_prob:
+            tokens = augment_boundary(tokens, strip_punct=True)
+        labels = bio_label_tokens(tokens, lang, is_first=(len(all_tokens) == 0), label2id=label2id)
+        remaining = MAX_LENGTH - 2 - total_tokens
+        tokens = tokens[:remaining]
+        labels = labels[:remaining]
+        all_tokens.extend(tokens)
+        all_labels.extend(labels)
+        total_tokens += len(tokens)
+
+    return {"original_text": " ".join(original_text_parts).strip(), "tokens": all_tokens, "ner_tags": all_labels}
+
+
 def build_synthetic_doc_with_retry(
     *,
     tokenizer,
     primary_pool: dict[str, deque[str]],
     fallback_pool: dict[str, deque[str]] | None = None,
     required_langs: list[str] | None = None,
+    pure: bool = False,
+    pure_lang: str | None = None,
+    n_segments: int = 4,
+    strip_punct_prob: float = 0.35,
+    swap_prob: float = 0.12,
+    o_inject_prob: float = 0.12,
+    allow_repeated_langs: bool = False,
     worker_idx: int = 0,
     max_retries: int = SYNTHETIC_DOC_RETRY_LIMIT,
     all_langs: list[str],
@@ -403,19 +453,38 @@ def build_synthetic_doc_with_retry(
 ) -> dict:
     """Build a synthetic doc and retry if it is malformed or too long for the model."""
     for _ in range(1, max_retries + 1):
-        example = create_synthetic_doc(
-            tokenizer=tokenizer,
-            primary_pool=primary_pool,
-            fallback_pool=fallback_pool,
-            required_langs=required_langs,
-            all_langs=all_langs,
-            lang_to_group=lang_to_group,
-            language_group_weights=language_group_weights,
-            max_length=max_length,
-            label2id=label2id,
-            sample_o_span=sample_o_span,
-            sample_code_span=sample_code_span,
-        )
+        if pure:
+            lang = pure_lang or (required_langs[0] if required_langs else None)
+            if lang is None:
+                raise ValueError("pure synthetic docs require pure_lang or required_langs")
+            example = create_pure_synthetic_doc(
+                tokenizer=tokenizer,
+                primary_pool=primary_pool,
+                lang=lang,
+                label2id=label2id,
+                min_sentences=1,
+                max_sentences=4,
+                strip_punct_prob=strip_punct_prob,
+            )
+        else:
+            example = create_synthetic_doc(
+                tokenizer=tokenizer,
+                primary_pool=primary_pool,
+                fallback_pool=fallback_pool,
+                required_langs=required_langs,
+                n_segments=n_segments,
+                strip_punct_prob=strip_punct_prob,
+                swap_prob=swap_prob,
+                o_inject_prob=o_inject_prob,
+                allow_repeated_langs=allow_repeated_langs,
+                all_langs=all_langs,
+                lang_to_group=lang_to_group,
+                language_group_weights=language_group_weights,
+                max_length=max_length,
+                label2id=label2id,
+                sample_o_span=sample_o_span,
+                sample_code_span=sample_code_span,
+            )
         if len(example.get("tokens", ())) != len(example.get("ner_tags", ())):
             continue
         try:
@@ -605,10 +674,7 @@ def build_synthetic_dataset(
             if not lang_stats:
                 continue
             reserved_n = int(lang_stats.get("reserved", 0))
-            coverage_docs_for_lang = max(
-                1,
-                min(MAX_COVERAGE_DOCS_PER_LANG, max(MIN_COVERAGE_DOCS_PER_LANG, (reserved_n + 3) // 4)),
-            )
+            coverage_docs_for_lang = max(1, reserved_n // 3)
             coverage_plan.extend([lang] * coverage_docs_for_lang)
 
         _clear_synthetic_cache_dir(SYNTHETIC_CACHE)
