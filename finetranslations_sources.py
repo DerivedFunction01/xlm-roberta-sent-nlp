@@ -354,7 +354,7 @@ def _segment_text(text: str, lang: str) -> list[str]:
     safe_text = sanitize_paragraph_for_pysbd(text)
     segmenter = _get_segmenter(lang)
     try:
-        segments = segmenter.segment(safe_text) if segmenter else SENT_SPLIT.split(safe_text)
+        segments = segmenter.segment(safe_text) if segmenter else SENT_SPLIT.split(safe_text) # type: ignore
     except re.error:
         segments = SENT_SPLIT.split(safe_text)
     return [segment for segment in segments if isinstance(segment, str) and segment.strip()]
@@ -482,8 +482,8 @@ def _load_finetrans_cache_map(cache_dir: str) -> dict[str, list[str]]:
         lang = name[:-8]
         path = os.path.join(cache_dir, name)
         rows = _read_records_parquet(path)
-        sentences = [
-            row.get("sentence")
+        sentences: list[str] = [
+            row.get("sentence", "")
             for row in rows
             if isinstance(row, dict) and isinstance(row.get("sentence"), str) and row["sentence"].strip()
         ]
@@ -532,7 +532,7 @@ def _read_records_parquet(path: str) -> list[dict[str, Any]]:
     except Exception:
         return []
     records = frame.to_dict(orient="records")
-    return [record for record in records if isinstance(record, dict)]
+    return [record for record in records if isinstance(record, dict)] # type: ignore
 
 
 def _write_record_batch(writer, pa_module, batch: list[dict[str, Any]]) -> None:
