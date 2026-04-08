@@ -4,9 +4,11 @@ import gc
 import json
 import os
 import random
+import unicodedata
 import multiprocessing as mp
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from functools import lru_cache
 from typing import Any, Callable
 
 import numpy as np
@@ -125,10 +127,25 @@ def bio_label_tokens(tokens: list[str], lang: str, is_first: bool, label2id: dic
     return labels
 
 
+@lru_cache(maxsize=16_384)
+def _is_punctuation_token(token: str) -> bool:
+    """Check if a token (possibly with ▁ prefix) is pure punctuation in any script.
+    
+    Cached to avoid redundant Unicode category checks for repeated tokens.
+    """
+    # Remove the space marker (▁) if present
+    text = token[1:] if token.startswith("▁") else token
+    # Check if all characters are Unicode punctuation (category P*)
+    return len(text) > 0 and all(unicodedata.category(c).startswith("P") for c in text)
+
+
 def augment_boundary(tokens: list[str], strip_punct: bool) -> list[str]:
-    """Optionally remove sentence-final punctuation to simulate no-boundary code-switching."""
+    """Optionally remove sentence-final punctuation to simulate no-boundary code-switching.
+    
+    Handles punctuation from all Unicode scripts (ASCII, Chinese, Arabic, etc.).
+    """
     if strip_punct and tokens:
-        tokens = [t for t in tokens if t not in [".", "!", "?", "▁.", "▁!", "▁?"]]
+        tokens = [t for t in tokens if not _is_punctuation_token(t)]
     return tokens
 
 
