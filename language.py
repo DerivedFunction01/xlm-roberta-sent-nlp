@@ -13,13 +13,13 @@ LATIN_GROUPS = {group for group, cfg in LANGUAGE_BUCKETS.items() if cfg.get("lat
 
 LANGS_JSON = Path(__file__).with_name("all_langs.json")
 
-# Read from file to load the key-value pairs
+# Read from file to load the key-value pairs. JSON key order is canonical.
 LANG_ISO2_TO_ISO3 = {}
 with open(LANGS_JSON) as f:
     # Parse the file as a json string
     LANG_ISO2_TO_ISO3 = json.load(f)
 
-ALL_LANGS = [lang for langs in LANGUAGE_GROUPS.values() for lang in langs]
+ALL_LANGS = list(LANG_ISO2_TO_ISO3.keys())
 LANG_TO_GROUP = {lang: group for group, langs in LANGUAGE_GROUPS.items() for lang in langs}
 
 
