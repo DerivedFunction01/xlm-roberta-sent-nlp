@@ -44,34 +44,57 @@ def tokenize_and_align(
     id2label: dict[int, str],
     max_length: int = MAX_LENGTH,
 ) -> dict:
-    """Re-encode the pre-tokenized token list and propagate labels."""
-    encoding = tokenizer(
-        example["tokens"],
-        is_split_into_words=True,
+    """Tokenize mutated tokens and align labels.
+    
+    The training data has mutated tokens (swapped, with code/noise injected, 
+    punctuation stripped, etc.), NOT the original text. We reconstruct text
+    from these mutated tokens to ensure training matches inference.
+    
+    This avoids double-tokenization that occurs when passing subword tokens
+    with is_split_into_words=True.
+    """
+    # Reconstruct text from the MUTATED subword tokens
+    # This preserves all mutations (swaps, code injection, noise, etc.)
+    mutated_tokens = example["tokens"]
+    reconstructed_text = tokenizer.convert_tokens_to_string(mutated_tokens)
+    
+    # Tokenize the reconstructed text (no is_split_into_words)
+    # This gives us the same token IDs as the mutated_tokens
+    encoding_no_special = tokenizer(
+        reconstructed_text,
         truncation=True,
         max_length=max_length,
         padding=False,
+        add_special_tokens=False,
     )
-    word_ids = encoding.word_ids()
-    labels = []
-    prev_word_id = None
-    for word_id in word_ids:
-        if word_id is None:
-            labels.append(-100)
-        elif word_id != prev_word_id:
-            labels.append(example["ner_tags"][word_id])
-        else:
-            orig_label = example["ner_tags"][word_id]
-            lang_tag = id2label[orig_label]
-            if lang_tag.startswith("B-"):
-                i_tag = "I-" + lang_tag[2:]
-                labels.append(label2id.get(i_tag, orig_label))
-            else:
-                labels.append(orig_label)
-        prev_word_id = word_id
-
+    
+    # The token IDs should match the mutated tokens exactly
+    # (can verify: tokenizer.convert_tokens_to_ids(mutated_tokens) == encoding_no_special["input_ids"])
+    
+    # Now tokenize WITH special tokens for the model input
+    encoding = tokenizer(
+        reconstructed_text,
+        truncation=True,
+        max_length=max_length,
+        padding=False,
+        add_special_tokens=True,  # Include [CLS] and [SEP]
+    )
+    
+    # Build label list: -100 for special tokens, then the ner_tags
+    num_special_before = tokenizer.num_special_tokens_to_add(pair=False) // 2
+    labels = [-100] * num_special_before  # [CLS] token(s)
+    
+    # Add labels for content tokens (truncate if necessary due to max_length)
+    ner_tags = example["ner_tags"]
+    num_content_tokens = len(encoding["input_ids"]) - num_special_before - 1  # -1 for [SEP]
+    labels.extend(ner_tags[:num_content_tokens])
+    
+    # Add [SEP] and padding labels
+    labels.extend([-100] * (len(encoding["input_ids"]) - len(labels)))
+    
     encoding["labels"] = labels
-    encoding["original_text"] = example.get("original_text", " ".join(example["tokens"]))
+    # Store reconstructed text for reference (this is what was actually used)
+    encoding["original_text"] = reconstructed_text
     return encoding
 
 
