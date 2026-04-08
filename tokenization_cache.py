@@ -182,6 +182,7 @@ def build_tokenized_dataset(
     label2id: dict[str, int],
     id2label: dict[int, str],
     max_length: int = MAX_LENGTH,
+    num_samples: int | None = None,
 ):
     """Load or build the tokenized train/eval split."""
     cached_tokenized = (
@@ -218,6 +219,13 @@ def build_tokenized_dataset(
         batched=False,
         remove_columns=["kind"],
     )
+
+    # Limit dataset size for testing/quick iteration if specified
+    if num_samples is not None:
+        coverage_size = int(num_samples * 0.7)  # ~70% from coverage
+        random_size = num_samples - coverage_size  # ~30% from random
+        coverage_dataset = coverage_dataset.select(range(min(coverage_size, len(coverage_dataset))))
+        random_dataset = random_dataset.select(range(min(random_size, len(random_dataset))))
 
     coverage_dataset = coverage_dataset.map(
         lambda ex: tokenize_and_align(ex, tokenizer=tokenizer, label2id=label2id, id2label=id2label),
