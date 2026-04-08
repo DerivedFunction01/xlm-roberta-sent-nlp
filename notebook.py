@@ -59,7 +59,7 @@ def load_tokenized_dataset_splits(cache_dir: str = "./sentences_cache/tokenized_
                 split_parts[0] if len(split_parts) == 1 else concatenate_datasets(split_parts)
             )
         return DatasetDict(loaded_splits)
-    
+
 _ALL_LANGS = []
 with open("all_langs.json", encoding="utf-8") as f:
     data = json.load(f)
@@ -72,7 +72,7 @@ from language import ALL_LANGS, LANG_TO_GROUP
 from paths import PATHS
 from source_pools import load_language_sentences_from_parquet
 from neutral_sources import build_neutral_sources
-from synthetic_build import build_synthetic_dataset
+from synthetic_build import build_synthetic_dataset, create_pure_synthetic_doc
 from tokenization_cache import build_tokenized_dataset
 
 _ALL_LANGS = ALL_LANGS
@@ -221,45 +221,6 @@ trainer.push_to_hub()
 print("Model saved to ./lang-ner-xlmr-final")
 
 # %%
-# --- Transparency Validation ---
-# Feed a mixed-language sentence to the NER pipeline and visualise the evidence.
-
-ner_pipeline = pipeline(
-    "ner",
-    model="./lang-ner-xlmr-final",
-    tokenizer="./lang-ner-xlmr-final",
-    aggregation_strategy="simple",   # merges consecutive same-label tokens
-    device=0 if torch.cuda.is_available() else -1,
-)
-
-DEMO_SENTENCES = [
-    # English + French
-    "The committee approved the proposal. Le comité a approuvé la proposition avec quelques modifications.",
-    # English + Spanish
-    "I really enjoyed the conference yesterday. Fue una experiencia increíble para todos los participantes.",
-    # English + German + Russian
-    "Hello, my name is Anna. Ich komme aus Deutschland. Я живу в Берлине уже пять лет.",
-]
-
-def display_transparency(text: str):
-    """Print a token-level language attribution report."""
-    results = ner_pipeline(text)
-    print(f"\nInput : {text}")
-    print("-" * 70)
-    print(f"{'Span':<35} {'Label':<12} {'Confidence':>10}")
-    print("-" * 70)
-    for entity in results:
-        word  = entity["word"].replace("▁", " ").strip()
-        label = entity["entity_group"]
-        score = entity["score"]
-        bar   = "█" * int(score * 20)
-        print(f"{word:<35} {label:<12} {score:>6.2%}  {bar}")
-    print()
-
-
-print("\n=== TRANSPARENCY VALIDATION ===")
-for sentence in DEMO_SENTENCES:
-    display_transparency(sentence)
 
 # %%
 # --- Save Label Map for Later Use ---
