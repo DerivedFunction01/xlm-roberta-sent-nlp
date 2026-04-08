@@ -11,13 +11,9 @@ import pandas as pd
 from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic
+import pyarrow as pa
+import pyarrow.parquet as pq
 
-try:
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-except ImportError:
-    pa = None
-    pq = None
 
 
 SOURCE_POOL_CACHE_VERSION = 1
@@ -263,8 +259,8 @@ def build_disk_sentence_pool_shards(
 
                 sentences = frame["sentence"].astype(str).tolist()
                 for idx, sentence in enumerate(sentences):
-                    worker_idx = _stable_uint64(seed, source_name, lang, sentence, "worker") % n_workers
-                    reserve_key = _stable_uint64(seed, source_name, lang, sentence, "reserve")
+                    worker_idx = _stable_uint64(str(seed), source_name, lang, sentence, "worker") % n_workers
+                    reserve_key = _stable_uint64(str(seed), source_name, lang, sentence, "reserve")
                     is_reserved = reserve_key % total < reserve_n if total > 0 else False
                     row = {"lang": lang, "sentence": sentence}
                     if is_reserved:
