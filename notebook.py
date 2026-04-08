@@ -316,7 +316,7 @@ model = AutoModelForSequenceClassification.from_pretrained(
     id2label={i: lang.upper() for i, lang in enumerate(_ALL_LANGS)},
     label2id={lang.upper(): i for i, lang in enumerate(_ALL_LANGS)},
 )
-
+#%%
 def compute_multilabel_metrics(p):
     logits, labels = p
     probs = 1 / (1 + np.exp(-logits))
