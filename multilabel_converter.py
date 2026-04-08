@@ -56,12 +56,16 @@ def example_to_multilabel(example: dict[str, Any], id2label: dict[int, str]) -> 
 
     language_labels = extract_example_languages(label_ids, id2label)
     multi_hot = [1 if lang in language_labels else 0 for lang in ALL_LANGS]
-
-    return {
-        "text": text,
-        "language_labels": language_labels,
+    result: dict[str, Any] = {
         "labels": multi_hot,
     }
+    if "input_ids" in example:
+        result["input_ids"] = example["input_ids"]
+    if "attention_mask" in example:
+        result["attention_mask"] = example["attention_mask"]
+    if "token_type_ids" in example and example["token_type_ids"] is not None:
+        result["token_type_ids"] = example["token_type_ids"]
+    return result
 
 
 def convert_tokenized_dataset(
@@ -84,7 +88,7 @@ def convert_tokenized_dataset(
             split_name: split.map(
                 lambda ex: example_to_multilabel(ex, id2label),
                 batched=False,
-                remove_columns=[col for col in split.column_names if col not in {"original_text", "tokens"}],
+                remove_columns=[col for col in split.column_names if col not in {"input_ids", "attention_mask", "token_type_ids", "labels"}],
             )
             for split_name, split in dataset.items()
         }
@@ -96,7 +100,31 @@ def load_tokenized_cache(path: Path) -> DatasetDict:
     return load_from_disk(str(path))
 
 
-def main() -> None:
+def convert_and_save_multilabel_dataset(
+    *,
+    input_dir: str | Path = PATHS["tokenized"]["cache_dir"],
+    output_dir: str | Path = PATHS["multilabel_dataset"]["cache_dir"],
+    num_samples: int | None = None,
+) -> DatasetDict:
+    """Convert the tokenized NER dataset cache into a multilabel dataset and save it."""
+    input_path = Path(input_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    tokenized_dataset = load_tokenized_cache(input_path)
+    _, id2label = build_label_maps(ALL_LANGS)
+
+    multilabel_dataset = convert_tokenized_dataset(
+        tokenized_dataset,
+        id2label=id2label,
+        num_samples=num_samples,
+    )
+
+    multilabel_dataset.save_to_disk(str(output_path))
+    return multilabel_dataset
+
+
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Convert a token-level NER dataset into a multilabel classification dataset."
     )
@@ -118,26 +146,16 @@ def main() -> None:
         default=None,
         help="Optional max number of examples per split for quick testing.",
     )
-
-    args = parser.parse_args()
-    input_dir = Path(args.input_dir)
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    tokenized_dataset = load_tokenized_cache(input_dir)
-    _, id2label = build_label_maps(ALL_LANGS)
-
-    multilabel_dataset = convert_tokenized_dataset(
-        tokenized_dataset,
-        id2label=id2label,
-        num_samples=args.num_samples,
-    )
-
-    multilabel_dataset.save_to_disk(str(output_dir))
-    print(f"Saved multilabel dataset to {output_dir}")
-    for split_name, split in multilabel_dataset.items():
-        print(f"{split_name}: {len(split)} examples")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    main()
+    args = _parse_args()
+    multilabel_dataset = convert_and_save_multilabel_dataset(
+        input_dir=args.input_dir,
+        output_dir=args.output_dir,
+        num_samples=args.num_samples,
+    )
+    print(f"Saved multilabel dataset to {args.output_dir}")
+    for split_name, split in multilabel_dataset.items():
+        print(f"{split_name}: {len(split)} examples")

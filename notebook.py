@@ -75,6 +75,7 @@ from language import ALL_LANGS, LANG_TO_GROUP
 from paths import PATHS
 from source_pools import load_language_sentences_from_parquet
 from neutral_sources import build_neutral_sources
+from multilabel_converter import convert_and_save_multilabel_dataset
 from synthetic_build import build_synthetic_dataset, create_pure_synthetic_doc
 from tokenization_cache import build_tokenized_dataset
 
@@ -119,7 +120,7 @@ cached_tokenized = load_tokenized_dataset_splits("./sentences_cache/tokenized_da
 if cached_tokenized is not None:
     train_dataset = cached_tokenized["train"]
     eval_dataset = cached_tokenized["eval"]
-    print("Loaded tokenized dataset cache from ./sentences_cache/tokenized_dataset")
+    print("Loaded tokenized dataset cache")
 else:
     # --- Synthetic Dataset Build ---
     synthetic_dataset = build_synthetic_dataset(
@@ -144,15 +145,112 @@ else:
 print(f"Train: {len(train_dataset)} | Eval: {len(eval_dataset)}")
 
 # %%
+# --- Tokenized Dataset Load (MultiLabel)
+multilabel_train_dataset = None
+multilabel_eval_dataset = None
+cache_multilabel = load_tokenized_dataset_splits(PATHS["multilabel_dataset"]["cache_dir"])
+if cache_multilabel is not None:
+    multilabel_train_dataset = cache_multilabel["train"]
+    multilabel_eval_dataset = cache_multilabel["eval"]
+    print("Loaded multilabel dataset cache")
+    if "input_ids" not in multilabel_train_dataset.column_names or "input_ids" not in multilabel_eval_dataset.column_names:
+        print("Existing multilabel cache is missing tokenized features; rebuilding cache...")
+        convert_and_save_multilabel_dataset()
+        cache_multilabel = load_tokenized_dataset_splits(PATHS["multilabel_dataset"]["cache_dir"])
+        if cache_multilabel is not None:
+            multilabel_train_dataset = cache_multilabel["train"]
+            multilabel_eval_dataset = cache_multilabel["eval"]
+else:
+    print("Building multilabel dataset cache from tokenized dataset...")
+    convert_and_save_multilabel_dataset()
+    cache_multilabel = load_tokenized_dataset_splits(PATHS["multilabel_dataset"]["cache_dir"])
+    if cache_multilabel is not None:
+        multilabel_train_dataset = cache_multilabel["train"]
+        multilabel_eval_dataset = cache_multilabel["eval"]
+if multilabel_train_dataset is None or multilabel_eval_dataset is None:
+    raise RuntimeError("Failed to load or build the multilabel dataset cache")
+print(f"Multilabel Train: {len(multilabel_train_dataset)} | Eval: {len(multilabel_eval_dataset)}")
+
+# %%
 # --- Model Setup ---
 from transformers import (
-    AutoModelForTokenClassification,
-    DataCollatorForTokenClassification,
     TrainingArguments,
     Trainer
 )
 import evaluate
+
+def make_training_args(
+    output_dir: str,
+    *,
+    train_batch_size: int,
+    eval_batch_size: int,
+    eval_steps: int,
+    save_steps: int,
+    epochs: int,
+    gradient_accumulation_steps: int,
+):
+    return TrainingArguments(
+        output_dir=output_dir,
+        num_train_epochs=epochs,
+        per_device_train_batch_size=train_batch_size,
+        per_device_eval_batch_size=eval_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        learning_rate=5e-5,
+        weight_decay=0.01,
+        eval_strategy="steps",
+        save_strategy="steps",
+        eval_steps=eval_steps, 
+        save_steps=save_steps,
+        load_best_model_at_end=True,
+        metric_for_best_model="f1",
+        fp16=torch.cuda.is_available(),
+        logging_steps=100,  # Less noise in the console
+        save_total_limit=2,  # Essential for 500k runs
+        report_to="tensorboard",
+        dataloader_num_workers=mp.cpu_count() // 2,
+        push_to_hub=True,
+    )
+
+
+def make_trainer(
+    *,
+    model,
+    train_dataset,
+    eval_dataset,
+    data_collator,
+    compute_metrics,
+    output_dir: str,
+    epochs: int = 3,
+    eval_steps: int = 100,
+    save_steps: int = 100,
+    train_batch_size: int = 16,
+    eval_batch_size: int = 32,
+    gradient_accumulation_steps: int = 2,
+
+):
+    return Trainer(
+        model=model,
+        args=make_training_args(
+            output_dir,
+            train_batch_size=train_batch_size,
+            eval_steps=eval_steps,
+            save_steps=save_steps,
+            epochs=epochs,
+            eval_batch_size=eval_batch_size,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+        ),
+        train_dataset=train_dataset,  # type: ignore
+        eval_dataset=eval_dataset,  # type: ignore
+        data_collator=data_collator,
+        compute_metrics=compute_metrics,
+    )
+
+
 # %%
+from transformers import (
+    AutoModelForTokenClassification,
+    DataCollatorForTokenClassification,
+)
 # --- Model ---
 model = AutoModelForTokenClassification.from_pretrained(
     MODEL_CHECKPOINT,
@@ -187,34 +285,13 @@ def compute_metrics(p):
 
 data_collator = DataCollatorForTokenClassification(tokenizer)
 
-training_args = TrainingArguments(
-    output_dir="./lang-ner-xlmr",
-    num_train_epochs=3,
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=32,
-    gradient_accumulation_steps=2,  # Effectively batch size 32
-    learning_rate=5e-5,
-    weight_decay=0.01,
-    eval_strategy="steps",
-    save_strategy="steps",
-    eval_steps=2500,  # Evaluate less frequently for speed
-    save_steps=2500,
-    load_best_model_at_end=True,
-    metric_for_best_model="f1",
-    fp16=torch.cuda.is_available(),
-    logging_steps=100,  # Less noise in the console
-    save_total_limit=2,  # Essential for 500k runs
-    report_to="tensorboard",
-    dataloader_num_workers=mp.cpu_count() // 2,
-    push_to_hub=True,
-)
-trainer = Trainer(
+trainer = make_trainer(
     model=model,
-    args=training_args,
-    train_dataset=train_dataset, # type: ignore
-    eval_dataset=eval_dataset,  # type: ignore
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
     data_collator=data_collator,
     compute_metrics=compute_metrics,
+    output_dir="./lang-ner-xlmr",
 )
 
 print("Starting fine-tuning …")
@@ -226,7 +303,65 @@ trainer.push_to_hub()
 print("Model saved to ./lang-ner-xlmr-final")
 
 # %%
-# --- Save Label Map for Later Use ---
-with open("./lang-ner-xlmr-final/label_map.json", "w") as f:
-    json.dump({"id2label": id2label, "label2id": label2id}, f, indent=2)
-print("Label map saved.")
+# --- Multilabel Classification
+from transformers import (
+    AutoModelForSequenceClassification,
+    DataCollatorWithPadding,
+)
+
+model = AutoModelForSequenceClassification.from_pretrained(
+    MODEL_CHECKPOINT,
+    num_labels=len(_ALL_LANGS),
+    problem_type="multi_label_classification",
+    id2label={i: lang.upper() for i, lang in enumerate(_ALL_LANGS)},
+    label2id={lang.upper(): i for i, lang in enumerate(_ALL_LANGS)},
+)
+
+def compute_multilabel_metrics(p):
+    logits, labels = p
+    probs = 1 / (1 + np.exp(-logits))
+    predictions = (probs >= 0.5).astype(int)
+    labels = labels.astype(int)
+
+    tp = np.logical_and(predictions == 1, labels == 1).sum()
+    fp = np.logical_and(predictions == 1, labels == 0).sum()
+    fn = np.logical_and(predictions == 0, labels == 1).sum()
+    exact_match = (predictions == labels).all(axis=1).mean()
+
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+
+    return {
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+        "accuracy": float(exact_match),
+    }
+
+class CustomMultiLabelDataCollatorWithPadding(DataCollatorWithPadding):
+    def __call__(self, features):
+        labels = torch.tensor([feature["labels"] for feature in features], dtype=torch.float32)
+        features = [{k: v for k, v in feature.items() if k != "labels"} for feature in features]
+        batch = super().__call__(features)
+        batch["labels"] = labels
+        return batch
+
+multilabel_data_collator = CustomMultiLabelDataCollatorWithPadding(tokenizer)
+
+multilabel_trainer = make_trainer(
+    model=model,
+    train_dataset=multilabel_train_dataset,
+    eval_dataset=multilabel_eval_dataset,
+    data_collator=multilabel_data_collator,
+    compute_metrics=compute_multilabel_metrics,
+    output_dir="./lang-ner-xlmr-multilabel",
+)
+
+print("Starting multilabel fine-tuning …")
+multilabel_trainer.train()
+multilabel_trainer.save_model("./lang-ner-xlmr-multilabel-final")
+multilabel_trainer.save_state()
+tokenizer.save_pretrained("./lang-ner-xlmr-multilabel-final")
+multilabel_trainer.push_to_hub()
+print("Multilabel model saved to ./lang-ner-xlmr-multilabel-final")
