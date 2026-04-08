@@ -143,6 +143,14 @@ else:
     )
 
 print(f"Train: {len(train_dataset)} | Eval: {len(eval_dataset)}")
+first_example = train_dataset[0]
+input_ids = first_example["input_ids"]
+tokens = tokenizer.convert_ids_to_tokens(input_ids)
+labels = first_example["labels"]
+# Convert via id2label
+labels = [id2label[label] for label in labels if label != -100]
+print(f"Tokens: {tokens}")
+print(f"Labels: {labels}")
 
 # %%
 # --- Tokenized Dataset Load (MultiLabel)
@@ -308,7 +316,7 @@ model = AutoModelForSequenceClassification.from_pretrained(
     id2label={i: lang.upper() for i, lang in enumerate(_ALL_LANGS)},
     label2id={lang.upper(): i for i, lang in enumerate(_ALL_LANGS)},
 )
-#%%
+# %%
 def compute_multilabel_metrics(p):
     logits, labels = p
     probs = 1 / (1 + np.exp(-logits))
@@ -351,7 +359,7 @@ multilabel_trainer = make_trainer(
 )
 
 print("Ready multilabel fine-tuning …")
-#%%
+# %%
 multilabel_trainer.train()
 multilabel_trainer.save_model()
 multilabel_trainer.save_state()
