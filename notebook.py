@@ -12,18 +12,11 @@ import json
 import multiprocessing as mp
 import torch
 import numpy as np
-import evaluate
 from transformers import (
     AutoTokenizer,
-    AutoModelForTokenClassification,
-    TrainingArguments,
-    Trainer,
-    DataCollatorForTokenClassification,
-    pipeline,
 )
 
 from pathlib import Path
-from huggingface_hub import login
 
 SEED = 42
 MODEL_CHECKPOINT = "xlm-roberta-base"
@@ -65,7 +58,17 @@ with open("all_langs.json", encoding="utf-8") as f:
     data = json.load(f)
     # read the keys only
     _ALL_LANGS = list(data.keys())
+# %%
+from huggingface_hub import login
 
+if Path("hf_token").exists():
+    with open("hf_token") as f:
+        token = f.read().strip()
+    login(token=token)
+    print("Logged in to Hugging Face Hub")
+# %%
+# --- Tokenizer ---
+tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Project Imports ---
 from language import ALL_LANGS, LANG_TO_GROUP
@@ -92,15 +95,7 @@ NUM_LABELS = len(label2id)
 print(f"Total labels: {NUM_LABELS}")
 print(f"Total languages: {len(_ALL_LANGS)}")
 print("Sample:", dict(list(id2label.items())[:7]))
-# %%
-if Path("hf_token").exists():
-    with open("hf_token") as f:
-        token = f.read().strip()
-    login(token=token)
-    print("Logged in to Hugging Face Hub")
-# %%
-# --- Tokenizer ---
-tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
+
 # %%
 # --- Data Loading ---
 wiki_english_seed_sentences = load_language_sentences_from_parquet(PATHS["wiki"]["cache_dir"], "en")
@@ -148,6 +143,15 @@ else:
 
 print(f"Train: {len(train_dataset)} | Eval: {len(eval_dataset)}")
 
+# %%
+# --- Model Setup ---
+from transformers import (
+    AutoModelForTokenClassification,
+    DataCollatorForTokenClassification,
+    TrainingArguments,
+    Trainer
+)
+import evaluate
 # %%
 # --- Model ---
 model = AutoModelForTokenClassification.from_pretrained(
@@ -216,11 +220,10 @@ trainer = Trainer(
 print("Starting fine-tuning …")
 trainer.train()
 trainer.save_model("./lang-ner-xlmr-final")
+trainer.save_state()
 tokenizer.save_pretrained("./lang-ner-xlmr-final")
 trainer.push_to_hub()
 print("Model saved to ./lang-ner-xlmr-final")
-
-# %%
 
 # %%
 # --- Save Label Map for Later Use ---
