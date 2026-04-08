@@ -189,7 +189,7 @@ training_args = TrainingArguments(
     per_device_train_batch_size=16,
     per_device_eval_batch_size=32,
     gradient_accumulation_steps=2,  # Effectively batch size 32
-    learning_rate=2e-5,
+    learning_rate=5e-5,
     weight_decay=0.01,
     eval_strategy="steps",
     save_strategy="steps",
@@ -202,6 +202,7 @@ training_args = TrainingArguments(
     save_total_limit=2,  # Essential for 500k runs
     report_to="tensorboard",
     dataloader_num_workers=mp.cpu_count() // 2,
+    push_to_hub=True,
 )
 trainer = Trainer(
     model=model,
