@@ -293,15 +293,7 @@ trainer = make_trainer(
     compute_metrics=compute_metrics,
     output_dir="./lang-ner-xlmr",
 )
-
-print("Starting fine-tuning …")
-trainer.train()
-trainer.save_model("./lang-ner-xlmr-final")
-trainer.save_state()
-tokenizer.save_pretrained("./lang-ner-xlmr-final")
-trainer.push_to_hub()
-print("Model saved to ./lang-ner-xlmr-final")
-
+print("Ready NER fine-tuning …")
 # %%
 # --- Multilabel Classification
 from transformers import (
@@ -358,10 +350,9 @@ multilabel_trainer = make_trainer(
     output_dir="./lang-ner-xlmr-multilabel",
 )
 
-print("Starting multilabel fine-tuning …")
+print("Ready multilabel fine-tuning …")
+#%%
 multilabel_trainer.train()
-multilabel_trainer.save_model("./lang-ner-xlmr-multilabel-final")
+multilabel_trainer.save_model()
 multilabel_trainer.save_state()
-tokenizer.save_pretrained("./lang-ner-xlmr-multilabel-final")
 multilabel_trainer.push_to_hub()
-print("Multilabel model saved to ./lang-ner-xlmr-multilabel-final")
