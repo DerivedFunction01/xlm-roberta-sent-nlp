@@ -27,7 +27,7 @@ torch.manual_seed(SEED)
 def get_workers(split: int = 1):
     return mp.cpu_count() // split
 
-def load_tokenized_dataset_splits(cache_dir: str = "./sentences_cache/tokenized_dataset"):
+def load_tokenized_dataset_splits(cache_dir: str):
     """Load a cached train/eval tokenized split without helper modules."""
     cache_path = Path(cache_dir)
     if not cache_path.exists():
@@ -114,8 +114,8 @@ sample_o_span = neutral_sources.sample_o_span
 sample_code_span = neutral_sources.sample_code_span
 
 # %%
-# --- Tokenized Dataset Load ---
-cached_tokenized = load_tokenized_dataset_splits()
+# --- Tokenized Dataset Load (Token Classification) ---
+cached_tokenized = load_tokenized_dataset_splits("./sentences_cache/tokenized_dataset")
 if cached_tokenized is not None:
     train_dataset = cached_tokenized["train"]
     eval_dataset = cached_tokenized["eval"]
