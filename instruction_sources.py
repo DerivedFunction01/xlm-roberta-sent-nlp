@@ -12,7 +12,7 @@ from datasets import load_dataset
 from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic, write_sentence_parquet
-from language import LANG_TO_GROUP
+from language import LATIN_GROUPS, LANG_TO_GROUP
 from paths import PATHS
 from source_config import INSTRUCT
 from text_utils import _collapse_spaces, _strip_bracket_notes
@@ -84,6 +84,9 @@ _SKIP_FALLBACK_KEYS = {
     "provenance_key",
 }
 _HAS_WORD_OR_IDEOGRAPH = re.compile(r"\w", flags=re.UNICODE)
+_TOKEN_RE = re.compile(r"\w+", flags=re.UNICODE)
+_LATIN_WORD_RE = re.compile(r"[A-Za-zÀ-ÿ]{2,}", flags=re.UNICODE)
+_MATH_SYMBOL_RE = re.compile(r"[=+\-*/^<>|~]")
 
 
 def _instruction_cache_dir(sentences_dir: str) -> str:
@@ -210,14 +213,31 @@ def _dedupe_sentence_list(sentences: list[str]) -> tuple[list[str], int]:
     return deduped, removed
 
 
-def _is_valid_instruction_text(text: str) -> bool:
+def _is_valid_instruction_text(text: str, lang: str, lang_to_group: dict[str, str]) -> bool:
     cleaned = _normalize_text(text)
     if len(cleaned) < 2 or len(cleaned) > 1_500:
         return False
     if not _HAS_WORD_OR_IDEOGRAPH.search(cleaned):
         return False
+    if not any(ch.isalpha() for ch in cleaned):
+        return False
+    token_count = len(_TOKEN_RE.findall(cleaned))
+    symbol_count = sum(
+        1 for ch in cleaned if not ch.isalnum() and not ch.isspace()
+    )
     digit_count = sum(ch.isdigit() for ch in cleaned)
-    if digit_count > len(cleaned) * 0.5:
+    math_symbol_count = len(_MATH_SYMBOL_RE.findall(cleaned))
+    word_count = len(_LATIN_WORD_RE.findall(cleaned))
+    is_latin = lang_to_group.get(lang) in LATIN_GROUPS
+    if token_count < 4:
+        return False
+    if digit_count > len(cleaned) * 0.35:
+        return False
+    if symbol_count > len(cleaned) * 0.45:
+        return False
+    if math_symbol_count >= 3 and word_count <= 2:
+        return False
+    if is_latin and cleaned.isupper() and len(cleaned) <= 24:
         return False
     return True
 
@@ -412,7 +432,7 @@ def _process_source_spec(
             continue
         for record in extracted:
             text = record["text"]
-            if not _is_valid_instruction_text(text):
+            if not _is_valid_instruction_text(text, lang, lang_to_group):
                 continue
             records_by_lang.setdefault(lang, []).append(record)
             field_counts[record["provenance_key"].split(":")[-2]] += 1
