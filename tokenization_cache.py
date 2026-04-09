@@ -176,7 +176,7 @@ def load_tokenized_dataset_splits() -> Any | None:
 def build_tokenized_dataset(
     synthetic_dataset,
     *,
-    seed: int,
+    seed: int = 42,
     model_checkpoint: str,
     tokenizer,
     label2id: dict[str, int],

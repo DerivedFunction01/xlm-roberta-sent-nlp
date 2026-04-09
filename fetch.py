@@ -1,4 +1,4 @@
-#%%
+# %%
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -29,59 +29,43 @@ def _maybe_login() -> None:
         login(token=token)
         print("Logged in to Hugging Face Hub")
 
+refresh_sources()
+_maybe_login()
 
-def prepare_data(
-    *,
-    seed: int = 42,
-    model_checkpoint: str = DEFAULT_MODEL_CHECKPOINT,
-) -> None:
-    refresh_sources()
-    _maybe_login()
-
-    tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
-    label2id, id2label = build_label_maps(ALL_LANGS)
-
-    wiki_english_seed_sentences = load_language_sentences_from_parquet(PATHS["wiki"]["cache_dir"], "en")
-    ft_english_seed_sentences = load_language_sentences_from_parquet(PATHS["finetrans"]["cache_dir"], "en")
-    neutral_sources = build_neutral_sources(
-        english_seed_sentences=wiki_english_seed_sentences + ft_english_seed_sentences,
-        seed=seed,
-    )
-
-    print("Building synthetic dataset cache ...")
-    synthetic_dataset = build_synthetic_dataset(
-        seed=seed,
-        tokenizer=tokenizer,
-        label2id=label2id,
-        id2label=id2label,
-        sample_o_span=neutral_sources.sample_o_span,
-        sample_code_span=neutral_sources.sample_code_span,
-    )
-    print(f"Synthetic examples: {len(synthetic_dataset):,}")
-
-    print("Building tokenized dataset cache ...")
-    train_dataset, eval_dataset = build_tokenized_dataset(
-        synthetic_dataset,
-        seed=seed,
-        model_checkpoint=model_checkpoint,
-        tokenizer=tokenizer,
-        label2id=label2id,
-        id2label=id2label,
-        max_length=512,
-    )
-    print(f"Tokenized train/eval: {len(train_dataset):,} / {len(eval_dataset):,}")
-
-    print("Building multilabel dataset cache ...")
-    multilabel_dataset = convert_and_save_multilabel_dataset()
-    for split_name, split in multilabel_dataset.items():
-        print(f"  {split_name}: {len(split):,} examples")
-
-
-def main() -> None:
-    prepare_data()
-
+tokenizer = AutoTokenizer.from_pretrained(DEFAULT_MODEL_CHECKPOINT)
+label2id, id2label = build_label_maps(ALL_LANGS)
 #%%
-if __name__ == "__main__":
-    main()
+wiki_english_seed_sentences = load_language_sentences_from_parquet(PATHS["wiki"]["cache_dir"], "en")
+ft_english_seed_sentences = load_language_sentences_from_parquet(PATHS["finetrans"]["cache_dir"], "en")
+neutral_sources = build_neutral_sources(
+    english_seed_sentences=wiki_english_seed_sentences + ft_english_seed_sentences,
+)
+#%%
+print("Building synthetic dataset cache ...")
+synthetic_dataset = build_synthetic_dataset(
+    tokenizer=tokenizer,
+    label2id=label2id,
+    id2label=id2label,
+    sample_o_span=neutral_sources.sample_o_span,
+    sample_code_span=neutral_sources.sample_code_span,
+)
+print(f"Synthetic examples: {len(synthetic_dataset):,}")
+#%%
+print("Building tokenized dataset cache ...")
+train_dataset, eval_dataset = build_tokenized_dataset(
+    synthetic_dataset,
+    model_checkpoint=DEFAULT_MODEL_CHECKPOINT,
+    tokenizer=tokenizer,
+    label2id=label2id,
+    id2label=id2label,
+    max_length=512,
+)
+print(f"Tokenized train/eval: {len(train_dataset):,} / {len(eval_dataset):,}")
+
+print("Building multilabel dataset cache ...")
+multilabel_dataset = convert_and_save_multilabel_dataset()
+for split_name, split in multilabel_dataset.items():
+    print(f"  {split_name}: {len(split):,} examples")
+
 
 # %%

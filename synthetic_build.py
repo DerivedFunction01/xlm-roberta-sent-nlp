@@ -706,7 +706,7 @@ def release_generation_memory() -> None:
 
 def build_synthetic_dataset(
     *,
-    seed: int,
+    seed: int = 42,
     tokenizer,
     label2id: dict[str, int],
     id2label: dict[int, str],
