@@ -242,6 +242,79 @@ def _render_original_text(parts: list[str], paragraph_break_prob: float = 0.0) -
 
 
 _WORD_RE = re.compile(r"\b[^\W\d_]{2,}\b", flags=re.UNICODE)
+_OCR_MAP: dict[str, set[str]] = {
+    "0": {"o", "O"},
+    "1": {"l", "I", "i"},
+    "3": {"e", "E"},
+    "4": {"a", "A"},
+    "5": {"s", "S"},
+    "6": {"b", "G"},
+    "7": {"t", "T"},
+    "8": {"B"},
+    "@": {"a", "A"},
+    "$": {"s", "S"},
+    "\"": {"'"},
+    "9": {"g", "q"},
+}
+_OCR_CHAR_MAP: dict[str, list[str]] = {}
+for replacement, originals in _OCR_MAP.items():
+    for ch in originals:
+        _OCR_CHAR_MAP.setdefault(ch, []).append(replacement)
+
+_UNICODE_ACCENT_VARIANTS: dict[str, list[str]] = {
+    "a": ["á", "à", "â", "ä", "ã", "å", "ā", "ă", "ą"],
+    "b": ["ḃ", "ƀ", "ɓ"],
+    "c": ["ç", "ć", "č"],
+    "d": ["ď", "đ", "ḋ", "ḍ"],
+    "e": ["é", "è", "ê", "ë", "ē", "ė", "ę"],
+    "f": ["ƒ"],
+    "g": ["ğ", "ĝ", "ġ", "ģ"],
+    "h": ["ħ", "ḥ"],
+    "i": ["í", "ì", "î", "ï", "ī", "į"],
+    "j": ["ĵ"],
+    "k": ["ķ", "ḱ"],
+    "l": ["ĺ", "ļ", "ľ", "ł"],
+    "m": ["ṃ"],
+    "n": ["ñ", "ń", "ņ", "ň"],
+    "o": ["ó", "ò", "ô", "ö", "õ", "ō", "ő"],
+    "p": ["ṕ"],
+    "r": ["ŕ", "ř", "ṛ"],
+    "s": ["ś", "š", "ş", "ș"],
+    "t": ["ť", "ţ", "ṭ", "ŧ"],
+    "u": ["ú", "ù", "û", "ü", "ū", "ű", "ŭ", "ũ"],
+    "v": ["ṽ"],
+    "w": ["ŵ", "ẁ", "ẃ"],
+    "y": ["ý", "ÿ", "ŷ"],
+    "z": ["ź", "ž", "ż", "ẓ"],
+}
+_KEYBOARD_MAP: dict[str, list[str]] = {
+    "q": ["w", "a"],
+    "w": ["q", "e", "s"],
+    "e": ["w", "r", "d"],
+    "r": ["e", "t", "f"],
+    "t": ["r", "y", "g"],
+    "y": ["t", "u", "h"],
+    "u": ["y", "i", "j"],
+    "i": ["u", "o", "k"],
+    "o": ["i", "p", "l"],
+    "p": ["o", "l"],
+    "a": ["q", "s", "z"],
+    "s": ["a", "d", "w", "x"],
+    "d": ["s", "f", "e", "c"],
+    "f": ["d", "g", "r", "v"],
+    "g": ["f", "h", "t", "b"],
+    "h": ["g", "j", "y", "n"],
+    "j": ["h", "k", "u", "m"],
+    "k": ["j", "l", "i"],
+    "l": ["k", "o", "p"],
+    "z": ["a", "x"],
+    "x": ["z", "c", "s"],
+    "c": ["x", "v", "d"],
+    "v": ["c", "b", "f"],
+    "b": ["v", "n", "g"],
+    "n": ["b", "m", "h"],
+    "m": ["n", "j"],
+}
 
 
 def _apply_random_word_casing(
@@ -276,6 +349,98 @@ def _apply_random_word_casing(
     if replacement == word:
         return sentence
     return f"{sentence[:match.start()]}{replacement}{sentence[match.end():]}"
+
+
+def _apply_random_spacing_noise(sentence: str, *, lang: str, merge_prob: float, split_prob: float) -> str:
+    """Randomly merge adjacent words or split a word for mild OCR/copy noise."""
+    total_prob = max(0.0, merge_prob) + max(0.0, split_prob)
+    if total_prob <= 0 or random.random() >= total_prob:
+        return sentence
+    if LANG_TO_GROUP.get(lang) not in LATIN_GROUPS:
+        return sentence
+
+    if random.random() < (merge_prob / total_prob if total_prob else 0.0):
+        matches = list(re.finditer(r"\b[^\W\d_]{2,}\s+[^\W\d_]{2,}\b", sentence, flags=re.UNICODE))
+        if not matches:
+            return sentence
+        match = random.choice(matches)
+        return f"{sentence[:match.start()]}{match.group(0).replace(' ', '', 1)}{sentence[match.end():]}"
+
+    matches = list(re.finditer(r"\b[^\W\d_]{4,}\b", sentence, flags=re.UNICODE))
+    if not matches:
+        return sentence
+    match = random.choice(matches)
+    word = match.group(0)
+    split_at = random.randint(2, len(word) - 2)
+    replacement = f"{word[:split_at]} {word[split_at:]}"
+    return f"{sentence[:match.start()]}{replacement}{sentence[match.end():]}"
+
+
+def _apply_random_char_noise(sentence: str, *, lang: str, prob: float) -> str:
+    """Apply a low-probability OCR / keyboard / accent corruption."""
+    if prob <= 0 or random.random() >= prob:
+        return sentence
+    if LANG_TO_GROUP.get(lang) not in LATIN_GROUPS:
+        return sentence
+
+    candidates = [
+        "ocr",
+        "accent",
+        "keyboard",
+    ]
+    mode = random.choice(candidates)
+    matches = list(_WORD_RE.finditer(sentence))
+    if not matches:
+        return sentence
+    match = random.choice(matches)
+    word = match.group(0)
+    if len(word) < 2:
+        return sentence
+
+    chars = list(word)
+    if mode == "ocr":
+        positions = [idx for idx, ch in enumerate(chars) if ch in _OCR_CHAR_MAP]
+        if not positions:
+            positions = [idx for idx, ch in enumerate(chars) if ch.lower() in _OCR_CHAR_MAP]
+        if not positions:
+            return sentence
+        idx = random.choice(positions)
+        ch = chars[idx]
+        replacements = _OCR_CHAR_MAP.get(ch) or _OCR_CHAR_MAP.get(ch.lower()) or []
+        if not replacements:
+            return sentence
+        replacement = random.choice(replacements)
+        if ch.isupper():
+            replacement = replacement.upper()
+        chars[idx] = replacement
+    elif mode == "accent":
+        positions = [idx for idx, ch in enumerate(chars) if ch.lower() in _UNICODE_ACCENT_VARIANTS]
+        if not positions:
+            return sentence
+        idx = random.choice(positions)
+        ch = chars[idx]
+        variants = _UNICODE_ACCENT_VARIANTS.get(ch.lower(), [])
+        if not variants:
+            return sentence
+        replacement = random.choice(variants)
+        if ch.isupper():
+            replacement = replacement.upper()
+        chars[idx] = replacement
+    else:
+        positions = [idx for idx, ch in enumerate(chars) if ch.lower() in _KEYBOARD_MAP]
+        if not positions:
+            return sentence
+        idx = random.choice(positions)
+        ch = chars[idx]
+        variants = _KEYBOARD_MAP.get(ch.lower(), [])
+        if not variants:
+            return sentence
+        replacement = random.choice(variants)
+        if ch.isupper():
+            replacement = replacement.upper()
+        chars[idx] = replacement
+
+    return f"{sentence[:match.start()]}{''.join(chars)}{sentence[match.end():]}"
 
 
 def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 0.02) -> tuple[list[str], list[int]]:
@@ -359,6 +524,9 @@ def generate_synthetic_examples_chunk(
                     uppercase_word_prob=PURE_DOC_MIX.get("uppercase_word_prob", 0.0),
                     lowercase_word_prob=PURE_DOC_MIX.get("lowercase_word_prob", 0.0),
                     titlecase_word_prob=PURE_DOC_MIX.get("titlecase_word_prob", 0.0),
+                    merge_word_prob=PURE_DOC_MIX.get("merge_word_prob", 0.0),
+                    split_word_prob=PURE_DOC_MIX.get("split_word_prob", 0.0),
+                    typo_char_prob=PURE_DOC_MIX.get("typo_char_prob", 0.0),
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -394,6 +562,9 @@ def generate_synthetic_examples_chunk(
                     uppercase_word_prob=HOMOGENEOUS_DOC_MIX.get("uppercase_word_prob", 0.0),
                     lowercase_word_prob=HOMOGENEOUS_DOC_MIX.get("lowercase_word_prob", 0.0),
                     titlecase_word_prob=HOMOGENEOUS_DOC_MIX.get("titlecase_word_prob", 0.0),
+                    merge_word_prob=HOMOGENEOUS_DOC_MIX.get("merge_word_prob", 0.0),
+                    split_word_prob=HOMOGENEOUS_DOC_MIX.get("split_word_prob", 0.0),
+                    typo_char_prob=HOMOGENEOUS_DOC_MIX.get("typo_char_prob", 0.0),
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -648,6 +819,9 @@ def create_pure_synthetic_doc(
     uppercase_word_prob: float = 0.0,
     lowercase_word_prob: float = 0.0,
     titlecase_word_prob: float = 0.0,
+    merge_word_prob: float = 0.0,
+    split_word_prob: float = 0.0,
+    typo_char_prob: float = 0.0,
 ) -> dict:
     """Build one mostly homogeneous single-language synthetic example."""
     sent_count = random.randint(min_sentences, max_sentences)
@@ -668,6 +842,13 @@ def create_pure_synthetic_doc(
             lowercase_prob=lowercase_word_prob,
             titlecase_prob=titlecase_word_prob,
         )
+        sent = _apply_random_spacing_noise(
+            sent,
+            lang=lang,
+            merge_prob=merge_word_prob,
+            split_prob=split_word_prob,
+        )
+        sent = _apply_random_char_noise(sent, lang=lang, prob=typo_char_prob)
         original_text_parts.append(sent)
         tokens = tokenizer.tokenize(sent)
         if not tokens:
@@ -715,6 +896,9 @@ def build_synthetic_doc_with_retry(
     uppercase_word_prob: float = 0.0,
     lowercase_word_prob: float = 0.0,
     titlecase_word_prob: float = 0.0,
+    merge_word_prob: float = 0.0,
+    split_word_prob: float = 0.0,
+    typo_char_prob: float = 0.0,
     swap_prob: float = 0.12,
     o_inject_prob: float = 0.12,
     allow_repeated_langs: bool = False,
@@ -747,6 +931,9 @@ def build_synthetic_doc_with_retry(
                 uppercase_word_prob=uppercase_word_prob,
                 lowercase_word_prob=lowercase_word_prob,
                 titlecase_word_prob=titlecase_word_prob,
+                merge_word_prob=merge_word_prob,
+                split_word_prob=split_word_prob,
+                typo_char_prob=typo_char_prob,
             )
         else:
             example = create_synthetic_doc(

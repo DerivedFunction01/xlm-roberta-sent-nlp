@@ -218,6 +218,9 @@ DOC_MIX = {
         "uppercase_word_prob": 0.03,
         "lowercase_word_prob": 0.03,
         "titlecase_word_prob": 0.02,
+        "merge_word_prob": 0.03,
+        "split_word_prob": 0.02,
+        "typo_char_prob": 0.02,
     },
     "homogeneous": {
         "fraction": 0.30,
@@ -230,6 +233,9 @@ DOC_MIX = {
         "uppercase_word_prob": 0.02,
         "lowercase_word_prob": 0.02,
         "titlecase_word_prob": 0.01,
+        "merge_word_prob": 0.02,
+        "split_word_prob": 0.01,
+        "typo_char_prob": 0.01,
     },
     "mixed": {
         "fraction": 0.10,
