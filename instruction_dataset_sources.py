@@ -148,6 +148,13 @@ def _extract_japanese_self_instruct_texts(row: dict[str, Any], spec: dict[str, A
     return texts
 
 
+def _extract_alpaca_texts(row: dict[str, Any], spec: dict[str, Any]) -> list[str]:
+    texts = _extract_texts_from_fields(row, ("instruction", "input", "output"))
+    if texts:
+        return texts
+    return []
+
+
 def _extract_generic_texts(row: dict[str, Any], spec: dict[str, Any]) -> list[str]:
     texts = _extract_texts_from_message_list(row, "messages")
     if texts:
@@ -173,11 +180,21 @@ INSTRUCTION_SOURCE_EXTRACTORS: dict[str, SourceExtractor] = {
     "chinese_qwen": _extract_chinese_qwen_texts,
     "turkish_openhermes": _extract_turkish_openhermes_texts,
     "japanese_self_instruct": _extract_japanese_self_instruct_texts,
+    "alpaca": _extract_alpaca_texts,
     "generic": _extract_generic_texts,
 }
 
 
 DEFAULT_INSTRUCTION_SOURCE_SPECS = [
+    {
+        "name": "alpaca_en",
+        "repo_id": "tatsu-lab/alpaca",
+        "split": "train",
+        "lang": "en",
+        "extractor": "alpaca",
+        "trust_remote_code": False,
+        "max_rows": 100_000,
+    },
     {
         "name": "french_instruct",
         "repo_id": "angeluriot/french_instruct",
