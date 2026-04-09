@@ -213,6 +213,7 @@ DOC_MIX = {
         "min_sentences": 1,
         "max_sentences": 4,
         "strip_punct_prob": 0.10,
+        "format_noise_prob": 0.30,
     },
     "homogeneous": {
         "fraction": 0.30,
@@ -220,6 +221,7 @@ DOC_MIX = {
         "min_sentences": 2,
         "max_sentences": 6,
         "strip_punct_prob": 0.15,
+        "format_noise_prob": 0.20,
     },
     "mixed": {
         "fraction": 0.10,

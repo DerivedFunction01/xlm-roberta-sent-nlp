@@ -153,6 +153,71 @@ def augment_boundary(tokens: list[str], strip_punct: bool) -> list[str]:
     return tokens
 
 
+def _inject_formatting_artifact(
+    tokens: list[str],
+    labels: list[int],
+    *,
+    tokenizer,
+    prefix: str = "",
+    suffix: str = "",
+    insert_at: int | None = None,
+) -> tuple[list[str], list[int], list[str]]:
+    """Inject formatting-only tokens that should stay labeled as O."""
+    artifact_text: list[str] = []
+    if prefix:
+        prefix_tokens = tokenizer.tokenize(prefix)
+        if prefix_tokens:
+            tokens = prefix_tokens + tokens
+            labels = [0] * len(prefix_tokens) + labels
+            artifact_text.append(prefix)
+    if suffix:
+        suffix_tokens = tokenizer.tokenize(suffix)
+        if suffix_tokens:
+            tokens = tokens + suffix_tokens
+            labels = labels + [0] * len(suffix_tokens)
+            artifact_text.append(suffix)
+    if insert_at is not None and 0 < insert_at < len(tokens):
+        # Keep infix insertion available for future expansions.
+        pass
+    return tokens, labels, artifact_text
+
+
+def _add_formatting_noise(
+    tokens: list[str],
+    labels: list[int],
+    *,
+    tokenizer,
+    lang: str,
+    artifact_prob: float,
+) -> tuple[list[str], list[int], list[str]]:
+    """Add light formatting noise to pure/homogeneous rows."""
+    if not tokens or artifact_prob <= 0 or random.random() >= artifact_prob:
+        return tokens, labels, []
+
+    pattern = random.choice(["wrap", "bullet", "trail", "tag"])
+    if pattern == "wrap":
+        prefix, suffix = random.choice([
+            ("(", ")"),
+            ("[", "]"),
+            ("\"", "\""),
+            ("“", "”"),
+            ("«", "»"),
+        ])
+        return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, prefix=prefix, suffix=suffix)
+    if pattern == "bullet":
+        prefix = random.choice(["-", "•", "1.", "i."])
+        return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, prefix=prefix)
+    if pattern == "trail":
+        suffix = random.choice([":", ";", "...", "?!"])
+        return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, suffix=suffix)
+    prefix, suffix = random.choice([
+        ("<p>", "</p>"),
+        ("<div>", "</div>"),
+        ("<blockquote>", "</blockquote>"),
+    ])
+    return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, prefix=prefix, suffix=suffix)
+
+
 def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 0.02) -> tuple[list[str], list[int]]:
     """Randomly swap tokens between positions to simulate within-sentence code-switching."""
     n = len(tokens)
@@ -229,6 +294,7 @@ def generate_synthetic_examples_chunk(
                     min_sentences=PURE_DOC_MIX["min_sentences"],
                     max_sentences=PURE_DOC_MIX["max_sentences"],
                     strip_punct_prob=PURE_DOC_MIX["strip_punct_prob"],
+                    format_noise_prob=PURE_DOC_MIX.get("format_noise_prob", 0.0),
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -259,6 +325,7 @@ def generate_synthetic_examples_chunk(
                     min_sentences=HOMOGENEOUS_DOC_MIX["min_sentences"],
                     max_sentences=HOMOGENEOUS_DOC_MIX["max_sentences"],
                     strip_punct_prob=HOMOGENEOUS_DOC_MIX["strip_punct_prob"],
+                    format_noise_prob=HOMOGENEOUS_DOC_MIX.get("format_noise_prob", 0.0),
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -508,6 +575,7 @@ def create_pure_synthetic_doc(
     min_sentences: int = 1,
     max_sentences: int = 4,
     strip_punct_prob: float = 0.15,
+    format_noise_prob: float = 0.0,
 ) -> dict:
     """Build one mostly homogeneous single-language synthetic example."""
     sent_count = random.randint(min_sentences, max_sentences)
@@ -528,6 +596,15 @@ def create_pure_synthetic_doc(
         if strip_punct_prob > 0 and random.random() < strip_punct_prob:
             tokens = augment_boundary(tokens, strip_punct=True)
         labels = bio_label_tokens(tokens, lang, is_first=(len(all_tokens) == 0), label2id=label2id)
+        tokens, labels, artifact_parts = _add_formatting_noise(
+            tokens,
+            labels,
+            tokenizer=tokenizer,
+            lang=lang,
+            artifact_prob=format_noise_prob,
+        )
+        if artifact_parts:
+            original_text_parts.extend(artifact_parts)
         remaining = MAX_LENGTH - 2 - total_tokens
         tokens = tokens[:remaining]
         labels = labels[:remaining]
@@ -550,6 +627,7 @@ def build_synthetic_doc_with_retry(
     max_sentences: int = 4,
     n_segments: int = 4,
     strip_punct_prob: float = 0.35,
+    format_noise_prob: float = 0.0,
     swap_prob: float = 0.12,
     o_inject_prob: float = 0.12,
     allow_repeated_langs: bool = False,
@@ -577,6 +655,7 @@ def build_synthetic_doc_with_retry(
                 min_sentences=min_sentences,
                 max_sentences=max_sentences,
                 strip_punct_prob=strip_punct_prob,
+                format_noise_prob=format_noise_prob,
             )
         else:
             example = create_synthetic_doc(
