@@ -27,32 +27,6 @@ torch.manual_seed(SEED)
 def get_workers(split: int = 1):
     return mp.cpu_count() // split
 
-def load_tokenized_dataset_splits(cache_dir: str):
-    """Load a cached train/eval tokenized split without helper modules."""
-    cache_path = Path(cache_dir)
-    if not cache_path.exists():
-        return None
-    try:
-        from datasets import Dataset, DatasetDict, concatenate_datasets, load_from_disk
-    except ImportError as exc:
-        raise RuntimeError("datasets is required to load the tokenized cache") from exc
-
-    try:
-        return load_from_disk(str(cache_path))
-    except Exception:
-        split_names = ["train", "eval"]
-        loaded_splits = {}
-        for split_name in split_names:
-            split_dir = cache_path / split_name
-            arrow_files = sorted(split_dir.glob("*.arrow"))
-            if not arrow_files:
-                return None
-            split_parts = [Dataset.from_file(str(path)) for path in arrow_files]
-            loaded_splits[split_name] = (
-                split_parts[0] if len(split_parts) == 1 else concatenate_datasets(split_parts)
-            )
-        return DatasetDict(loaded_splits)
-
 _ALL_LANGS = []
 with open("all_langs.json", encoding="utf-8") as f:
     data = json.load(f)
@@ -71,13 +45,10 @@ if Path("hf_token").exists():
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
 # --- Project Imports ---
-from language import ALL_LANGS, LANG_TO_GROUP
+from language import ALL_LANGS
 from paths import PATHS
-from source_pools import load_language_sentences_from_parquet
-from neutral_sources import build_neutral_sources
-from multilabel_converter import convert_and_save_multilabel_dataset
-from synthetic_build import build_synthetic_dataset, create_pure_synthetic_doc
-from tokenization_cache import build_tokenized_dataset
+from multilabel_converter import load_tokenized_cache
+from tokenization_cache import load_tokenized_dataset_cache
 
 _ALL_LANGS = ALL_LANGS
 # %%
@@ -99,47 +70,18 @@ print("Sample:", dict(list(id2label.items())[:7]))
 
 # %%
 # --- Data Loading ---
-wiki_english_seed_sentences = load_language_sentences_from_parquet(PATHS["wiki"]["cache_dir"], "en")
-ft_english_seed_sentences = load_language_sentences_from_parquet(PATHS["finetrans"]["cache_dir"], "en")
-print(f"Wiki English seed sentences: {len(wiki_english_seed_sentences):,}")
-print(f"FineTranslations English seed sentences: {len(ft_english_seed_sentences):,}")
-# %%
-neutral_sources = build_neutral_sources(
-    english_seed_sentences=(
-        wiki_english_seed_sentences
-        + ft_english_seed_sentences
-    ),
+cached_tokenized = load_tokenized_dataset_cache(
     seed=SEED,
+    model_checkpoint=MODEL_CHECKPOINT,
+    max_length=512,
 )
-sample_o_span = neutral_sources.sample_o_span
-sample_code_span = neutral_sources.sample_code_span
-
-# %%
-# --- Tokenized Dataset Load (Token Classification) ---
-cached_tokenized = load_tokenized_dataset_splits(PATHS["tokenized"]["cache_dir"])
 if cached_tokenized is not None:
     train_dataset = cached_tokenized["train"]
     eval_dataset = cached_tokenized["eval"]
     print("Loaded tokenized dataset cache")
 else:
-    # --- Synthetic Dataset Build ---
-    synthetic_dataset = build_synthetic_dataset(
-        seed=SEED,
-        tokenizer=tokenizer,
-        label2id=label2id,
-        id2label=id2label,
-        sample_o_span=sample_o_span,
-        sample_code_span=sample_code_span,
-    )
-
-    train_dataset, eval_dataset = build_tokenized_dataset(
-        synthetic_dataset,
-        seed=SEED,
-        model_checkpoint=MODEL_CHECKPOINT,
-        tokenizer=tokenizer,
-        label2id=label2id,
-        id2label=id2label,
-        max_length=512,
+    raise RuntimeError(
+        "Tokenized cache not found. Run `python fetch.py` first to prepare the datasets."
     )
 
 print(f"Train: {len(train_dataset)} | Eval: {len(eval_dataset)}")
@@ -156,27 +98,17 @@ print(f"Labels: {labels}")
 # --- Tokenized Dataset Load (MultiLabel)
 multilabel_train_dataset = None
 multilabel_eval_dataset = None
-cache_multilabel = load_tokenized_dataset_splits(PATHS["multilabel_dataset"]["cache_dir"])
+cache_multilabel = load_tokenized_cache(Path(PATHS["multilabel_dataset"]["cache_dir"]))
 if cache_multilabel is not None:
     multilabel_train_dataset = cache_multilabel["train"]
     multilabel_eval_dataset = cache_multilabel["eval"]
     print("Loaded multilabel dataset cache")
-    if "input_ids" not in multilabel_train_dataset.column_names or "input_ids" not in multilabel_eval_dataset.column_names:
-        print("Existing multilabel cache is missing tokenized features; rebuilding cache...")
-        convert_and_save_multilabel_dataset()
-        cache_multilabel = load_tokenized_dataset_splits(PATHS["multilabel_dataset"]["cache_dir"])
-        if cache_multilabel is not None:
-            multilabel_train_dataset = cache_multilabel["train"]
-            multilabel_eval_dataset = cache_multilabel["eval"]
 else:
-    print("Building multilabel dataset cache from tokenized dataset...")
-    convert_and_save_multilabel_dataset()
-    cache_multilabel = load_tokenized_dataset_splits(PATHS["multilabel_dataset"]["cache_dir"])
-    if cache_multilabel is not None:
-        multilabel_train_dataset = cache_multilabel["train"]
-        multilabel_eval_dataset = cache_multilabel["eval"]
+    raise RuntimeError(
+        "Multilabel cache not found. Run `python fetch.py` first to prepare the datasets."
+    )
 if multilabel_train_dataset is None or multilabel_eval_dataset is None:
-    raise RuntimeError("Failed to load or build the multilabel dataset cache")
+    raise RuntimeError("Failed to load the cached multilabel dataset")
 print(f"Multilabel Train: {len(multilabel_train_dataset)} | Eval: {len(multilabel_eval_dataset)}")
 
 # %%
