@@ -19,7 +19,6 @@ DEFAULT_DATASETS = [
     {"repo_id": "2A2I/Arabic-OpenHermes-2.5", "label": "Arabic"},
     {"repo_id": "nlp-with-deeplearning/ko.openhermes", "label": "Korean"},
     {"repo_id": "stefan-it/nanochat-german-openhermes", "label": "German"},
-    {"repo_id": "angeluriot/french_instruct", "label": "French"},
     {"repo_id": "yhavinga/Openhermes-2.5-dutch-97k", "label": "Dutch"},
     {"repo_id": "cnmoro/Instruct-PTBR-ENUS-11M", "label": "Portuguese/English"},
     {"repo_id": "Jackrong/Chinese-Qwen3-235B-Thinking-2507-Distill-100k", "label": "Chinese"},
@@ -186,16 +185,24 @@ def _probe_split(
     print(f"  Config: {config_label}")
     print(f"  Split: {split_name}")
     try:
+        load_kwargs: dict[str, Any] = {
+            "split": split_name,
+            "streaming": True,
+            "trust_remote_code": trust_remote_code,
+        }
+        if config_name is not None:
+            load_kwargs["name"] = config_name
         dataset = load_dataset(
             repo_id,
-            name=config_name,
-            split=split_name,
-            streaming=True,
-            trust_remote_code=trust_remote_code,
+            **load_kwargs,
         )
     except Exception as exc:
         print(f"    load failed: {exc}")
         return
+
+    features = getattr(dataset, "features", None)
+    if features is not None:
+        print(f"    features: {features}")
 
     samples = _iter_example_rows(dataset, num_examples)
     if not samples:
@@ -228,7 +235,9 @@ def probe_dataset(
     max_chars: int,
     max_list_items: int,
 ) -> None:
-    print(f"\n=== {repo_id} ===")
+    label = next((item["label"] for item in DEFAULT_DATASETS if item["repo_id"] == repo_id), None)
+    title = f"{repo_id}" if label is None else f"{repo_id} ({label})"
+    print(f"\n=== {title} ===")
     try:
         configs = get_dataset_config_names(repo_id)
         if not configs:
