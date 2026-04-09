@@ -165,10 +165,16 @@ LANGUAGE_BUCKETS = {
         "min_chars": 2_000,
         "latin": False,
     },
+    "AfricanLatin": {
+        "langs": ["sw", "tl", "eu"],
+        "weight": 0.8,
+        "min_chars": 1_500,
+        "latin": True,
+    },
     # el ~0.55%, he ~0.24%, th ~0.38%, hy ~0.033%, ka ~0.044% etc. — combined ~1%+
     # nudged up slightly from 0.8 given Greek and Thai have meaningful CC presence
     "OtherScripts": {
-        "langs": ["el", "he", "hy", "ka", "am", "km", "lo", "my", "th"],
+        "langs": ["el", "he", "hy", "ka", "am", "km", "lo", "my", "th", "si", "bo", "ti", "dv"],
         "weight": 0.9,
         "min_chars": 2_000,
         "latin": False,
