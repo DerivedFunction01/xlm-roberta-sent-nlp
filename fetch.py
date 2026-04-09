@@ -15,6 +15,7 @@ from paths import PATHS
 from source_pools import load_language_sentences_from_parquet
 from synthetic_build import build_synthetic_dataset
 from tokenization_cache import build_tokenized_dataset
+from tqdm.auto import tqdm
 
 DEFAULT_MODEL_CHECKPOINT = "xlm-roberta-base"
 
