@@ -264,7 +264,7 @@ def _process_source_spec(
     *,
     spec: dict[str, Any],
     lang_to_group: dict[str, str],
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, int], dict[str, int]]:
+) -> tuple[dict[str, list[str]], dict[str, int], dict[str, int]]:
     repo_id = str(spec["repo_id"])
     source_name = str(spec["name"])
     split = str(spec.get("split", "train"))
@@ -276,13 +276,13 @@ def _process_source_spec(
     allow_code = bool(spec.get("allow_code", False))
     extractor = INSTRUCTION_SOURCE_EXTRACTORS.get(extractor_name)
 
-    records_by_lang: dict[str, list[dict[str, Any]]] = {}
+    sentence_map: dict[str, list[str]] = {}
     extractor_counts: Counter[str] = Counter()
     source_counts: Counter[str] = Counter()
 
     if extractor is None:
         tqdm.write(f"  Skipping {repo_id}: unknown extractor '{extractor_name}'")
-        return records_by_lang, dict(extractor_counts), dict(source_counts)
+        return sentence_map, dict(extractor_counts), dict(source_counts)
 
     try:
         load_kwargs: dict[str, Any] = {
@@ -295,7 +295,7 @@ def _process_source_spec(
         ds = load_dataset(repo_id, **load_kwargs)
     except Exception as exc:
         tqdm.write(f"  Skipping {repo_id}: {exc}")
-        return records_by_lang, dict(extractor_counts), dict(source_counts)
+        return sentence_map, dict(extractor_counts), dict(source_counts)
 
     for row_idx, row in enumerate(tqdm(ds, desc=repo_id, leave=False)):
         if max_rows > 0 and row_idx >= max_rows:
@@ -309,18 +309,11 @@ def _process_source_spec(
         for text_idx, text in enumerate(raw_texts):
             if not _is_valid_instruction_text(text, lang, lang_to_group, allow_code=allow_code):
                 continue
-            records_by_lang.setdefault(lang, []).append(
-                {
-                    "lang": lang,
-                    "text": _normalize_text(text),
-                    "source_dataset": repo_id,
-                    "provenance_key": f"{repo_id}:{row_idx}:{extractor_name}:{text_idx}",
-                }
-            )
+            sentence_map.setdefault(lang, []).append(_normalize_text(text))
             extractor_counts[extractor_name] += 1
             source_counts[source_name] += 1
 
-    return records_by_lang, dict(extractor_counts), dict(source_counts)
+    return sentence_map, dict(extractor_counts), dict(source_counts)
 
 
 def load_instruction_sentences(
@@ -352,7 +345,7 @@ def load_instruction_sentences(
 
     existing_meta = _load_instruction_meta_raw(cache_meta)
     cache_state = _instruction_meta_state(meta=existing_meta, expected_meta=expected_meta)
-    if not force_rebuild and cache_state == "exact" and existing_meta is not None and existing_meta.get("status") == "complete":
+    if not force_rebuild and cache_state == "exact" and existing_meta is not None and existing_meta.get("status") in {"complete", "building"}:
         print(f"Loading instruction cache from {cache_dir}")
         cached = _load_instruction_cache_map(cache_dir)
         if cached:
@@ -364,7 +357,7 @@ def load_instruction_sentences(
         not force_rebuild
         and cache_state == "subset"
         and existing_meta is not None
-        and existing_meta.get("status") == "complete"
+        and existing_meta.get("status") in {"complete", "building"}
         and os.path.isdir(cache_dir)
     )
     if not force_rebuild and (os.path.exists(cache_dir) or os.path.exists(cache_meta)) and not incremental_update:
@@ -396,9 +389,19 @@ def load_instruction_sentences(
 
     print(f"Loading instruction sources ({len(source_specs)} dataset(s)) ...")
     print()
-    records_by_lang: dict[str, list[dict[str, Any]]] = {}
+    current_sentence_map: dict[str, list[str]] = {lang: sentences[:] for lang, sentences in base_result.items()}
+    if not current_sentence_map and incremental_update:
+        current_sentence_map = {}
+    processed_source_specs: list[dict[str, Any]] = []
+    if incremental_update and isinstance(existing_meta, dict) and isinstance(existing_meta.get("sources"), list):
+        processed_source_specs = [spec for spec in existing_meta["sources"] if isinstance(spec, dict)]
     source_extractor_counts: dict[str, dict[str, int]] = {}
     source_text_counts: dict[str, int] = {}
+    existing_total_before = 0
+    if incremental_update and isinstance(existing_meta, dict):
+        base_total_after = sum(len(v) for v in base_result.values())
+        existing_total_before = int(existing_meta.get("total_before", base_total_after))
+    new_total_before = 0
     for spec in tqdm(source_specs, desc="Instruction sources"):
         normalized_spec = _normalize_source_spec(spec)
         source_name = normalized_spec["name"]
@@ -408,36 +411,55 @@ def load_instruction_sentences(
         config_name = normalized_spec.get("config_name")
         config_suffix = f" / {config_name}" if config_name else ""
         tqdm.write(f"  Reading {source_name} -> {lang}{config_suffix} [{extractor_name}]")
-        source_records, extractor_counts, source_counts = _process_source_spec(spec=normalized_spec, lang_to_group=lang_to_group)
+        source_sentence_map, extractor_counts, source_counts = _process_source_spec(spec=normalized_spec, lang_to_group=lang_to_group)
         source_extractor_counts[source_name] = extractor_counts
-        source_text_counts[source_name] = int(sum(source_counts.values()))
-        for source_lang, records in source_records.items():
-            records_by_lang.setdefault(source_lang, []).extend(records)
-
-    sentence_map = _records_to_sentence_map(records_by_lang)
-    normalized_sentence_map = _normalize_sentence_map(sentence_map, seed=seed, max_sentences_per_lang=max_sentences_per_lang)
-    if incremental_update:
-        normalized_sentence_map = _merge_sentence_maps(base_result, normalized_sentence_map)
+        source_total_before = int(sum(len(sentences) for sentences in source_sentence_map.values()))
+        source_text_counts[source_name] = source_total_before
+        new_total_before += source_total_before
+        for source_lang, sentences in source_sentence_map.items():
+            current_sentence_map.setdefault(source_lang, []).extend(sentences)
+        processed_source_specs.append(normalized_spec)
         normalized_sentence_map = _normalize_sentence_map(
-            normalized_sentence_map,
+            current_sentence_map,
             seed=seed,
             max_sentences_per_lang=max_sentences_per_lang,
         )
+        lang_counts = _write_instruction_cache_map(cache_dir, normalized_sentence_map)
+        snapshot_total_before = existing_total_before + new_total_before
+        snapshot_total_after = sum(lang_counts.values())
+        snapshot_total_removed = max(0, snapshot_total_before - snapshot_total_after)
+        snapshot_sources = processed_source_specs[:]
+        write_json_atomic(
+            cache_meta,
+            {
+                **expected_meta,
+                "sources": snapshot_sources,
+                "status": "building",
+                "deduped": True,
+                "total_before": snapshot_total_before,
+                "total_after": snapshot_total_after,
+                "total_removed": snapshot_total_removed,
+                "lang_counts": lang_counts,
+                "source_text_counts": source_text_counts,
+                "source_extractor_counts": source_extractor_counts,
+                "source_row_caps": {spec["name"]: int(spec.get("max_rows", 0) or 0) for spec in normalized_sources},
+            },
+        )
+        tqdm.write(f"  Wrote instruction cache snapshot after {source_name}")
 
+    normalized_sentence_map = _normalize_sentence_map(
+        current_sentence_map,
+        seed=seed,
+        max_sentences_per_lang=max_sentences_per_lang,
+    )
     lang_counts = _write_instruction_cache_map(cache_dir, normalized_sentence_map)
     total_sentences = sum(lang_counts.values())
-    new_total_before = sum(len(sentences) for sentences in sentence_map.values())
+    total_before = existing_total_before + new_total_before
     total_after = total_sentences
-    total_before = new_total_before
     total_removed = max(0, total_before - total_after)
 
-    merged_sources = normalized_sources[:]
-    if incremental_update and isinstance(existing_meta, dict) and isinstance(existing_meta.get("sources"), list):
-        merged_sources = list(existing_meta["sources"]) + [spec for spec in normalized_sources if _source_signature(spec) not in processed_signatures]
-        base_total_after = sum(len(v) for v in base_result.values())
-        total_before = int(existing_meta.get("total_before", base_total_after)) + new_total_before
-        total_after = total_sentences
-        total_removed = max(0, total_before - total_after)
+    merged_sources = processed_source_specs
+    if incremental_update and isinstance(existing_meta, dict):
         if isinstance(existing_meta.get("source_text_counts"), dict):
             merged_source_text_counts = dict(existing_meta["source_text_counts"])
             merged_source_text_counts.update(source_text_counts)
