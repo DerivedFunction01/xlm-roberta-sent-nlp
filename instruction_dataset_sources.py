@@ -185,7 +185,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "fr",
         "extractor": "french_instruct",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "due_chiacchiere",
@@ -194,7 +194,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "it",
         "extractor": "due_chiacchiere",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "aya_hindi_complete",
@@ -204,7 +204,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "hi",
         "extractor": "aya_hindi",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "indonesia_sft",
@@ -213,7 +213,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "id",
         "extractor": "indonesia_sft",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "openhermes_spanish",
@@ -222,7 +222,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "es",
         "extractor": "openhermes_spanish",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "openhermes_ru",
@@ -231,7 +231,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "ru",
         "extractor": "openhermes_ru",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "arabic_openhermes",
@@ -240,7 +240,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "ar",
         "extractor": "arabic_openhermes",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "ko_openhermes",
@@ -249,7 +249,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "ko",
         "extractor": "ko_openhermes",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "german_openhermes",
@@ -258,7 +258,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "de",
         "extractor": "german_openhermes",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "dutch_openhermes",
@@ -267,7 +267,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "nl",
         "extractor": "dutch_openhermes",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "ptbr_enus_pt",
@@ -276,7 +276,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "pt",
         "extractor": "ptbr_enus",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "chinese_qwen",
@@ -285,7 +285,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "zh",
         "extractor": "chinese_qwen",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "turkish_openhermes",
@@ -294,7 +294,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "tr",
         "extractor": "turkish_openhermes",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
     {
         "name": "japanese_self_instruct",
@@ -303,6 +303,6 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "lang": "ja",
         "extractor": "japanese_self_instruct",
         "trust_remote_code": False,
-        "max_rows": 30_000,
+        "max_rows": 75_000,
     },
 ]
