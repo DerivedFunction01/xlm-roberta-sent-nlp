@@ -20,13 +20,25 @@ from source_config import INSTRUCT
 from text_utils import _collapse_spaces, _strip_bracket_notes
 
 
-INSTRUCTION_CACHE_VERSION = 2
+INSTRUCTION_CACHE_VERSION = 3
 DEFAULT_MAX_SENTENCES_PER_LANG = INSTRUCT["max_lang"]
 DEFAULT_SOURCE_SPECS = DEFAULT_INSTRUCTION_SOURCE_SPECS
 _HAS_WORD_OR_IDEOGRAPH = re.compile(r"\w", flags=re.UNICODE)
 _TOKEN_RE = re.compile(r"\w+", flags=re.UNICODE)
 _LATIN_WORD_RE = re.compile(r"[A-Za-zÀ-ÿ]{2,}", flags=re.UNICODE)
 _MATH_SYMBOL_RE = re.compile(r"[=+\-*/^<>|~]")
+_URL_RE = re.compile(r"https?://|www\.", flags=re.IGNORECASE)
+_PROMPT_MARKER_RE = re.compile(
+    r"\b("
+    r"BEGININPUT|ENDINPUT|BEGINCONTEXT|ENDCONTEXT|BEGININSTRUCTION|ENDINSTRUCTION|"
+    r"INICIOINPUT|FININPUT|INICIOCONTEXTO|FINCONTEXTO|INICIOINSTRUCCIÓN|FININSTRUCCIÓN|"
+    r"НАЧАТЬВВОД|КОНЕЧНЫЙ\s+ПУТЬ|НАЧАТЬКОНТЕКСТ|КОНЕЦКОНТЕКСТА|"
+    r"STARTINPUT|STOPINPUT|STARTCONTEXT|STOPCONTEXT|STARTINSTRUCTION|STOPINSTRUCTION|"
+    r"INPUT|CONTEXT|INSTRUCTION"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+_TABLEISH_RE = re.compile(r"\|.+\|.+\|")
 _CODE_FENCE_RE = re.compile(r"```|~~~")
 _CODE_KEYWORD_RE = re.compile(
     r"\b(import|from|def|class|return|lambda|function|const|let|var|public|private|protected|static|if|else|elif|for|while|try|catch|except|throw|throws|new|switch|case|package|include|using|namespace)\b"
@@ -208,6 +220,10 @@ def _is_valid_instruction_text(
         return False
     if not any(ch.isalpha() for ch in cleaned):
         return False
+    if _URL_RE.search(cleaned):
+        return False
+    if _PROMPT_MARKER_RE.search(cleaned):
+        return False
     token_count = len(_TOKEN_RE.findall(cleaned))
     symbol_count = sum(
         1 for ch in cleaned if not ch.isalnum() and not ch.isspace()
@@ -221,6 +237,8 @@ def _is_valid_instruction_text(
     if digit_count > len(cleaned) * 0.35:
         return False
     if symbol_count > len(cleaned) * 0.45:
+        return False
+    if _TABLEISH_RE.search(cleaned) and token_count <= 40:
         return False
     if math_symbol_count >= 3 and word_count <= 2:
         return False
