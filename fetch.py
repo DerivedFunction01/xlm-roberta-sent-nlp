@@ -31,12 +31,10 @@ def _maybe_login() -> None:
 
 def prepare_data(
     *,
-    max_workers: int | None = None,
     seed: int = 42,
     model_checkpoint: str = DEFAULT_MODEL_CHECKPOINT,
 ) -> None:
-    workers = max(1, mp.cpu_count() // 3) if max_workers is None else max(1, max_workers)
-    refresh_sources(max_workers=workers)
+    refresh_sources()
     _maybe_login()
 
     tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
