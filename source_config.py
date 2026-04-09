@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from instruction_dataset_sources import DEFAULT_INSTRUCTION_SOURCE_SPECS
+
 LANGUAGE_BUCKETS = {
     # ~41% of CC — intentionally capped to avoid crowding out other languages
     "English": {
@@ -241,17 +243,7 @@ INSTRUCT = {
     "rebuild": False,
     "max_lang": 50_000,
     "overflow_lang": 75_000,
-    "sources": [
-        {
-            "name": "french_instruct",
-            "repo_id": "angeluriot/french_instruct",
-            "split": "train",
-            "lang": "fr",
-            "mode": "auto",
-            "trust_remote_code": False,
-            "max_rows": 100_000,
-        },
-    ],
+    "sources": DEFAULT_INSTRUCTION_SOURCE_SPECS,
 }
 
 FT = {

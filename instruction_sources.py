@@ -5,12 +5,13 @@ import os
 import random
 import re
 from collections import Counter
-from typing import Any, Iterable
+from typing import Any
 
 import pandas as pd
 from datasets import load_dataset
 from tqdm.auto import tqdm
 
+from instruction_dataset_sources import DEFAULT_INSTRUCTION_SOURCE_SPECS, INSTRUCTION_SOURCE_EXTRACTORS
 from io_utils import write_json_atomic, write_sentence_parquet
 from language import LATIN_GROUPS, LANG_TO_GROUP
 from paths import PATHS
@@ -18,76 +19,29 @@ from source_config import INSTRUCT
 from text_utils import _collapse_spaces, _strip_bracket_notes
 
 
-INSTRUCTION_CACHE_VERSION = 1
+INSTRUCTION_CACHE_VERSION = 2
 DEFAULT_MAX_SENTENCES_PER_LANG = INSTRUCT["max_lang"]
-DEFAULT_SOURCE_SPECS = [
-    {
-        "name": "french_instruct",
-        "repo_id": "angeluriot/french_instruct",
-        "split": "train",
-        "lang": "fr",
-        "mode": "auto",
-        "trust_remote_code": False,
-        "max_rows": 25_000,
-    },
-]
-
-_CONVERSATION_KEYS = ("messages", "conversations", "conversation", "dialogue", "turns", "chat", "chatml")
-_PAIR_FIELD_SETS = (
-    ("instruction", "output"),
-    ("instruction", "response"),
-    ("instruction", "answer"),
-    ("prompt", "completion"),
-    ("prompt", "response"),
-    ("question", "answer"),
-    ("input", "output"),
-    ("input", "response"),
-)
-_TEXT_FIELDS = (
-    "text",
-    "sentence",
-    "content",
-    "message",
-    "utterance",
-    "prompt",
-    "instruction",
-    "input",
-    "question",
-    "context",
-    "answer",
-    "response",
-    "output",
-    "completion",
-    "completion_text",
-    "chosen",
-    "rejected",
-)
-_MESSAGE_CONTENT_FIELDS = ("content", "value", "text", "message", "utterance", "answer", "response")
-_SKIP_FALLBACK_KEYS = {
-    "id",
-    "idx",
-    "index",
-    "lang",
-    "language",
-    "source",
-    "dataset",
-    "task",
-    "category",
-    "categories",
-    "label",
-    "labels",
-    "score",
-    "split",
-    "source_dataset",
-    "source_name",
-    "source_id",
-    "source_key",
-    "provenance_key",
-}
+DEFAULT_SOURCE_SPECS = DEFAULT_INSTRUCTION_SOURCE_SPECS
 _HAS_WORD_OR_IDEOGRAPH = re.compile(r"\w", flags=re.UNICODE)
 _TOKEN_RE = re.compile(r"\w+", flags=re.UNICODE)
 _LATIN_WORD_RE = re.compile(r"[A-Za-zÀ-ÿ]{2,}", flags=re.UNICODE)
 _MATH_SYMBOL_RE = re.compile(r"[=+\-*/^<>|~]")
+_CODE_FENCE_RE = re.compile(r"```|~~~")
+_CODE_KEYWORD_RE = re.compile(
+    r"\b(import|from|def|class|return|lambda|function|const|let|var|public|private|protected|static|if|else|elif|for|while|try|catch|except|throw|throws|new|switch|case|package|include|using|namespace)\b"
+)
+_CODE_PATTERN_RE = re.compile(
+    r"(^|\n)\s*(?:"
+    r"(?:def|class|function|const|let|var)\s+\w+\s*(?:\(|=)|"
+    r"(?:import|from)\s+\w+|"
+    r"#include\s*<|"
+    r"[{}\[\]();]{2,}|"
+    r"[A-Za-z_][A-Za-z0-9_]*\s*=\s*[^=].*;|"
+    r"<[A-Za-z][^>]*>|"
+    r".*=>.*"
+    r")",
+    flags=re.UNICODE,
+)
 
 
 def _instruction_cache_dir(sentences_dir: str) -> str:
@@ -113,14 +67,17 @@ def _normalize_text(text: str) -> str:
 
 
 def _normalize_source_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    config_name = spec.get("config_name")
     return {
         "name": str(spec.get("name") or spec.get("repo_id") or "source"),
         "repo_id": str(spec["repo_id"]),
+        "config_name": None if config_name in {None, ""} else str(config_name),
         "split": str(spec.get("split", "train")),
         "lang": str(spec.get("lang", "")),
-        "mode": str(spec.get("mode", "auto")),
+        "extractor": str(spec.get("extractor", "generic")),
         "trust_remote_code": bool(spec.get("trust_remote_code", False)),
         "max_rows": int(spec.get("max_rows", 0) or 0),
+        "allow_code": bool(spec.get("allow_code", False)),
     }
 
 
@@ -215,7 +172,34 @@ def _dedupe_sentence_list(sentences: list[str]) -> tuple[list[str], int]:
     return deduped, removed
 
 
-def _is_valid_instruction_text(text: str, lang: str, lang_to_group: dict[str, str]) -> bool:
+def _looks_like_code(text: str) -> bool:
+    if _CODE_FENCE_RE.search(text):
+        return True
+    if _CODE_KEYWORD_RE.search(text) and any(ch in text for ch in (";", "{", "}", "(", ")", "[", "]", "<", ">", "=>", "::")):
+        return True
+    if _CODE_PATTERN_RE.search(text):
+        return True
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) >= 3:
+        code_like_lines = sum(
+            1
+            for line in lines
+            if line.startswith(("    ", "\t"))
+            or line.strip().startswith(("#", "//", "/*", "*", "*/"))
+            or line.rstrip().endswith((";", "{", "}", ":"))
+        )
+        if code_like_lines / max(1, len(lines)) >= 0.5:
+            return True
+    return False
+
+
+def _is_valid_instruction_text(
+    text: str,
+    lang: str,
+    lang_to_group: dict[str, str],
+    *,
+    allow_code: bool = False,
+) -> bool:
     cleaned = _normalize_text(text)
     if len(cleaned) < 2 or len(cleaned) > 1_500:
         return False
@@ -239,140 +223,11 @@ def _is_valid_instruction_text(text: str, lang: str, lang_to_group: dict[str, st
         return False
     if math_symbol_count >= 3 and word_count <= 2:
         return False
+    if not allow_code and _looks_like_code(cleaned):
+        return False
     if is_latin and cleaned.isupper() and len(cleaned) <= 24:
         return False
     return True
-
-
-def _is_message_like(value: Any) -> bool:
-    return isinstance(value, dict) and any(key in value for key in _MESSAGE_CONTENT_FIELDS)
-
-
-def _extract_message_text(message: Any) -> list[str]:
-    if isinstance(message, str):
-        cleaned = _normalize_text(message)
-        return [cleaned] if cleaned else []
-    if isinstance(message, dict):
-        for key in _MESSAGE_CONTENT_FIELDS:
-            value = message.get(key)
-            if isinstance(value, str):
-                cleaned = _normalize_text(value)
-                if cleaned:
-                    return [cleaned]
-        nested: list[str] = []
-        for value in message.values():
-            nested.extend(_extract_message_text(value))
-        return nested
-    return []
-
-
-def _extract_conversation_texts(value: Any) -> list[str]:
-    texts: list[str] = []
-    if isinstance(value, list):
-        for item in value:
-            texts.extend(_extract_message_text(item))
-    else:
-        texts.extend(_extract_message_text(value))
-    return texts
-
-
-def _iter_fallback_strings(row: dict[str, Any]) -> Iterable[tuple[str, str]]:
-    for key, value in row.items():
-        if key in _SKIP_FALLBACK_KEYS:
-            continue
-        if isinstance(value, str):
-            cleaned = _normalize_text(value)
-            if cleaned:
-                yield key, cleaned
-        elif isinstance(value, list):
-            for idx, item in enumerate(value):
-                if isinstance(item, str):
-                    cleaned = _normalize_text(item)
-                    if cleaned:
-                        yield f"{key}[{idx}]", cleaned
-                elif _is_message_like(item):
-                    for text in _extract_message_text(item):
-                        yield f"{key}[{idx}]", text
-        elif isinstance(value, dict):
-            if _is_message_like(value):
-                for text in _extract_message_text(value):
-                    yield key, text
-            else:
-                for sub_key, sub_value in value.items():
-                    if isinstance(sub_value, str):
-                        cleaned = _normalize_text(sub_value)
-                        if cleaned:
-                            yield f"{key}.{sub_key}", cleaned
-
-
-def _extract_row_texts(row: dict[str, Any], *, mode: str = "auto") -> list[tuple[str, str]]:
-    records: list[tuple[str, str]] = []
-
-    if mode in {"auto", "conversation"}:
-        for field in _CONVERSATION_KEYS:
-            value = row.get(field)
-            if value is not None:
-                texts = _extract_conversation_texts(value)
-                if texts:
-                    return [(f"{field}[{idx}]", text) for idx, text in enumerate(texts)]
-
-    if mode in {"auto", "paired"}:
-        for left, right in _PAIR_FIELD_SETS:
-            left_value = row.get(left)
-            right_value = row.get(right)
-            if isinstance(left_value, str) or isinstance(right_value, str):
-                if isinstance(left_value, str):
-                    cleaned = _normalize_text(left_value)
-                    if cleaned:
-                        records.append((left, cleaned))
-                if isinstance(right_value, str):
-                    cleaned = _normalize_text(right_value)
-                    if cleaned:
-                        records.append((right, cleaned))
-                if records:
-                    return records
-
-    if mode in {"auto", "flat"}:
-        for field in _TEXT_FIELDS:
-            value = row.get(field)
-            if isinstance(value, str):
-                cleaned = _normalize_text(value)
-                if cleaned:
-                    records.append((field, cleaned))
-        if records:
-            return records
-
-    fallback_records = list(_iter_fallback_strings(row))
-    if fallback_records:
-        return fallback_records
-    return []
-
-
-def _row_to_text_records(
-    row: dict[str, Any],
-    *,
-    repo_id: str,
-    lang: str,
-    row_idx: int,
-    mode: str = "auto",
-) -> list[dict[str, str]]:
-    extracted = _extract_row_texts(row, mode=mode)
-    records: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for item_idx, (field_path, text) in enumerate(extracted):
-        cleaned = _normalize_text(text)
-        if not cleaned or cleaned in seen:
-            continue
-        seen.add(cleaned)
-        records.append(
-            {
-                "lang": lang,
-                "text": cleaned,
-                "source_dataset": repo_id,
-                "provenance_key": f"{repo_id}:{row_idx}:{field_path}:{item_idx}",
-            }
-        )
-    return records
 
 
 def _records_to_sentence_map(records_by_lang: dict[str, list[dict[str, Any]]]) -> dict[str, list[str]]:
@@ -411,21 +266,36 @@ def _process_source_spec(
     lang_to_group: dict[str, str],
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, int], dict[str, int]]:
     repo_id = str(spec["repo_id"])
+    source_name = str(spec["name"])
     split = str(spec.get("split", "train"))
+    config_name = spec.get("config_name")
     lang = str(spec.get("lang", ""))
-    mode = str(spec.get("mode", "auto"))
+    extractor_name = str(spec.get("extractor", "generic"))
     trust_remote_code = bool(spec.get("trust_remote_code", False))
     max_rows = int(spec.get("max_rows", 0) or 0)
+    allow_code = bool(spec.get("allow_code", False))
+    extractor = INSTRUCTION_SOURCE_EXTRACTORS.get(extractor_name)
 
     records_by_lang: dict[str, list[dict[str, Any]]] = {}
-    field_counts: Counter[str] = Counter()
+    extractor_counts: Counter[str] = Counter()
     source_counts: Counter[str] = Counter()
 
+    if extractor is None:
+        tqdm.write(f"  Skipping {repo_id}: unknown extractor '{extractor_name}'")
+        return records_by_lang, dict(extractor_counts), dict(source_counts)
+
     try:
-        ds = load_dataset(repo_id, split=split, streaming=True, trust_remote_code=trust_remote_code)
+        load_kwargs: dict[str, Any] = {
+            "split": split,
+            "streaming": True,
+            "trust_remote_code": trust_remote_code,
+        }
+        if config_name is not None:
+            load_kwargs["name"] = config_name
+        ds = load_dataset(repo_id, **load_kwargs)
     except Exception as exc:
         tqdm.write(f"  Skipping {repo_id}: {exc}")
-        return records_by_lang, dict(field_counts), dict(source_counts)
+        return records_by_lang, dict(extractor_counts), dict(source_counts)
 
     for row_idx, row in enumerate(tqdm(ds, desc=repo_id, leave=False)):
         if max_rows > 0 and row_idx >= max_rows:
@@ -433,18 +303,24 @@ def _process_source_spec(
             break
         if not isinstance(row, dict):
             continue
-        extracted = _row_to_text_records(row, repo_id=repo_id, lang=lang, row_idx=row_idx, mode=mode)
-        if not extracted:
+        raw_texts = extractor(row, spec)
+        if not raw_texts:
             continue
-        for record in extracted:
-            text = record["text"]
-            if not _is_valid_instruction_text(text, lang, lang_to_group):
+        for text_idx, text in enumerate(raw_texts):
+            if not _is_valid_instruction_text(text, lang, lang_to_group, allow_code=allow_code):
                 continue
-            records_by_lang.setdefault(lang, []).append(record)
-            field_counts[record["provenance_key"].split(":")[-2]] += 1
-            source_counts[repo_id] += 1
+            records_by_lang.setdefault(lang, []).append(
+                {
+                    "lang": lang,
+                    "text": _normalize_text(text),
+                    "source_dataset": repo_id,
+                    "provenance_key": f"{repo_id}:{row_idx}:{extractor_name}:{text_idx}",
+                }
+            )
+            extractor_counts[extractor_name] += 1
+            source_counts[source_name] += 1
 
-    return records_by_lang, dict(field_counts), dict(source_counts)
+    return records_by_lang, dict(extractor_counts), dict(source_counts)
 
 
 def load_instruction_sentences(
@@ -521,16 +397,20 @@ def load_instruction_sentences(
     print(f"Loading instruction sources ({len(source_specs)} dataset(s)) ...")
     print()
     records_by_lang: dict[str, list[dict[str, Any]]] = {}
-    source_field_counts: dict[str, dict[str, int]] = {}
+    source_extractor_counts: dict[str, dict[str, int]] = {}
     source_text_counts: dict[str, int] = {}
     for spec in tqdm(source_specs, desc="Instruction sources"):
         normalized_spec = _normalize_source_spec(spec)
+        source_name = normalized_spec["name"]
         repo_id = normalized_spec["repo_id"]
         lang = normalized_spec["lang"]
-        tqdm.write(f"  Reading {normalized_spec['name']} -> {lang}")
-        source_records, field_counts, source_counts = _process_source_spec(spec=normalized_spec, lang_to_group=lang_to_group)
-        source_field_counts[repo_id] = field_counts
-        source_text_counts[repo_id] = int(sum(source_counts.values()))
+        extractor_name = normalized_spec["extractor"]
+        config_name = normalized_spec.get("config_name")
+        config_suffix = f" / {config_name}" if config_name else ""
+        tqdm.write(f"  Reading {source_name} -> {lang}{config_suffix} [{extractor_name}]")
+        source_records, extractor_counts, source_counts = _process_source_spec(spec=normalized_spec, lang_to_group=lang_to_group)
+        source_extractor_counts[source_name] = extractor_counts
+        source_text_counts[source_name] = int(sum(source_counts.values()))
         for source_lang, records in source_records.items():
             records_by_lang.setdefault(source_lang, []).extend(records)
 
@@ -562,10 +442,10 @@ def load_instruction_sentences(
             merged_source_text_counts = dict(existing_meta["source_text_counts"])
             merged_source_text_counts.update(source_text_counts)
             source_text_counts = merged_source_text_counts
-        if isinstance(existing_meta.get("source_field_counts"), dict):
-            merged_source_field_counts = dict(existing_meta["source_field_counts"])
-            merged_source_field_counts.update(source_field_counts)
-            source_field_counts = merged_source_field_counts
+        if isinstance(existing_meta.get("source_extractor_counts"), dict):
+            merged_source_extractor_counts = dict(existing_meta["source_extractor_counts"])
+            merged_source_extractor_counts.update(source_extractor_counts)
+            source_extractor_counts = merged_source_extractor_counts
 
     write_json_atomic(
         cache_meta,
@@ -579,8 +459,8 @@ def load_instruction_sentences(
             "total_removed": total_removed,
             "lang_counts": lang_counts,
             "source_text_counts": source_text_counts,
-            "source_field_counts": source_field_counts,
-            "source_row_caps": {spec["repo_id"]: int(spec.get("max_rows", 0) or 0) for spec in normalized_sources},
+            "source_extractor_counts": source_extractor_counts,
+            "source_row_caps": {spec["name"]: int(spec.get("max_rows", 0) or 0) for spec in normalized_sources},
         },
     )
 

@@ -5,7 +5,7 @@ import json
 from itertools import islice
 from typing import Any
 
-from datasets import get_dataset_config_names, get_dataset_split_names, load_dataset
+from datasets import get_dataset_config_names, load_dataset, load_dataset_builder
 from tqdm.auto import tqdm
 
 
@@ -146,7 +146,12 @@ def _collect_string_paths(value: Any, *, prefix: str = "", max_depth: int = 3) -
 
 def _choose_splits(repo_id: str, config_name: str | None, all_splits: bool) -> list[str]:
     try:
-        split_names = get_dataset_split_names(repo_id, name=config_name) if config_name is not None else get_dataset_split_names(repo_id)
+        builder_kwargs: dict[str, Any] = {}
+        if config_name is not None:
+            builder_kwargs["name"] = config_name
+        builder = load_dataset_builder(repo_id, **builder_kwargs)
+        split_info = getattr(getattr(builder, "info", None), "splits", None)
+        split_names = list(split_info.keys()) if split_info else []
     except Exception as exc:
         print(f"    split discovery failed: {exc}")
         return ["train"]
