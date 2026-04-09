@@ -24,7 +24,7 @@ MODEL_CHECKPOINT = "DerivedFunction/lang-ner-xlmr"
 TOKENIZER_MODEL = "xlm-roberta-base"
 
 model = AutoModelForTokenClassification.from_pretrained(MODEL_CHECKPOINT)
-tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_MODEL)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 
 print(f"   ✓ Model loaded: {MODEL_CHECKPOINT}")
 print(f"   ✓ Tokenizer loaded: {TOKENIZER_MODEL}")
@@ -96,7 +96,7 @@ results_by_lang = defaultdict(list)
 
 for idx, example in enumerate(tqdm(test_data.select(range(sample_size)), total=sample_size, desc="Running inference")):
     text = example["text"]
-    true_lang_name = example["language"]
+    true_lang_name = example["labels"]
     true_lang = papluca_to_iso.get(true_lang_name.lower(), true_lang_name.lower())
     
     # Run inference
