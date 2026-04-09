@@ -5,6 +5,7 @@ import os
 import random
 import re
 import time
+from collections import Counter
 from functools import lru_cache
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any
@@ -545,38 +546,63 @@ def _finetrans_cache_meta(
     }
 
 
-def _load_finetrans_meta(
-    *,
-    cache_file: str,
+def _normalize_finetrans_configs(value: Any) -> list[tuple[Any, Any]]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[tuple[Any, Any]] = []
+    for item in value:
+        if isinstance(item, list) and len(item) >= 2:
+            normalized.append((item[0], item[1]))
+    return normalized
+
+
+def _load_finetrans_meta_raw(
     cache_meta: str,
-    expected_meta: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if not os.path.exists(cache_file) or not os.path.exists(cache_meta):
+    if not os.path.exists(cache_meta):
         return None
     try:
         with open(cache_meta, encoding="utf-8") as f:
             meta = json.load(f)
     except Exception:
         return None
+    return meta if isinstance(meta, dict) else None
+
+
+def _finetrans_meta_compatibility(
+    *,
+    meta: dict[str, Any] | None,
+    expected_meta: dict[str, Any],
+) -> str | None:
     if not isinstance(meta, dict):
-        return None
-    def _normalize_configs(value: Any) -> Any:
-        if not isinstance(value, list):
-            return value
-        normalized: list[list[Any]] = []
-        for item in value:
-            if isinstance(item, list) and len(item) >= 2:
-                normalized.append([item[0], item[1]])
-            else:
-                normalized.append(item)
-        return normalized
-    if _normalize_configs(meta.get("configs")) != _normalize_configs(expected_meta.get("configs")):
         return None
     for key, value in expected_meta.items():
         if key == "configs":
             continue
         if meta.get(key) != value:
             return None
+    meta_configs = _normalize_finetrans_configs(meta.get("configs"))
+    expected_configs = _normalize_finetrans_configs(expected_meta.get("configs"))
+    if meta_configs == expected_configs:
+        return "exact"
+    meta_counts = Counter(meta_configs)
+    expected_counts = Counter(expected_configs)
+    if all(meta_counts[item] <= expected_counts[item] for item in meta_counts):
+        return "subset"
+    return None
+
+
+def _load_finetrans_meta(
+    *,
+    cache_file: str,
+    cache_meta: str,
+    expected_meta: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not os.path.exists(cache_file):
+        return None
+    meta = _load_finetrans_meta_raw(cache_meta)
+    if _finetrans_meta_compatibility(meta=meta, expected_meta=expected_meta) != "exact":
+        return None
     return meta
 
 
@@ -921,12 +947,9 @@ def load_finetranslations_sentences(
         configs=configs,
     )
 
-    final_meta = _load_finetrans_meta(
-        cache_file=cache_dir,
-        cache_meta=cache_meta,
-        expected_meta=expected_meta,
-    )
-    if not force_rebuild and final_meta is not None and final_meta.get("status") == "complete":
+    existing_meta = _load_finetrans_meta_raw(cache_meta)
+    cache_state = _finetrans_meta_compatibility(meta=existing_meta, expected_meta=expected_meta)
+    if not force_rebuild and cache_state == "exact" and existing_meta is not None and existing_meta.get("status") == "complete":
         print(f"Loading FineTranslations cache from {cache_dir}")
         result = _load_finetrans_cache_map(cache_dir)
         if result:
@@ -937,10 +960,20 @@ def load_finetranslations_sentences(
     config_root = os.path.join(sentences_dir, "_finetrans_tmp")
     os.makedirs(config_root, exist_ok=True)
     recover_from_temp = _has_finetrans_temp_shards(config_root)
+    incremental_update = (
+        not force_rebuild
+        and cache_state == "subset"
+        and existing_meta is not None
+        and existing_meta.get("status") == "complete"
+        and os.path.isdir(cache_dir)
+    )
 
-    if not force_rebuild and (
-        os.path.exists(cache_dir) or os.path.exists(cache_meta)
-    ) and not recover_from_temp:
+    if (
+        not force_rebuild
+        and (os.path.exists(cache_dir) or os.path.exists(cache_meta))
+        and not recover_from_temp
+        and not incremental_update
+    ):
         raise RuntimeError(
             "FineTranslations cache metadata does not match the current config. "
             "Refusing to rebuild over the existing cache. "
@@ -949,16 +982,57 @@ def load_finetranslations_sentences(
     if force_rebuild:
         _clear_finetrans_config_dir(config_root)
 
-    max_workers = min(len(configs), max(1, max_workers or 1))
+    configs_to_process = configs
+    cached_config_pairs: set[tuple[str, str]] = set()
+    base_result: dict[str, list[str]] = {}
+    base_meta = existing_meta if incremental_update else None
+    if incremental_update:
+        cached_config_pairs = set(_normalize_finetrans_configs(existing_meta.get("configs")))
+        base_result = _load_finetrans_cache_map(cache_dir)
+        if not base_result and (existing_meta.get("lang_counts") or existing_meta.get("total_after")):
+            incremental_update = False
+            base_result = {}
+            cached_config_pairs = set()
+            configs_to_process = configs
+        else:
+            configs_to_process = [item for item in configs if item not in cached_config_pairs]
+            if not configs_to_process:
+                if isinstance(base_meta, dict):
+                    write_json_atomic(
+                        cache_meta,
+                        {
+                            **expected_meta,
+                            "status": base_meta.get("status", "complete"),
+                            "deduped": base_meta.get("deduped", True),
+                            "dedup_summary": base_meta.get("dedup_summary", {}),
+                            "lang_counts": base_meta.get("lang_counts", {lang: len(sentences) for lang, sentences in base_result.items()}),
+                            "total_before": base_meta.get("total_before", sum(len(v) for v in base_result.values())),
+                            "total_after": base_meta.get("total_after", sum(len(v) for v in base_result.values())),
+                            "total_removed": base_meta.get("total_removed", 0),
+                            "next_config_idx": len(configs),
+                            "next_row_idx": 0,
+                            "next_shard_idx": 0,
+                        },
+                    )
+                print(f"Loading FineTranslations cache from {cache_dir}")
+                total = sum(len(v) for v in base_result.values())
+                print(f"  {len(base_result)} languages | {total:,} sentences total")
+                return base_result
+            print(
+                f"Expanding FineTranslations cache with {len(configs_to_process)} new subset(s) "
+                f"(reusing {len(cached_config_pairs)} existing cache entries) ..."
+            )
+
+    max_workers = min(len(configs_to_process), max(1, max_workers or 1))
     if recover_from_temp and not force_rebuild:
         print("Recovering FineTranslations cache from existing temp shards ...")
     else:
-        print(f"Loading FineTranslations ({len(configs)} subsets) ...")
+        print(f"Loading FineTranslations ({len(configs_to_process)} subsets) ...")
         print(f"(Workers: {max_workers} processes | matched configs only)\n")
 
         futures = {}
         with ProcessPoolExecutor(max_workers=max_workers) as pool:
-            for config_idx, (config, lang) in enumerate(configs):
+            for config_idx, (config, lang) in enumerate(configs_to_process):
                 futures[pool.submit(
                     _process_finetrans_config,
                     config_idx=config_idx,
@@ -1073,6 +1147,31 @@ def load_finetranslations_sentences(
         total_after += len(deduped_sentences)
         total_removed += removed
 
+    if incremental_update:
+        merged_result = dict(base_result)
+        merged_dedup_summary = (
+            dict(base_meta.get("dedup_summary", {}))
+            if isinstance(base_meta, dict) and isinstance(base_meta.get("dedup_summary"), dict)
+            else {}
+        )
+        merged_lang_counts = (
+            dict(base_meta.get("lang_counts", {}))
+            if isinstance(base_meta, dict) and isinstance(base_meta.get("lang_counts"), dict)
+            else {}
+        )
+        merged_total_before = int(base_meta.get("total_before", sum(len(v) for v in base_result.values()))) if isinstance(base_meta, dict) else 0
+        for lang, sentences in result.items():
+            merged_result[lang] = _dedupe_sentence_list(merged_result.get(lang, []) + sentences)[0]
+        merged_dedup_summary.update(dedup_summary)
+        merged_lang_counts.update({lang: len(sentences) for lang, sentences in result.items()})
+        total_before = merged_total_before + total_before
+        total_after = sum(len(v) for v in merged_result.values())
+        total_removed = total_before - total_after
+        result = merged_result
+    else:
+        merged_dedup_summary = dedup_summary
+        merged_lang_counts = {lang: len(sentences) for lang, sentences in result.items()}
+
     # Rebuilds are written atomically, so we keep any previous live cache in
     # place until the new parquet and metadata are fully ready.
     _write_finetrans_cache_map(cache_dir, result)
@@ -1082,8 +1181,8 @@ def load_finetranslations_sentences(
             **expected_meta,
             "status": "complete",
             "deduped": True,
-            "dedup_summary": dedup_summary,
-            "lang_counts": {lang: len(sentences) for lang, sentences in result.items()},
+            "dedup_summary": merged_dedup_summary,
+            "lang_counts": merged_lang_counts,
             "total_before": total_before,
             "total_after": total_after,
             "total_removed": total_removed,
