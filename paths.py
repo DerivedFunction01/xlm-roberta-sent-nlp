@@ -21,6 +21,10 @@ PATHS["smol"] = {
     "cache_dir": os.path.join(PATHS["sentences_dir"], "smol_sentences"),
     "cache_meta": os.path.join(PATHS["sentences_dir"], "smol_sentences", "smol_sentences.meta.json"),
 }
+PATHS["instruction"] = {
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "instruction_sentences"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "instruction_sentences", "instruction_sentences.meta.json"),
+}
 PATHS["finetrans"] = {
     "cache_dir": os.path.join(PATHS["sentences_dir"], "finetranslations"),
     "cache_meta": os.path.join(PATHS["sentences_dir"], "finetranslations", "finetranslations.meta.json"),
@@ -56,6 +60,7 @@ for path in [
     PATHS["wiki"]["temp_dir"],
     PATHS["wiki"]["seg_debug_dir"],
     PATHS["smol"]["cache_dir"],
+    PATHS["instruction"]["cache_dir"],
     PATHS["finetrans"]["temp_dir"],
     PATHS["finetrans"]["cache_dir"],
     PATHS["synthetic"]["cache_dir"],

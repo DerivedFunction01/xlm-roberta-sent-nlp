@@ -17,7 +17,7 @@ from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic
 from paths import PATHS
-from source_config import DOC_MIX, FT, POOL, RUN, SMOL
+from source_config import DOC_MIX, FT, INSTRUCT, POOL, RUN, SMOL
 from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, LANGUAGE_GROUP_WEIGHTS
 
 MAX_LENGTH = RUN["len"]
@@ -38,11 +38,15 @@ MAX_RESERVED_SENTENCES = POOL["wiki"]["max"]
 SMOL_RESERVE_FRACTION = POOL["smol"]["reserve"]
 SMOL_MIN_RESERVED_SENTENCES = POOL["smol"]["min"]
 SMOL_MAX_RESERVED_SENTENCES = POOL["smol"]["max"]
+INSTRUCT_RESERVE_FRACTION = POOL["instruct"]["reserve"]
+INSTRUCT_MIN_RESERVED_SENTENCES = POOL["instruct"]["min"]
+INSTRUCT_MAX_RESERVED_SENTENCES = POOL["instruct"]["max"]
 FT_RESERVE_FRACTION = POOL["ft"]["reserve"]
 FT_MIN_RESERVED_SENTENCES = POOL["ft"]["min"]
 FT_MAX_RESERVED_SENTENCES = POOL["ft"]["max"]
 
 USE_SMOL_AUGMENTATION = SMOL["use"]
+USE_INSTRUCTION_AUGMENTATION = INSTRUCT["use"]
 USE_FINETRANS_AUGMENTATION = FT["use"]
 PURE_DOC_MIX = DOC_MIX["pure"]
 HOMOGENEOUS_DOC_MIX = DOC_MIX["homogeneous"]
@@ -737,6 +741,16 @@ def build_synthetic_dataset(
                     "reserve_fraction": SMOL_RESERVE_FRACTION,
                     "min_reserved": SMOL_MIN_RESERVED_SENTENCES,
                     "max_reserved": SMOL_MAX_RESERVED_SENTENCES,
+                }
+            )
+        if USE_INSTRUCTION_AUGMENTATION:
+            source_specs.append(
+                {
+                    "name": "instruction",
+                    "cache_dir": PATHS["instruction"]["cache_dir"],
+                    "reserve_fraction": INSTRUCT_RESERVE_FRACTION,
+                    "min_reserved": INSTRUCT_MIN_RESERVED_SENTENCES,
+                    "max_reserved": INSTRUCT_MAX_RESERVED_SENTENCES,
                 }
             )
         if USE_FINETRANS_AUGMENTATION:

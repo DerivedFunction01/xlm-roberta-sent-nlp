@@ -187,6 +187,11 @@ POOL = {
         "min": 4,
         "max": 120_000,
     },
+    "instruct": {
+        "reserve": 0.60,
+        "min": 1,
+        "max": 120_000,
+    },
     "smol": {
         "reserve": 0.95,
         "min": 1,
@@ -229,6 +234,23 @@ DOC_MIX = {
 SMOL = {
     "use": True,
     "rebuild": False,
+}
+
+INSTRUCT = {
+    "use": True,
+    "rebuild": False,
+    "max_lang": 50_000,
+    "overflow_lang": 75_000,
+    "sources": [
+        {
+            "name": "french_instruct",
+            "repo_id": "angeluriot/french_instruct",
+            "split": "train",
+            "lang": "fr",
+            "mode": "auto",
+            "trust_remote_code": False,
+        },
+    ],
 }
 
 FT = {
