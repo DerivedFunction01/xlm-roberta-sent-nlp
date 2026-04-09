@@ -51,7 +51,7 @@ PATHS["multilabel_dataset"] = {
     "cache_dir": os.path.join(PATHS["sentences_dir"], "multilabel_dataset"),
 }
 PATHS["versions"] = {
-    "cache": 2,
+    "cache": 3,
     "tokenized": 2,
 }
 

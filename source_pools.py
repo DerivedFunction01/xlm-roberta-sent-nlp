@@ -13,10 +13,11 @@ from tqdm.auto import tqdm
 from io_utils import write_json_atomic
 import pyarrow as pa
 import pyarrow.parquet as pq
+from text_utils import normalize_sentence_for_pool
 
 
 
-SOURCE_POOL_CACHE_VERSION = 1
+SOURCE_POOL_CACHE_VERSION = 2
 
 
 def split_sentence_map_for_synthetic(
@@ -160,7 +161,8 @@ def load_language_sentences_from_parquet(cache_dir: str, lang: str) -> list[str]
     frame = pd.read_parquet(path)
     if "sentence" not in frame.columns:
         return []
-    return frame["sentence"].astype(str).tolist()
+    sentences = frame["sentence"].astype(str).tolist()
+    return [sentence for sentence in (normalize_sentence_for_pool(sentence, lang=lang) for sentence in sentences) if sentence]
 
 
 def load_worker_sentence_pool(path: str) -> dict[str, deque[str]]:
@@ -171,7 +173,14 @@ def load_worker_sentence_pool(path: str) -> dict[str, deque[str]]:
         return {}
     pools: dict[str, deque[str]] = {}
     for lang, group in frame.groupby("lang", sort=False):
-        pools[str(lang)] = deque(group["sentence"].astype(str).tolist())
+        pools[str(lang)] = deque(
+            sentence
+            for sentence in (
+                normalize_sentence_for_pool(raw_sentence, lang=str(lang))
+                for raw_sentence in group["sentence"].astype(str).tolist()
+            )
+            if sentence
+        )
     return pools
 
 
@@ -257,7 +266,14 @@ def build_disk_sentence_pool_shards(
                 language_reserved = 0
                 language_main = 0
 
-                sentences = frame["sentence"].astype(str).tolist()
+                sentences = [
+                    sentence
+                    for sentence in (
+                        normalize_sentence_for_pool(raw_sentence, lang=lang, seed=seed)
+                        for raw_sentence in frame["sentence"].astype(str).tolist()
+                    )
+                    if sentence
+                ]
                 for idx, sentence in enumerate(sentences):
                     worker_idx = _stable_uint64(str(seed), source_name, lang, sentence, "worker") % n_workers
                     reserve_key = _stable_uint64(str(seed), source_name, lang, sentence, "reserve")

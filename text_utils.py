@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 import traceback
@@ -23,6 +24,30 @@ WIKI_DIGITS = re.compile(r"\d")
 WIKI_WORDS = re.compile(r"\b\w+\b", flags=re.UNICODE)
 MAX_DIGIT_RATIO = 0.10
 MIN_LATIN_WORDS = 4
+POOL_TERMINAL_PUNCT_CHOICES = (".", ":", ";", "!", "?")
+POOL_WRAPPER_PAIRS = (
+    ("(", ")"),
+    ("[", "]"),
+    ("{", "}"),
+    ("<", ">"),
+    ("【", "】"),
+    ("（", "）"),
+    ("「", "」"),
+    ("『", "』"),
+    ("«", "»"),
+    ("‹", "›"),
+    ("“", "”"),
+    ("‘", "’"),
+)
+POOL_SAME_CHAR_WRAPPERS = ('"', "'")
+POOL_LEADING_MARKER_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:\d{1,4}|[ivxlcdm]{1,8}|[a-zA-Z])(?:[.)]|[\]\)])\s+|"
+    r"[\-\*\u2022\u00b7\u2023\u2043\u2219\u2013\u2014]\s+"
+    r")",
+    flags=re.IGNORECASE,
+)
+POOL_TRAILING_PUNCT_RE = re.compile(r"^(?P<body>.*?)(?P<punct>[.!?;:…]+)$", flags=re.UNICODE)
 
 PYSBD_SUPPORTED = {
     "en", "hi", "mr", "bg", "es", "ru", "ar", "am", "hy", "fa",
@@ -121,6 +146,71 @@ def clean_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> s
         sentence = WIKI_ASCII_WORDS.sub("", sentence)
     sentence = _collapse_spaces(sentence)
     return sentence.strip()
+
+
+def _stable_pool_choice(seed_text: str, choices: tuple[str, ...]) -> str:
+    digest = hashlib.blake2b(seed_text.encode("utf-8"), digest_size=2).digest()
+    return choices[int.from_bytes(digest, "big") % len(choices)]
+
+
+def _strip_outer_pool_wrappers(text: str) -> str:
+    stripped = text.strip()
+    if len(stripped) < 2:
+        return stripped
+
+    changed = True
+    while changed:
+        changed = False
+        stripped = stripped.strip()
+        if len(stripped) < 2:
+            break
+        for open_ch, close_ch in POOL_WRAPPER_PAIRS:
+            if stripped.startswith(open_ch) and stripped.endswith(close_ch):
+                inner = stripped[len(open_ch) : len(stripped) - len(close_ch)].strip()
+                if inner:
+                    stripped = inner
+                    changed = True
+                    break
+        else:
+            if stripped[0] in POOL_SAME_CHAR_WRAPPERS and stripped[-1] == stripped[0]:
+                inner = stripped[1:-1].strip()
+                if inner:
+                    stripped = inner
+                    changed = True
+    return stripped
+
+
+def normalize_sentence_for_pool(
+    sentence: str,
+    *,
+    lang: str = "",
+    seed: int = 0,
+) -> str:
+    """Normalize a cached pool sentence for synthetic sampling."""
+    if not isinstance(sentence, str):
+        return ""
+
+    text = _collapse_spaces(sentence).strip()
+    if not text:
+        return ""
+
+    text = _strip_outer_pool_wrappers(text)
+    text = POOL_LEADING_MARKER_RE.sub("", text).strip()
+    text = _collapse_repeated_punct(text)
+    text = _collapse_spaces(text).strip()
+    if not text:
+        return ""
+
+    match = POOL_TRAILING_PUNCT_RE.match(text)
+    if match:
+        body = match.group("body").rstrip()
+        if body:
+            choice_seed = f"{seed}\0{lang}\0{body}"
+            text = f"{body}{_stable_pool_choice(choice_seed, POOL_TERMINAL_PUNCT_CHOICES)}"
+
+    text = _collapse_repeated_punct(text)
+    text = _collapse_spaces(text).strip()
+    return text
 
 
 def _is_valid_sentence(
