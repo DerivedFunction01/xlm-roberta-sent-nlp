@@ -159,7 +159,6 @@ def make_trainer(
     eval_dataset,
     data_collator,
     compute_metrics,
-    tokenizer,
     output_dir: str,
     epochs: int = 3,
     eval_steps: int = 100,
@@ -184,7 +183,6 @@ def make_trainer(
         eval_dataset=eval_dataset,  # type: ignore
         data_collator=data_collator,
         compute_metrics=compute_metrics,
-        tokenizer=tokenizer,
     )
 
 
@@ -233,7 +231,6 @@ trainer = make_trainer(
     eval_dataset=eval_dataset,
     data_collator=data_collator,
     compute_metrics=compute_metrics,
-    tokenizer=tokenizer,
     output_dir="./lang-ner-xlmr",
 )
 print("Ready NER fine-tuning …")
@@ -290,7 +287,6 @@ multilabel_trainer = make_trainer(
     eval_dataset=multilabel_eval_dataset,
     data_collator=multilabel_data_collator,
     compute_metrics=compute_multilabel_metrics,
-    tokenizer=tokenizer,
     output_dir="./lang-ner-xlmr-multilabel",
 )
 
