@@ -21,7 +21,6 @@ from language import ALL_LANGS, LANG_ISO2_TO_ISO3
 
 
 MODEL_CHECKPOINT = "DerivedFunction/polyglot-tagger-60L"
-DEFAULT_SAMPLE_SIZE = 2000
 
 
 def _parse_args() -> argparse.Namespace:
@@ -36,12 +35,6 @@ def _parse_args() -> argparse.Namespace:
             "Optional ISO-2 languages to keep, e.g. --langs en es fr. "
             "Defaults to all model languages that have a mapping in all_langs.json."
         ),
-    )
-    parser.add_argument(
-        "--sample-size",
-        type=int,
-        default=DEFAULT_SAMPLE_SIZE,
-        help="Maximum number of filtered examples to evaluate. Use -1 for all examples.",
     )
     parser.add_argument(
         "--split",
@@ -65,11 +58,19 @@ def _resolve_text_column(dataset) -> str:
 
 
 def _label_name_from_example(example: dict, dataset, lang_column: str) -> str:
+    """Decode the ClassLabel-backed `lang` field into its string label."""
     value = example[lang_column]
     feature = dataset.features[lang_column]
+    if hasattr(feature, "int2str") and isinstance(value, int):
+        return feature.int2str(value)
     if hasattr(feature, "names") and isinstance(value, int):
         return feature.names[value]
     return str(value)
+
+
+def _dataset_label_to_iso3(label: str) -> str:
+    """Strip the script suffix from labels like 'eng_Latn'."""
+    return label.split("_", 1)[0]
 
 
 def main() -> None:
@@ -113,9 +114,11 @@ def main() -> None:
     print("\n3. Filtering languages...")
     print(f"   ✓ Keeping {len(keep_langs_iso2)} ISO-2 languages")
     print(f"   ✓ Corresponding ISO-3 labels: {len(keep_langs_iso3)}")
-
+    # Print one example row in test_data
+    print(f"   ✓ Example dataset row: {test_data[0]}")
     filtered_test = test_data.filter(
-        lambda ex: _label_name_from_example(ex, test_data, lang_column) in keep_langs_iso3
+        lambda ex: _dataset_label_to_iso3(_label_name_from_example(ex, test_data, lang_column))
+        in keep_langs_iso3
     )
     print(f"   ✓ Filtered dataset size: {len(filtered_test)}")
 
@@ -144,7 +147,7 @@ def main() -> None:
     per_lang_stats = defaultdict(lambda: {"correct": 0, "total": 0})
     results_by_lang = defaultdict(list)
 
-    sample_size = len(filtered_test) if args.sample_size == -1 else min(args.sample_size, len(filtered_test))
+    sample_size = len(filtered_test)
     print(f"Processing {sample_size} examples...\n")
 
     for example in tqdm(
@@ -154,7 +157,7 @@ def main() -> None:
     ):
         text = example[text_column]
         true_lang_name = _label_name_from_example(example, filtered_test, lang_column)
-        true_lang_iso2 = iso3_to_iso2.get(true_lang_name)
+        true_lang_iso2 = iso3_to_iso2.get(_dataset_label_to_iso3(true_lang_name))
         if true_lang_iso2 is None:
             continue
 
