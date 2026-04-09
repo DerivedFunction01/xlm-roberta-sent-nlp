@@ -39,6 +39,8 @@ _PROMPT_MARKER_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _TABLEISH_RE = re.compile(r"\|.+\|.+\|")
+_LATEX_COMMAND_RE = re.compile(r"\\[A-Za-z]+")
+_LATEX_BRACE_RE = re.compile(r"\{[^{}]{0,80}\}")
 _CODE_FENCE_RE = re.compile(r"```|~~~")
 _CODE_KEYWORD_RE = re.compile(
     r"\b(import|from|def|class|return|lambda|function|const|let|var|public|private|protected|static|if|else|elif|for|while|try|catch|except|throw|throws|new|switch|case|package|include|using|namespace)\b"
@@ -224,6 +226,9 @@ def _is_valid_instruction_text(
         return False
     if _PROMPT_MARKER_RE.search(cleaned):
         return False
+    if "\\" in cleaned:
+        if _LATEX_COMMAND_RE.search(cleaned) or _LATEX_BRACE_RE.search(cleaned):
+            return False
     token_count = len(_TOKEN_RE.findall(cleaned))
     symbol_count = sum(
         1 for ch in cleaned if not ch.isalnum() and not ch.isspace()
@@ -239,6 +244,8 @@ def _is_valid_instruction_text(
     if symbol_count > len(cleaned) * 0.45:
         return False
     if _TABLEISH_RE.search(cleaned) and token_count <= 40:
+        return False
+    if cleaned.count("{") + cleaned.count("}") >= 4 and token_count <= 60:
         return False
     if math_symbol_count >= 3 and word_count <= 2:
         return False
