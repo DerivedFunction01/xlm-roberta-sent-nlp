@@ -5,6 +5,7 @@ import os
 import random
 import re
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any
 
 import pandas as pd
@@ -316,6 +317,18 @@ def _process_source_spec(
     return sentence_map, dict(extractor_counts), dict(source_counts)
 
 
+def _process_source_spec_worker(
+    spec: dict[str, Any],
+    lang_to_group: dict[str, str],
+) -> tuple[dict[str, Any], dict[str, list[str]], dict[str, int], dict[str, int]]:
+    normalized_spec = _normalize_source_spec(spec)
+    sentence_map, extractor_counts, source_counts = _process_source_spec(
+        spec=normalized_spec,
+        lang_to_group=lang_to_group,
+    )
+    return normalized_spec, sentence_map, extractor_counts, source_counts
+
+
 def load_instruction_sentences(
     *,
     sentences_dir: str = PATHS["sentences_dir"],
@@ -324,6 +337,7 @@ def load_instruction_sentences(
     force_rebuild: bool | None = None,
     seed: int = 42,
     max_sentences_per_lang: int = DEFAULT_MAX_SENTENCES_PER_LANG,
+    max_workers: int | None = None,
     source_specs: list[dict[str, Any]] | None = None,
 ) -> dict[str, list[str]] | None:
     if not use:
@@ -332,6 +346,7 @@ def load_instruction_sentences(
     force_rebuild = bool(force_rebuild) if force_rebuild is not None else INSTRUCT["rebuild"]
     source_specs = source_specs or INSTRUCT["sources"] or DEFAULT_SOURCE_SPECS
     normalized_sources = [_normalize_source_spec(spec) for spec in source_specs]
+    max_workers = min(len(normalized_sources), max(1, int(max_workers or max(1, (os.cpu_count() or 1) // 3))))
 
     cache_dir = _instruction_cache_dir(sentences_dir)
     cache_meta = _instruction_cache_meta_path(sentences_dir)
@@ -402,50 +417,111 @@ def load_instruction_sentences(
         base_total_after = sum(len(v) for v in base_result.values())
         existing_total_before = int(existing_meta.get("total_before", base_total_after))
     new_total_before = 0
-    for spec in tqdm(source_specs, desc="Instruction sources"):
-        normalized_spec = _normalize_source_spec(spec)
-        source_name = normalized_spec["name"]
-        repo_id = normalized_spec["repo_id"]
-        lang = normalized_spec["lang"]
-        extractor_name = normalized_spec["extractor"]
-        config_name = normalized_spec.get("config_name")
-        config_suffix = f" / {config_name}" if config_name else ""
-        tqdm.write(f"  Reading {source_name} -> {lang}{config_suffix} [{extractor_name}]")
-        source_sentence_map, extractor_counts, source_counts = _process_source_spec(spec=normalized_spec, lang_to_group=lang_to_group)
-        source_extractor_counts[source_name] = extractor_counts
-        source_total_before = int(sum(len(sentences) for sentences in source_sentence_map.values()))
-        source_text_counts[source_name] = source_total_before
-        new_total_before += source_total_before
-        for source_lang, sentences in source_sentence_map.items():
-            current_sentence_map.setdefault(source_lang, []).extend(sentences)
-        processed_source_specs.append(normalized_spec)
-        normalized_sentence_map = _normalize_sentence_map(
-            current_sentence_map,
-            seed=seed,
-            max_sentences_per_lang=max_sentences_per_lang,
-        )
-        lang_counts = _write_instruction_cache_map(cache_dir, normalized_sentence_map)
-        snapshot_total_before = existing_total_before + new_total_before
-        snapshot_total_after = sum(lang_counts.values())
-        snapshot_total_removed = max(0, snapshot_total_before - snapshot_total_after)
-        snapshot_sources = processed_source_specs[:]
-        write_json_atomic(
-            cache_meta,
-            {
-                **expected_meta,
-                "sources": snapshot_sources,
-                "status": "building",
-                "deduped": True,
-                "total_before": snapshot_total_before,
-                "total_after": snapshot_total_after,
-                "total_removed": snapshot_total_removed,
-                "lang_counts": lang_counts,
-                "source_text_counts": source_text_counts,
-                "source_extractor_counts": source_extractor_counts,
-                "source_row_caps": {spec["name"]: int(spec.get("max_rows", 0) or 0) for spec in normalized_sources},
-            },
-        )
-        tqdm.write(f"  Wrote instruction cache snapshot after {source_name}")
+    ordered_specs = list(source_specs)
+    if max_workers > 1 and len(ordered_specs) > 1:
+        print(f"(Workers: {max_workers} processes | one dataset per worker)\n")
+        with ProcessPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(_process_source_spec_worker, spec, lang_to_group): idx
+                for idx, spec in enumerate(ordered_specs)
+            }
+            pending_results: dict[int, tuple[dict[str, Any], dict[str, list[str]], dict[str, int], dict[str, int]]] = {}
+            next_idx = 0
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Instruction sources"):
+                idx = futures[future]
+                try:
+                    pending_results[idx] = future.result()
+                except Exception as exc:
+                    spec = _normalize_source_spec(ordered_specs[idx])
+                    tqdm.write(f"  Skipping {spec['repo_id']}: {exc}")
+                    pending_results[idx] = (spec, {}, {}, {})
+                while next_idx in pending_results:
+                    normalized_spec, source_sentence_map, extractor_counts, source_counts = pending_results.pop(next_idx)
+                    source_name = normalized_spec["name"]
+                    lang = normalized_spec["lang"]
+                    extractor_name = normalized_spec["extractor"]
+                    config_name = normalized_spec.get("config_name")
+                    config_suffix = f" / {config_name}" if config_name else ""
+                    tqdm.write(f"  Reading {source_name} -> {lang}{config_suffix} [{extractor_name}]")
+                    source_extractor_counts[source_name] = extractor_counts
+                    source_total_before = int(sum(len(sentences) for sentences in source_sentence_map.values()))
+                    source_text_counts[source_name] = source_total_before
+                    new_total_before += source_total_before
+                    for source_lang, sentences in source_sentence_map.items():
+                        current_sentence_map.setdefault(source_lang, []).extend(sentences)
+                    processed_source_specs.append(normalized_spec)
+                    normalized_sentence_map = _normalize_sentence_map(
+                        current_sentence_map,
+                        seed=seed,
+                        max_sentences_per_lang=max_sentences_per_lang,
+                    )
+                    lang_counts = _write_instruction_cache_map(cache_dir, normalized_sentence_map)
+                    snapshot_total_before = existing_total_before + new_total_before
+                    snapshot_total_after = sum(lang_counts.values())
+                    snapshot_total_removed = max(0, snapshot_total_before - snapshot_total_after)
+                    snapshot_sources = processed_source_specs[:]
+                    write_json_atomic(
+                        cache_meta,
+                        {
+                            **expected_meta,
+                            "sources": snapshot_sources,
+                            "status": "building",
+                            "deduped": True,
+                            "total_before": snapshot_total_before,
+                            "total_after": snapshot_total_after,
+                            "total_removed": snapshot_total_removed,
+                            "lang_counts": lang_counts,
+                            "source_text_counts": source_text_counts,
+                            "source_extractor_counts": source_extractor_counts,
+                            "source_row_caps": {spec["name"]: int(spec.get("max_rows", 0) or 0) for spec in normalized_sources},
+                        },
+                    )
+                    tqdm.write(f"  Wrote instruction cache snapshot after {source_name}")
+                    next_idx += 1
+    else:
+        for spec in tqdm(ordered_specs, desc="Instruction sources"):
+            normalized_spec = _normalize_source_spec(spec)
+            source_name = normalized_spec["name"]
+            lang = normalized_spec["lang"]
+            extractor_name = normalized_spec["extractor"]
+            config_name = normalized_spec.get("config_name")
+            config_suffix = f" / {config_name}" if config_name else ""
+            tqdm.write(f"  Reading {source_name} -> {lang}{config_suffix} [{extractor_name}]")
+            source_sentence_map, extractor_counts, source_counts = _process_source_spec(spec=normalized_spec, lang_to_group=lang_to_group)
+            source_extractor_counts[source_name] = extractor_counts
+            source_total_before = int(sum(len(sentences) for sentences in source_sentence_map.values()))
+            source_text_counts[source_name] = source_total_before
+            new_total_before += source_total_before
+            for source_lang, sentences in source_sentence_map.items():
+                current_sentence_map.setdefault(source_lang, []).extend(sentences)
+            processed_source_specs.append(normalized_spec)
+            normalized_sentence_map = _normalize_sentence_map(
+                current_sentence_map,
+                seed=seed,
+                max_sentences_per_lang=max_sentences_per_lang,
+            )
+            lang_counts = _write_instruction_cache_map(cache_dir, normalized_sentence_map)
+            snapshot_total_before = existing_total_before + new_total_before
+            snapshot_total_after = sum(lang_counts.values())
+            snapshot_total_removed = max(0, snapshot_total_before - snapshot_total_after)
+            snapshot_sources = processed_source_specs[:]
+            write_json_atomic(
+                cache_meta,
+                {
+                    **expected_meta,
+                    "sources": snapshot_sources,
+                    "status": "building",
+                    "deduped": True,
+                    "total_before": snapshot_total_before,
+                    "total_after": snapshot_total_after,
+                    "total_removed": snapshot_total_removed,
+                    "lang_counts": lang_counts,
+                    "source_text_counts": source_text_counts,
+                    "source_extractor_counts": source_extractor_counts,
+                    "source_row_caps": {spec["name"]: int(spec.get("max_rows", 0) or 0) for spec in normalized_sources},
+                },
+            )
+            tqdm.write(f"  Wrote instruction cache snapshot after {source_name}")
 
     normalized_sentence_map = _normalize_sentence_map(
         current_sentence_map,

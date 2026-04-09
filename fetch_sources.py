@@ -19,7 +19,9 @@ _ = load_finetranslations_sentences(
 )
 # %%
 print("Refreshing instruction-source caches ...")
-_ = load_instruction_sentences()
+_ = load_instruction_sentences(
+    max_workers=max_workers,
+)
 # %%
 _ = load_smol_sentences()
 
