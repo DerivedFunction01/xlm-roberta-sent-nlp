@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 
 SourceExtractor = Callable[[dict[str, Any], dict[str, Any]], list[str]]
+_HTML_TAG_RE = re.compile(r"</?[A-Za-z][^>\n]{0,80}>")
+_REPEATED_PUNCT_RE = re.compile(r"([,.;:!?…،。！？])\1+")
 
 
 def _normalize_text(text: str) -> str:
-    return " ".join(text.replace("\n", " ").split()).strip()
+    text = text.replace("\n", " ")
+    text = _HTML_TAG_RE.sub(" ", text)
+    text = _REPEATED_PUNCT_RE.sub(r"\1", text)
+    return " ".join(text.split()).strip()
 
 
 def _extract_texts_from_message_list(

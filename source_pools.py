@@ -17,7 +17,7 @@ from text_utils import normalize_sentence_for_pool
 
 
 
-SOURCE_POOL_CACHE_VERSION = 2
+SOURCE_POOL_CACHE_VERSION = 3
 
 
 def split_sentence_map_for_synthetic(

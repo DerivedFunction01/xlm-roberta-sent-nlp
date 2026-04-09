@@ -19,6 +19,7 @@ WIKI_LEADING_ORPHAN_LETTER = re.compile(r"^[\"'“”‘’«»‹›\s,.;:!?…
 WIKI_BLOCKED_MARKERS = ("http",)
 WIKI_BLOCKED_CHARS = {"=", "<", ">", "|"}
 WIKI_OPENING_QUOTES = {"\"", "'", "“", "”", "‘", "’", "«", "»", "‹", "›"}
+HTML_TAG_RE = re.compile(r"</?[A-Za-z][^>\n]{0,80}>")
 WIKI_NON_CONTENT = re.compile(r"[\W_]+", flags=re.UNICODE)
 WIKI_DIGITS = re.compile(r"\d")
 WIKI_WORDS = re.compile(r"\b\w+\b", flags=re.UNICODE)
@@ -141,7 +142,9 @@ def _strip_ascii_for_lang(lang: str, lang_to_group: dict[str, str]) -> bool:
 def clean_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> str:
     if "\\" in sentence:
         sentence = sentence.replace("\\", "")
+    sentence = HTML_TAG_RE.sub(" ", sentence)
     sentence = _strip_bracket_notes(sentence)
+    sentence = _collapse_repeated_punct(sentence)
     if _strip_ascii_for_lang(lang, lang_to_group):
         sentence = WIKI_ASCII_WORDS.sub("", sentence)
     sentence = _collapse_spaces(sentence)
@@ -194,6 +197,7 @@ def normalize_sentence_for_pool(
     if not text:
         return ""
 
+    text = HTML_TAG_RE.sub(" ", text)
     text = _strip_outer_pool_wrappers(text)
     text = POOL_LEADING_MARKER_RE.sub("", text).strip()
     text = _collapse_repeated_punct(text)

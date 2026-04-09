@@ -17,15 +17,17 @@ from io_utils import write_json_atomic, write_sentence_parquet
 from language import LATIN_GROUPS, LANG_TO_GROUP
 from paths import PATHS
 from source_config import INSTRUCT
-from text_utils import _collapse_spaces, _strip_bracket_notes
+from text_utils import _collapse_spaces, _strip_bracket_notes, clean_sentence
 
 
-INSTRUCTION_CACHE_VERSION = 3
+INSTRUCTION_CACHE_VERSION = 4
 DEFAULT_MAX_SENTENCES_PER_LANG = INSTRUCT["max_lang"]
 DEFAULT_SOURCE_SPECS = DEFAULT_INSTRUCTION_SOURCE_SPECS
 _HAS_WORD_OR_IDEOGRAPH = re.compile(r"\w", flags=re.UNICODE)
 _TOKEN_RE = re.compile(r"\w+", flags=re.UNICODE)
 _LATIN_WORD_RE = re.compile(r"[A-Za-zÀ-ÿ]{2,}", flags=re.UNICODE)
+_HTML_TAG_RE = re.compile(r"</?[A-Za-z][^>\n]{0,80}>")
+_REPEATED_PUNCT_RE = re.compile(r"([,.;:!?…،。！？])\1+")
 _MATH_SYMBOL_RE = re.compile(r"[=+\-*/^<>|~]")
 _URL_RE = re.compile(r"https?://|www\.", flags=re.IGNORECASE)
 _PROMPT_MARKER_RE = re.compile(
@@ -77,6 +79,8 @@ def _instruction_cache_meta_path(sentences_dir: str) -> str:
 
 def _normalize_text(text: str) -> str:
     text = _strip_bracket_notes(text)
+    text = _HTML_TAG_RE.sub(" ", text)
+    text = _REPEATED_PUNCT_RE.sub(r"\1", text)
     text = _collapse_spaces(text)
     return text.strip()
 
@@ -224,6 +228,7 @@ def _is_valid_instruction_text(
     allow_code: bool = False,
 ) -> bool:
     cleaned = _normalize_text(text)
+    cleaned = clean_sentence(cleaned, lang, lang_to_group)
     if len(cleaned) < 2 or len(cleaned) > 1_500:
         return False
     if not _HAS_WORD_OR_IDEOGRAPH.search(cleaned):
