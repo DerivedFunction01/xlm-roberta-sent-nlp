@@ -250,7 +250,7 @@ def build_tokenized_dataset(
         desc="Tokenizing random split",
     )
 
-    split = random_dataset.train_test_split(test_size=0.01, seed=seed)
+    split = random_dataset.train_test_split(test_size=0.05, seed=seed)
     train_dataset = concatenate_datasets([coverage_dataset, split["train"]])
     eval_dataset = split["test"]
     if USE_TOKENIZED_CACHE:
