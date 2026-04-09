@@ -157,6 +157,14 @@ def _load_instruction_cache_map(cache_dir: str) -> dict[str, list[str]]:
     return result
 
 
+def _instruction_cache_has_artifacts(cache_dir: str, cache_meta: str) -> bool:
+    if os.path.exists(cache_meta):
+        return True
+    if not os.path.isdir(cache_dir):
+        return False
+    return any(name.endswith(".parquet") for name in os.listdir(cache_dir))
+
+
 def _write_instruction_cache_map(cache_dir: str, sentence_map: dict[str, list[str]]) -> dict[str, int]:
     os.makedirs(cache_dir, exist_ok=True)
     counts: dict[str, int] = {}
@@ -400,7 +408,8 @@ def load_instruction_sentences(
         and existing_meta.get("status") in {"complete", "building"}
         and os.path.isdir(cache_dir)
     )
-    if not force_rebuild and (os.path.exists(cache_dir) or os.path.exists(cache_meta)) and not incremental_update:
+    has_cache_artifacts = _instruction_cache_has_artifacts(cache_dir, cache_meta)
+    if not force_rebuild and has_cache_artifacts and not incremental_update:
         raise RuntimeError(
             "Instruction cache metadata does not match the current config. "
             "Refusing to rebuild over the existing cache. "
