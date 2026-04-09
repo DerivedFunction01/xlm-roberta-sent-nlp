@@ -215,6 +215,9 @@ DOC_MIX = {
         "strip_punct_prob": 0.10,
         "format_noise_prob": 0.30,
         "paragraph_break_prob": 0.25,
+        "uppercase_word_prob": 0.03,
+        "lowercase_word_prob": 0.03,
+        "titlecase_word_prob": 0.02,
     },
     "homogeneous": {
         "fraction": 0.30,
@@ -224,6 +227,9 @@ DOC_MIX = {
         "strip_punct_prob": 0.15,
         "format_noise_prob": 0.20,
         "paragraph_break_prob": 0.20,
+        "uppercase_word_prob": 0.02,
+        "lowercase_word_prob": 0.02,
+        "titlecase_word_prob": 0.01,
     },
     "mixed": {
         "fraction": 0.10,

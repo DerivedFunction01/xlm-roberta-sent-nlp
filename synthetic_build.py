@@ -4,6 +4,7 @@ import gc
 import json
 import os
 import random
+import re
 import unicodedata
 import multiprocessing as mp
 from collections import deque
@@ -18,7 +19,7 @@ from tqdm.auto import tqdm
 from io_utils import write_json_atomic
 from paths import PATHS
 from source_config import DOC_MIX, FT, INSTRUCT, POOL, RUN, SMOL
-from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, LANGUAGE_GROUP_WEIGHTS
+from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, LANGUAGE_GROUP_WEIGHTS, LATIN_GROUPS
 
 MAX_LENGTH = RUN["len"]
 EXAMPLES_TARGET = RUN["target"]
@@ -240,6 +241,43 @@ def _render_original_text(parts: list[str], paragraph_break_prob: float = 0.0) -
     return "".join(rendered).strip()
 
 
+_WORD_RE = re.compile(r"\b[^\W\d_]{2,}\b", flags=re.UNICODE)
+
+
+def _apply_random_word_casing(
+    sentence: str,
+    *,
+    lang: str,
+    uppercase_prob: float,
+    lowercase_prob: float,
+    titlecase_prob: float,
+) -> str:
+    """Apply one random casing transform to a word in a mostly Latin sentence."""
+    total_prob = max(0.0, uppercase_prob) + max(0.0, lowercase_prob) + max(0.0, titlecase_prob)
+    if total_prob <= 0 or random.random() >= total_prob:
+        return sentence
+    if LANG_TO_GROUP.get(lang) not in LATIN_GROUPS:
+        return sentence
+
+    matches = list(_WORD_RE.finditer(sentence))
+    if not matches:
+        return sentence
+    match = random.choice(matches)
+    word = match.group(0)
+    if len(word) < 3:
+        return sentence
+    roll = random.random() * total_prob
+    if roll < uppercase_prob:
+        replacement = word.upper()
+    elif roll < uppercase_prob + lowercase_prob:
+        replacement = word.lower()
+    else:
+        replacement = word[:1].upper() + word[1:].lower()
+    if replacement == word:
+        return sentence
+    return f"{sentence[:match.start()]}{replacement}{sentence[match.end():]}"
+
+
 def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 0.02) -> tuple[list[str], list[int]]:
     """Randomly swap tokens between positions to simulate within-sentence code-switching."""
     n = len(tokens)
@@ -318,6 +356,9 @@ def generate_synthetic_examples_chunk(
                     strip_punct_prob=PURE_DOC_MIX["strip_punct_prob"],
                     format_noise_prob=PURE_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=PURE_DOC_MIX.get("paragraph_break_prob", 0.0),
+                    uppercase_word_prob=PURE_DOC_MIX.get("uppercase_word_prob", 0.0),
+                    lowercase_word_prob=PURE_DOC_MIX.get("lowercase_word_prob", 0.0),
+                    titlecase_word_prob=PURE_DOC_MIX.get("titlecase_word_prob", 0.0),
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -350,6 +391,9 @@ def generate_synthetic_examples_chunk(
                     strip_punct_prob=HOMOGENEOUS_DOC_MIX["strip_punct_prob"],
                     format_noise_prob=HOMOGENEOUS_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=HOMOGENEOUS_DOC_MIX.get("paragraph_break_prob", 0.0),
+                    uppercase_word_prob=HOMOGENEOUS_DOC_MIX.get("uppercase_word_prob", 0.0),
+                    lowercase_word_prob=HOMOGENEOUS_DOC_MIX.get("lowercase_word_prob", 0.0),
+                    titlecase_word_prob=HOMOGENEOUS_DOC_MIX.get("titlecase_word_prob", 0.0),
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -601,6 +645,9 @@ def create_pure_synthetic_doc(
     strip_punct_prob: float = 0.15,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
+    uppercase_word_prob: float = 0.0,
+    lowercase_word_prob: float = 0.0,
+    titlecase_word_prob: float = 0.0,
 ) -> dict:
     """Build one mostly homogeneous single-language synthetic example."""
     sent_count = random.randint(min_sentences, max_sentences)
@@ -614,6 +661,13 @@ def create_pure_synthetic_doc(
         sent = draw_sentence(lang, primary_pool, None)
         if sent is None:
             break
+        sent = _apply_random_word_casing(
+            sent,
+            lang=lang,
+            uppercase_prob=uppercase_word_prob,
+            lowercase_prob=lowercase_word_prob,
+            titlecase_prob=titlecase_word_prob,
+        )
         original_text_parts.append(sent)
         tokens = tokenizer.tokenize(sent)
         if not tokens:
@@ -658,6 +712,9 @@ def build_synthetic_doc_with_retry(
     strip_punct_prob: float = 0.35,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
+    uppercase_word_prob: float = 0.0,
+    lowercase_word_prob: float = 0.0,
+    titlecase_word_prob: float = 0.0,
     swap_prob: float = 0.12,
     o_inject_prob: float = 0.12,
     allow_repeated_langs: bool = False,
@@ -687,6 +744,9 @@ def build_synthetic_doc_with_retry(
                 strip_punct_prob=strip_punct_prob,
                 format_noise_prob=format_noise_prob,
                 paragraph_break_prob=paragraph_break_prob,
+                uppercase_word_prob=uppercase_word_prob,
+                lowercase_word_prob=lowercase_word_prob,
+                titlecase_word_prob=titlecase_word_prob,
             )
         else:
             example = create_synthetic_doc(
