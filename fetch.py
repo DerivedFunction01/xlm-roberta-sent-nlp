@@ -1,3 +1,4 @@
+#%%
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -79,6 +80,8 @@ def prepare_data(
 def main() -> None:
     prepare_data()
 
-
+#%%
 if __name__ == "__main__":
     main()
+
+# %%
