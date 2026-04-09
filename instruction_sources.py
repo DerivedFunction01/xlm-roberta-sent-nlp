@@ -28,6 +28,7 @@ DEFAULT_SOURCE_SPECS = [
         "lang": "fr",
         "mode": "auto",
         "trust_remote_code": False,
+        "max_rows": 25_000,
     },
 ]
 
@@ -119,6 +120,7 @@ def _normalize_source_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "lang": str(spec.get("lang", "")),
         "mode": str(spec.get("mode", "auto")),
         "trust_remote_code": bool(spec.get("trust_remote_code", False)),
+        "max_rows": int(spec.get("max_rows", 0) or 0),
     }
 
 
@@ -413,6 +415,7 @@ def _process_source_spec(
     lang = str(spec.get("lang", ""))
     mode = str(spec.get("mode", "auto"))
     trust_remote_code = bool(spec.get("trust_remote_code", False))
+    max_rows = int(spec.get("max_rows", 0) or 0)
 
     records_by_lang: dict[str, list[dict[str, Any]]] = {}
     field_counts: Counter[str] = Counter()
@@ -425,6 +428,9 @@ def _process_source_spec(
         return records_by_lang, dict(field_counts), dict(source_counts)
 
     for row_idx, row in enumerate(tqdm(ds, desc=repo_id, leave=False)):
+        if max_rows > 0 and row_idx >= max_rows:
+            tqdm.write(f"  Reached row cap for {repo_id}: {max_rows}")
+            break
         if not isinstance(row, dict):
             continue
         extracted = _row_to_text_records(row, repo_id=repo_id, lang=lang, row_idx=row_idx, mode=mode)
@@ -574,6 +580,7 @@ def load_instruction_sentences(
             "lang_counts": lang_counts,
             "source_text_counts": source_text_counts,
             "source_field_counts": source_field_counts,
+            "source_row_caps": {spec["repo_id"]: int(spec.get("max_rows", 0) or 0) for spec in normalized_sources},
         },
     )
 

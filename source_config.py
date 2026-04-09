@@ -249,6 +249,7 @@ INSTRUCT = {
             "lang": "fr",
             "mode": "auto",
             "trust_remote_code": False,
+            "max_rows": 100_000,
         },
     ],
 }
