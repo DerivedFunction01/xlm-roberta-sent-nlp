@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic, write_records_parquet, write_sentence_parquet
 from paths import PATHS
-from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3
+from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3, LANG_TO_GROUP
 from source_config import (
     FT,
 )
@@ -889,30 +889,20 @@ def _process_finetrans_config(
 def load_finetranslations_sentences(
     *,
     sentences_dir: str = PATHS["sentences_dir"],
-    lang_to_group: dict[str, str],
-    use: bool | None = None,
-    force_rebuild: bool | None = None,
-    seed: int | None = None,
-    max_sentences_per_lang: int | None = None,
-    overflow_sentences_per_lang: int | None = None,
-    max_row_index: int | None = None,
-    max_miss_streak: int | None = None,
-    include_translated_english: bool | None = None,
-    english_accept_every: int | None = None,
+    lang_to_group: dict[str, str] = LANG_TO_GROUP,
+    use: bool | None = FT["use"],
+    force_rebuild: bool = FT["rebuild"],
+    seed: int = 42,
+    max_sentences_per_lang: int = FT["max_lang"],
+    overflow_sentences_per_lang = FT["overflow_lang"],
+    max_row_index: int = FT["max_row"] ,
+    max_miss_streak: int = FT["miss"],
+    include_translated_english = FT["include_en"],
+    english_accept_every: int = FT["every"],
     max_workers: int | None = None,
 ) -> dict[str, list[str]] | None:
-    use = FT["use"] if use is None else use
     if not use:
         return None
-    force_rebuild = FT["rebuild"] if force_rebuild is None else force_rebuild
-    seed = 42 if seed is None else seed
-    max_sentences_per_lang = FT["max_lang"] if max_sentences_per_lang is None else max_sentences_per_lang
-    overflow_sentences_per_lang = FT["overflow_lang"] if overflow_sentences_per_lang is None else overflow_sentences_per_lang
-    max_row_index = FT["max_row"] if max_row_index is None else max_row_index
-    max_miss_streak = FT["miss"] if max_miss_streak is None else max_miss_streak
-    include_translated_english = FT["include_en"] if include_translated_english is None else include_translated_english
-    english_accept_every = FT["every"] if english_accept_every is None else english_accept_every
-
     configs = _matching_configs(lang_to_group)
     if not configs:
         print("No FineTranslations subsets matched the current language set.")
