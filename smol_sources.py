@@ -12,6 +12,7 @@ from tqdm.auto import tqdm
 from io_utils import write_json_atomic, write_sentence_parquet
 from language import LANG_TO_GROUP
 from paths import PATHS
+from source_config import SMOL
 from text_utils import _collapse_spaces, _get_segmenter, _is_valid_sentence, _strip_bracket_notes
 
 
@@ -169,20 +170,16 @@ def load_smol_sentences(
     *,
     sentences_dir: str = PATHS["sentences_dir"],
     lang_to_group: dict[str, str] = LANG_TO_GROUP,
-    use: bool | None = None,
+    use: bool = SMOL["use"],
     force_rebuild: bool | None = None,
-    seed: int | None = None,
-    max_sentences_per_lang: int | None = None,
+    seed: int = 42,
+    max_sentences_per_lang: int = MAX_SENTENCES_PER_LANG,
     uncapped_langs: set[str] | None = None,
 ) -> dict[str, list[str]] | None:
-    from source_config import SMOL
 
-    use = SMOL["use"] if use is None else use
     if not use:
         return None
     force_rebuild = False if force_rebuild is None else force_rebuild
-    seed = 42 if seed is None else seed
-    max_sentences_per_lang = MAX_SENTENCES_PER_LANG if max_sentences_per_lang is None else max_sentences_per_lang
     cache_dir = _smol_cache_dir(sentences_dir)
     cache_meta = _smol_cache_meta_path(sentences_dir)
     legacy_cache_file = _smol_legacy_cache_file(sentences_dir)
