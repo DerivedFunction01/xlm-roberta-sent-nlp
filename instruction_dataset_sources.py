@@ -161,6 +161,13 @@ def _extract_alpaca_texts(row: dict[str, Any], spec: dict[str, Any]) -> list[str
     return []
 
 
+def _extract_latin_english_parallel_texts(row: dict[str, Any], spec: dict[str, Any]) -> list[str]:
+    texts = _extract_texts_from_fields(row, ("la",))
+    if texts:
+        return texts
+    return []
+
+
 def _extract_generic_texts(row: dict[str, Any], spec: dict[str, Any]) -> list[str]:
     texts = _extract_texts_from_message_list(row, "messages")
     if texts:
@@ -187,6 +194,7 @@ INSTRUCTION_SOURCE_EXTRACTORS: dict[str, SourceExtractor] = {
     "turkish_openhermes": _extract_turkish_openhermes_texts,
     "japanese_self_instruct": _extract_japanese_self_instruct_texts,
     "alpaca": _extract_alpaca_texts,
+    "latin_english_parallel": _extract_latin_english_parallel_texts,
     "generic": _extract_generic_texts,
 }
 
@@ -198,6 +206,15 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "en",
         "extractor": "alpaca",
+        "trust_remote_code": False,
+        "max_rows": 100_000,
+    },
+    {
+        "name": "latin_english_parallel_la",
+        "repo_id": "grosenthal/latin_english_parallel",
+        "split": "train",
+        "lang": "la",
+        "extractor": "latin_english_parallel",
         "trust_remote_code": False,
         "max_rows": 100_000,
     },
