@@ -205,17 +205,39 @@ def _add_formatting_noise(
         ])
         return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, prefix=prefix, suffix=suffix)
     if pattern == "bullet":
-        prefix = random.choice(["-", "•", "1.", "i."])
+        prefix = random.choice(["-", "•", "*", "1.", "i.", "##", "###"])
         return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, prefix=prefix)
     if pattern == "trail":
-        suffix = random.choice([":", ";", "...", "?!"])
+        suffix = random.choice([":", ";", "...", "?!", " |", " | |"])
         return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, suffix=suffix)
     prefix, suffix = random.choice([
         ("<p>", "</p>"),
         ("<div>", "</div>"),
         ("<blockquote>", "</blockquote>"),
+        ("<table>", "</table>"),
+        ("<tr>", "</tr>"),
+        ("<td>", "</td>"),
+        ("<span>", "</span>"),
+        ("**", "**"),
     ])
     return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, prefix=prefix, suffix=suffix)
+
+
+def _render_original_text(parts: list[str], paragraph_break_prob: float = 0.0) -> str:
+    """Join generated sentence parts into a lightly paragraphized preview string."""
+    if not parts:
+        return ""
+    if paragraph_break_prob <= 0 or len(parts) == 1:
+        return " ".join(parts).strip()
+
+    rendered: list[str] = [parts[0]]
+    for part in parts[1:]:
+        if random.random() < paragraph_break_prob:
+            rendered.append("\n\n")
+        else:
+            rendered.append(" ")
+        rendered.append(part)
+    return "".join(rendered).strip()
 
 
 def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 0.02) -> tuple[list[str], list[int]]:
@@ -295,6 +317,7 @@ def generate_synthetic_examples_chunk(
                     max_sentences=PURE_DOC_MIX["max_sentences"],
                     strip_punct_prob=PURE_DOC_MIX["strip_punct_prob"],
                     format_noise_prob=PURE_DOC_MIX.get("format_noise_prob", 0.0),
+                    paragraph_break_prob=PURE_DOC_MIX.get("paragraph_break_prob", 0.0),
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -326,6 +349,7 @@ def generate_synthetic_examples_chunk(
                     max_sentences=HOMOGENEOUS_DOC_MIX["max_sentences"],
                     strip_punct_prob=HOMOGENEOUS_DOC_MIX["strip_punct_prob"],
                     format_noise_prob=HOMOGENEOUS_DOC_MIX.get("format_noise_prob", 0.0),
+                    paragraph_break_prob=HOMOGENEOUS_DOC_MIX.get("paragraph_break_prob", 0.0),
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -563,7 +587,7 @@ def create_synthetic_doc(
                 all_labels = all_labels[:insert_pos] + [0] * len(o_tokens) + all_labels[insert_pos:]
                 total_tokens += len(o_tokens)
 
-    return {"original_text": " ".join(original_text_parts).strip(), "tokens": all_tokens, "ner_tags": all_labels}
+    return {"original_text": _render_original_text(original_text_parts), "tokens": all_tokens, "ner_tags": all_labels}
 
 
 def create_pure_synthetic_doc(
@@ -576,6 +600,7 @@ def create_pure_synthetic_doc(
     max_sentences: int = 4,
     strip_punct_prob: float = 0.15,
     format_noise_prob: float = 0.0,
+    paragraph_break_prob: float = 0.0,
 ) -> dict:
     """Build one mostly homogeneous single-language synthetic example."""
     sent_count = random.randint(min_sentences, max_sentences)
@@ -612,7 +637,11 @@ def create_pure_synthetic_doc(
         all_labels.extend(labels)
         total_tokens += len(tokens)
 
-    return {"original_text": " ".join(original_text_parts).strip(), "tokens": all_tokens, "ner_tags": all_labels}
+    return {
+        "original_text": _render_original_text(original_text_parts, paragraph_break_prob=paragraph_break_prob),
+        "tokens": all_tokens,
+        "ner_tags": all_labels,
+    }
 
 
 def build_synthetic_doc_with_retry(
@@ -628,6 +657,7 @@ def build_synthetic_doc_with_retry(
     n_segments: int = 4,
     strip_punct_prob: float = 0.35,
     format_noise_prob: float = 0.0,
+    paragraph_break_prob: float = 0.0,
     swap_prob: float = 0.12,
     o_inject_prob: float = 0.12,
     allow_repeated_langs: bool = False,
@@ -656,6 +686,7 @@ def build_synthetic_doc_with_retry(
                 max_sentences=max_sentences,
                 strip_punct_prob=strip_punct_prob,
                 format_noise_prob=format_noise_prob,
+                paragraph_break_prob=paragraph_break_prob,
             )
         else:
             example = create_synthetic_doc(
