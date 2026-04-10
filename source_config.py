@@ -262,7 +262,7 @@ POOL = {
     "instruct": {
         "reserve": 0.60,
         "min": 1,
-        "max": 120_000,
+        "max": 30_000,
     },
     "smol": {
         "reserve": 0.95,
