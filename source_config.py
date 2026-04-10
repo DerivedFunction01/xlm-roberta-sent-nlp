@@ -185,15 +185,28 @@ LANGUAGE_BUCKETS = {
     },
     # combined ~0.27% of CC — upweighted for script diversity
     "IndicOther": {
-        "langs": ["ur", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "as", "or", "ne"],
+        "langs": [
+            "ur",
+            "bn",
+            "ta",
+            "te",
+            "mr",
+            "gu",
+            "kn",
+            "ml",
+            "pa",
+            "as",
+            "or",
+            "ne",
+        ],
         "weight": 0.9,
         "min_chars": 2_000,
         "latin": False,
     },
     # kk ~0.038%, mn ~0.016% of CC — very thin corpus, weight is already a large relative boost
-    "CentralAsianCyrillic": {
-        "langs": ["kk", "mn", "tt"],
-        "weight": 0.9,
+    "CentralAsianCaucusCyrillic": {
+        "langs": ["kk", "mn", "tt", "ky", "tg", "ba", "ce"],
+        "weight": 1.2,
         "min_chars": 2_000,
         "latin": False,
     },
@@ -327,7 +340,7 @@ FT = {
     "max_row": 50_000,
     "miss": 1_000,
     "include_en": True,
-    "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms", "ckb", "nn"},
+    "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms", "ckb", "nn", "ce", "ky", "tg", "ba"},
     "lang_overrides": {
         "zh": "yue",
     },
