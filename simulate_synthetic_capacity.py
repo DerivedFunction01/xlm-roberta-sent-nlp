@@ -123,6 +123,7 @@ def _simulate_single_run(
 
     used_docs = {"pure": 0, "homogeneous": 0, "mixed": 0}
     used_sentences = {"reserved": defaultdict(int), "main": defaultdict(int)}
+    example_presence = defaultdict(int)
     depleted: list[dict[str, Any]] = []
 
     def consume(lang: str, pool_name: str, n_sentences: int) -> bool:
@@ -146,6 +147,7 @@ def _simulate_single_run(
             )
             break
         used_docs["pure"] += 1
+        example_presence[lang] += 1
 
     for lang in homogeneous_plan:
         n_sentences = _sample_sentence_count(rng, "homogeneous")
@@ -160,6 +162,7 @@ def _simulate_single_run(
             )
             break
         used_docs["homogeneous"] += 1
+        example_presence[lang] += 1
 
     # Approximate mixed docs as one main-pool sentence per chosen segment.
     for _ in range(mixed_target):
@@ -203,6 +206,8 @@ def _simulate_single_run(
         if not ok:
             break
         used_docs["mixed"] += 1
+        for lang in chosen:
+            example_presence[lang] += 1
 
     remaining_reserved = {lang: count for lang, count in pool_state["reserved"].items() if count > 0}
     remaining_main = {lang: count for lang, count in pool_state["main"].items() if count > 0}
@@ -219,6 +224,7 @@ def _simulate_single_run(
             "reserved": dict(used_sentences["reserved"]),
             "main": dict(used_sentences["main"]),
         },
+        "example_presence": dict(example_presence),
         "remaining_reserved": remaining_reserved,
         "remaining_main": remaining_main,
         "depleted": depleted,
@@ -281,6 +287,21 @@ def _summarize_run(run: dict[str, Any], language_stats: dict[str, dict[str, int]
     _top_bottlenecks("main", "remaining_main")
     _most_headroom("reserved", "remaining_reserved")
     _most_headroom("main", "remaining_main")
+
+    presence = run.get("example_presence", {})
+    if isinstance(presence, dict) and presence:
+        rows = []
+        for lang in ALL_LANGS:
+            count = int(presence.get(lang, 0))
+            rows.append((lang, count, count / max(1, target_docs)))
+
+        print("\nExample presence share:")
+        for lang, count, frac in sorted(rows, key=lambda item: (-item[2], -item[1], item[0]))[:top_k]:
+            print(f"  {lang:<5} examples={count:>7,} / {target_docs:<7,} ({frac:6.1%})")
+
+        print("\nLowest presence share:")
+        for lang, count, frac in sorted(rows, key=lambda item: (item[2], item[1], item[0]))[:top_k]:
+            print(f"  {lang:<5} examples={count:>7,} / {target_docs:<7,} ({frac:6.1%})")
 
 
 def _estimate_trials(
