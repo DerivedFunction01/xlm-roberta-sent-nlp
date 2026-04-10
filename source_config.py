@@ -349,12 +349,12 @@ FT["every"] = len(FT["langs"])
 
 RUN = {
     "len": 512,
-    "target": 4_000_000,  # synthetic mixed-language training examples to generate
+    "target": 5_500_000, 
     "syn_cache": True,
     "syn_rebuild": False,
     "tok_cache": True,
     "tok_rebuild": False,
     "tok_skip_check": False,
     "retry": 8,
-    "preview": 2_000,
+    "preview": 10_000,
 }
