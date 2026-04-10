@@ -123,7 +123,12 @@ def _matching_configs(
     lang_to_group: dict[str, str],
 ) -> list[tuple[str, str]]:
     matched: list[tuple[str, str]] = []
-    for config in get_dataset_config_names(FINETRANS_DATASET):
+    try:
+        configs = get_dataset_config_names(FINETRANS_DATASET)
+    except Exception as exc:
+        print(f"  Skipping FineTranslations config discovery: {exc}")
+        return []
+    for config in configs:
         lang = _config_name_to_lang(config, lang_to_group)
         if lang is not None:
             matched.append((config, lang))
