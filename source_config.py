@@ -13,165 +13,165 @@ LANGUAGE_BUCKETS = {
     # ~6.3% of CC — was badly underweighted relative to German/French
     "Russian": {
         "langs": ["ru"],
-        "weight": 1.8,
+        "weight": 1.95,
         "min_chars": 2_000,
         "latin": False,
     },
     # ~5.9% of CC
     "German": {
         "langs": ["de"],
-        "weight": 1.8,
+        "weight": 1.9,
         "min_chars": 2_000,
         "latin": True,
     },
     # ~5.7% of CC — bumped up from 1.7 to match its actual footprint
     "Japanese": {
         "langs": ["ja"],
-        "weight": 1.8,
+        "weight": 1.9,
         "min_chars": 1_200,
         "latin": False,
     },
     # ~5.0% of CC — CC likely undercounts due to Great Firewall
     "Chinese": {
         "langs": ["zh"],
-        "weight": 1.8,
+        "weight": 1.9,
         "min_chars": 1_200,
         "latin": False,
     },
     # ~4.6% of CC
     "French": {
         "langs": ["fr"],
-        "weight": 1.8,
+        "weight": 1.9,
         "min_chars": 2_000,
         "latin": True,
     },
     # ~4.6% of CC
     "Spanish": {
         "langs": ["es"],
-        "weight": 1.8,
+        "weight": 1.9,
         "min_chars": 2_000,
         "latin": True,
     },
     # ~2.5% of CC
     "Portuguese": {
         "langs": ["pt"],
-        "weight": 1.6,
+        "weight": 1.7,
         "min_chars": 2_000,
         "latin": True,
     },
     # ~2.4% of CC
     "Italian": {
         "langs": ["it"],
-        "weight": 1.5,
+        "weight": 1.6,
         "min_chars": 2_000,
         "latin": True,
     },
     # ~2.0% of CC — split out from CentralEuropeanLatin; rivals Italian/Portuguese
     "Polish": {
         "langs": ["pl"],
-        "weight": 1.5,
+        "weight": 1.55,
         "min_chars": 2_000,
         "latin": True,
     },
     # ~1.8% of CC — was significantly underweighted at 1.15
     "Dutch": {
         "langs": ["nl"],
-        "weight": 1.5,
+        "weight": 1.55,
         "min_chars": 2_000,
         "latin": True,
     },
     # ~1.2% of CC — split out from CentralEuropeanLatin; large internet population
     "Turkish": {
         "langs": ["tr"],
-        "weight": 1.4,
+        "weight": 1.45,
         "min_chars": 2_000,
         "latin": True,
     },
     # ind ~1.1%, vie ~1.05% of CC
     "SoutheastAsianLatin": {
         "langs": ["vi", "id", "ms", "sq", "la"],
-        "weight": 1.4,
+        "weight": 1.55,
         "min_chars": 2_000,
         "latin": True,
     },
     "WesternLatin": {
         "langs": ["ca", "gl", "oc"],
-        "weight": 1.0,
+        "weight": 1.05,
         "min_chars": 1_500,
         "latin": True,
     },
     "CelticLatin": {
         "langs": ["br", "ga", "gd", "cy"],
-        "weight": 0.8,
+        "weight": 0.85,
         "min_chars": 1_500,
         "latin": True,
     },
     "AdriaticLatin": {
         "langs": ["bs", "hr", "sl", "sk"],
-        "weight": 1.0,
+        "weight": 1.1,
         "min_chars": 1_500,
         "latin": True,
     },
     "BalticLatin": {
         "langs": ["et", "lv", "lt"],
-        "weight": 0.9,
+        "weight": 0.95,
         "min_chars": 1_500,
         "latin": True,
     },
     # ces ~1.14%, ron ~0.53%, hun ~0.52% of CC — smaller tier after splitting out pl/tr
     "CentralEuropeanLatin": {
         "langs": ["cs", "ro", "hu"],
-        "weight": 1.2,
+        "weight": 1.3,
         "min_chars": 2_000,
-        "latin": True,
-    },
-    "NorthGermanicLatin": {
-        "langs": ["nb"],
-        "weight": 1.0,
-        "min_chars": 1_500,
         "latin": True,
     },
     # ~0.81% of CC — was overweighted at 1.7
     "Korean": {
         "langs": ["ko"],
-        "weight": 1.3,
+        "weight": 1.35,
         "min_chars": 1_200,
         "latin": False,
     },
     # ukr ~0.70%, bel ~0.017% of CC
     "EastSlavicCyrillic": {
         "langs": ["uk", "be"],
-        "weight": 1.15,
+        "weight": 1.2,
         "min_chars": 2_000,
         "latin": False,
     },
     # ~0.65% of CC — upweighted relative to CC share given speaker population
     "Arabic": {
         "langs": ["ar"],
-        "weight": 1.35,
+        "weight": 1.4,
         "min_chars": 2_000,
         "latin": False,
     },
-    # sv ~0.7%, dan ~0.51%, nor+nno ~0.33%, fin ~0.37%, isl ~0.04%, afr ~0.01%
+    "Norwegian": {
+        "langs": ["no", "nb", "nn"],
+        "weight": 1.0,
+        "min_chars": 2_000,
+        "latin": True,
+    },
+    # sv ~0.7%, dan ~0.51%, fin ~0.37%, isl ~0.04%, afr ~0.01%
     # combined ~2.0% of CC — was drastically overweighted at 6.0
     # note: Swedish Wikipedia is heavily bot-generated stubs, don't rely on article count
     "NordicCore": {
-        "langs": ["sv", "da", "no", "nn", "is", "af", "fi"],
-        "weight": 1.8,
+        "langs": ["sv", "da", "is", "af", "fi"],
+        "weight": 1.95,
         "min_chars": 2_000,
         "latin": True,
     },
     # bul ~0.27%, srp ~0.25%, mkd ~0.037% of CC
     "BalkanCyrillic": {
         "langs": ["bg", "sr", "mk"],
-        "weight": 1.0,
+        "weight": 1.05,
         "min_chars": 2_000,
         "latin": False,
     },
     # fas ~0.20% of CC (ignore the one anomalous crawl spike)
     "ArabicOther": {
         "langs": ["fa", "ps", "sd", "ug"],
-        "weight": 0.9,
+        "weight": 0.95,
         "min_chars": 2_000,
         "latin": False,
     },
@@ -199,14 +199,14 @@ LANGUAGE_BUCKETS = {
             "or",
             "ne",
         ],
-        "weight": 0.9,
+        "weight": 0.95,
         "min_chars": 2_000,
         "latin": False,
     },
     # kk ~0.038%, mn ~0.016% of CC — very thin corpus, weight is already a large relative boost
     "CentralAsianCaucusCyrillic": {
         "langs": ["kk", "mn", "tt", "ky", "tg", "ba", "ce"],
-        "weight": 1.2,
+        "weight": 1.05,
         "min_chars": 2_000,
         "latin": False,
     },
@@ -215,25 +215,25 @@ LANGUAGE_BUCKETS = {
     # - ckb: FineTranslations / Arabic-script Kurdish
     "KurdishLatin": {
         "langs": ["ku"],
-        "weight": 0.95,
+        "weight": 0.5,
         "min_chars": 1_500,
         "latin": True,
     },
     "KurdishArabic": {
         "langs": ["ckb"],
-        "weight": 0.95,
+        "weight": 0.5,
         "min_chars": 2_000,
         "latin": False,
     },
     "AfricanLatin": {
         "langs": ["sw", "tl", "eu", "yo", "zu", "ny"],
-        "weight": 0.8,
+        "weight": 0.9,
         "min_chars": 1_500,
         "latin": True,
     },
     "PeripheralLatin": {
         "langs": ["eo", "jv", "lb", "mg", "mt", "om", "rm", "so", "su", "uz"],
-        "weight": 0.8,
+        "weight": 0.9,
         "min_chars": 1_500,
         "latin": True,
     },
@@ -241,13 +241,13 @@ LANGUAGE_BUCKETS = {
     # Greco-Semitic/Caucasus-style scripts separate from Brahmic/Tibetan ones.
     "OtherScriptsWest": {
         "langs": ["el", "he", "hy", "ka", "am", "ti", "dv", "hbo", "grc"],
-        "weight": 0.95,
+        "weight": 1.0,
         "min_chars": 2_000,
         "latin": False,
     },
     "OtherScriptsEast": {
         "langs": ["km", "lo", "my", "th", "si", "bo"],
-        "weight": 0.85,
+        "weight": 0.9,
         "min_chars": 2_000,
         "latin": False,
     },
