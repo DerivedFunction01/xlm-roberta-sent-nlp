@@ -6,7 +6,7 @@ LANGUAGE_BUCKETS = {
     # ~41% of CC — intentionally capped to avoid crowding out other languages
     "English": {
         "langs": ["en"],
-        "weight": 2.5,
+        "weight": 2.9,
         "min_chars": 2_000,
         "latin": True,
     },
@@ -135,7 +135,7 @@ LANGUAGE_BUCKETS = {
     # ukr ~0.70%, bel ~0.017% of CC
     "EastSlavicCyrillic": {
         "langs": ["uk", "be"],
-        "weight": 1.2,
+        "weight": 1.7,
         "min_chars": 2_000,
         "latin": False,
     },
@@ -157,7 +157,7 @@ LANGUAGE_BUCKETS = {
     # note: Swedish Wikipedia is heavily bot-generated stubs, don't rely on article count
     "NordicCore": {
         "langs": ["sv", "da", "is", "af", "fi"],
-        "weight": 1.95,
+        "weight": 2.1,
         "min_chars": 2_000,
         "latin": True,
     },
@@ -215,13 +215,13 @@ LANGUAGE_BUCKETS = {
     # - ckb: FineTranslations / Arabic-script Kurdish
     "KurdishLatin": {
         "langs": ["ku"],
-        "weight": 0.5,
+        "weight": 0.45,
         "min_chars": 1_500,
         "latin": True,
     },
     "KurdishArabic": {
         "langs": ["ckb"],
-        "weight": 0.5,
+        "weight": 0.45,
         "min_chars": 2_000,
         "latin": False,
     },
@@ -349,7 +349,7 @@ FT["every"] = len(FT["langs"])
 
 RUN = {
     "len": 512,
-    "target": 5_500_000, 
+    "target": 4_500_000, 
     "syn_cache": True,
     "syn_rebuild": False,
     "tok_cache": True,
