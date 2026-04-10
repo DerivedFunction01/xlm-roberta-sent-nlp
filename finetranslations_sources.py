@@ -540,7 +540,9 @@ def _finetrans_cache_meta(
     english_accept_every: int,
     include_translated_english: bool,
     configs: list[tuple[str, str]],
+    completed_configs: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
+    completed = completed_configs if completed_configs is not None else configs
     return {
         "dataset": FINETRANS_DATASET,
         "cache_layout": "per_language_parquet_v1",
@@ -552,6 +554,7 @@ def _finetrans_cache_meta(
         "english_accept_every": english_accept_every,
         "include_translated_english": include_translated_english,
         "configs": [[config, lang] for config, lang in configs],
+        "completed_configs": [[config, lang] for config, lang in completed],
         "cache_format": "parquet_records_v1",
     }
 
@@ -564,6 +567,18 @@ def _normalize_finetrans_configs(value: Any) -> list[tuple[Any, Any]]:
         if isinstance(item, list) and len(item) >= 2:
             normalized.append((item[0], item[1]))
     return normalized
+
+
+def _finetrans_completed_configs(meta: dict[str, Any] | None, expected_configs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    if not isinstance(meta, dict):
+        return []
+    completed = _normalize_finetrans_configs(meta.get("completed_configs"))
+    if completed:
+        return completed
+    configs = _normalize_finetrans_configs(meta.get("configs"))
+    if configs and len(configs) <= len(expected_configs):
+        return configs
+    return []
 
 
 def _load_finetrans_meta_raw(
@@ -591,7 +606,7 @@ def _finetrans_meta_compatibility(
             continue
         if meta.get(key) != value:
             return None
-    meta_configs = _normalize_finetrans_configs(meta.get("configs"))
+    meta_configs = _finetrans_completed_configs(meta, _normalize_finetrans_configs(expected_meta.get("configs")))
     expected_configs = _normalize_finetrans_configs(expected_meta.get("configs"))
     if meta_configs == expected_configs:
         return "exact"
@@ -959,20 +974,39 @@ def load_finetranslations_sentences(
 
     existing_meta = _load_finetrans_meta_raw(cache_meta)
     cache_state = _finetrans_meta_compatibility(meta=existing_meta, expected_meta=expected_meta)
-    if not force_rebuild and cache_state == "exact" and existing_meta is not None and existing_meta.get("status") == "complete":
+    config_root = os.path.join(sentences_dir, "_finetrans_tmp")
+    os.makedirs(config_root, exist_ok=True)
+    recover_from_temp = _has_finetrans_temp_shards(config_root)
+    base_result: dict[str, list[str]] = _load_finetrans_cache_map(cache_dir) if os.path.isdir(cache_dir) else {}
+    cached_langs = set(base_result)
+    meta_completed_configs = _normalize_finetrans_configs(
+        existing_meta.get("completed_configs") if isinstance(existing_meta, dict) else None
+    )
+    existing_completed_configs = meta_completed_configs
+    if not existing_completed_configs and cached_langs:
+        existing_completed_configs = [item for item in configs if item[1] in cached_langs]
+    completed_config_pairs = set(existing_completed_configs)
+    cache_has_all_expected_langs = {lang for _, lang in configs}.issubset(cached_langs)
+    cache_is_complete = (
+        not force_rebuild
+        and existing_meta is not None
+        and existing_meta.get("status") == "complete"
+        and (
+            set(meta_completed_configs) == set(configs)
+            if meta_completed_configs
+            else completed_config_pairs == set(configs) and cache_has_all_expected_langs
+        )
+    )
+    if cache_is_complete and cache_state == "exact":
         print(f"Loading FineTranslations cache from {cache_dir}")
-        result = _load_finetrans_cache_map(cache_dir)
+        result = base_result
         if result:
             total = sum(len(v) for v in result.values())
             print(f"  {len(result)} languages | {total:,} sentences total")
             return result
 
-    config_root = os.path.join(sentences_dir, "_finetrans_tmp")
-    os.makedirs(config_root, exist_ok=True)
-    recover_from_temp = _has_finetrans_temp_shards(config_root)
     incremental_update = (
         not force_rebuild
-        and cache_state == "subset"
         and existing_meta is not None
         and existing_meta.get("status") == "complete"
         and os.path.isdir(cache_dir)
@@ -992,16 +1026,12 @@ def load_finetranslations_sentences(
     if force_rebuild:
         _clear_finetrans_config_dir(config_root)
 
-    configs_to_process = configs
-    cached_config_pairs: set[tuple[str, str]] = set()
-    base_result: dict[str, list[str]] = {}
+    configs_to_process = [item for item in configs if item not in completed_config_pairs]
+    cached_config_pairs: set[tuple[str, str]] = set(completed_config_pairs)
     base_meta = existing_meta if incremental_update else None
     if incremental_update:
-        cached_config_pairs = set(_normalize_finetrans_configs(existing_meta.get("configs")))
-        base_result = _load_finetrans_cache_map(cache_dir)
         if not base_result and (existing_meta.get("lang_counts") or existing_meta.get("total_after")):
             incremental_update = False
-            base_result = {}
             cached_config_pairs = set()
             configs_to_process = configs
         else:
@@ -1019,6 +1049,7 @@ def load_finetranslations_sentences(
                             "total_before": base_meta.get("total_before", sum(len(v) for v in base_result.values())),
                             "total_after": base_meta.get("total_after", sum(len(v) for v in base_result.values())),
                             "total_removed": base_meta.get("total_removed", 0),
+                            "completed_configs": [[config, lang] for config, lang in cached_config_pairs],
                             "next_config_idx": len(configs),
                             "next_row_idx": 0,
                             "next_shard_idx": 0,
@@ -1030,7 +1061,7 @@ def load_finetranslations_sentences(
                 return base_result
             print(
                 f"Expanding FineTranslations cache with {len(configs_to_process)} new subset(s) "
-                f"(reusing {len(cached_config_pairs)} existing cache entries) ..."
+                f"(reusing {len(cached_config_pairs)} completed config entries) ..."
             )
 
     max_workers = min(len(configs_to_process), max(1, max_workers or 1))
@@ -1181,6 +1212,7 @@ def load_finetranslations_sentences(
     else:
         merged_dedup_summary = dedup_summary
         merged_lang_counts = {lang: len(sentences) for lang, sentences in result.items()}
+    completed_config_pairs = set(cached_config_pairs).union(configs_to_process)
 
     # Rebuilds are written atomically, so we keep any previous live cache in
     # place until the new parquet and metadata are fully ready.
@@ -1196,6 +1228,7 @@ def load_finetranslations_sentences(
             "total_before": total_before,
             "total_after": total_after,
             "total_removed": total_removed,
+            "completed_configs": [[config, lang] for config, lang in sorted(completed_config_pairs)],
             "next_config_idx": len(configs),
             "next_row_idx": 0,
             "next_shard_idx": 0,
