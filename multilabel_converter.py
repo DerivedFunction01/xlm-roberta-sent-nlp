@@ -77,7 +77,7 @@ def convert_tokenized_dataset(
     num_samples: int | None = None,
 ) -> DatasetDict:
     """Convert a token classification train/eval split into multilabel examples."""
-    if num_samples is not None:
+    if num_samples is not None and dataset is not None:
         dataset = DatasetDict(
             {
                 split_name: split.select(range(min(num_samples, len(split))))
@@ -130,7 +130,8 @@ def convert_and_save_multilabel_dataset(
 
     tokenized_dataset = load_tokenized_cache(input_path)
     _, id2label = build_label_maps(ALL_LANGS)
-
+    if tokenized_dataset is None:
+        raise RuntimeError
     multilabel_dataset = convert_tokenized_dataset(
         tokenized_dataset,
         id2label=id2label,
