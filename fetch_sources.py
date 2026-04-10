@@ -12,11 +12,9 @@ from smol_sources import load_smol_sentences
 def refresh_sources() -> None:
     #%%
     workers = max(1, mp.cpu_count() // 4)
-    wiki_langs = [lang for lang in ALL_LANGS if lang != "ckb"]
     #%%
     print("Refreshing wiki caches ...")
     _ = load_wiki_sentences(
-        langs=wiki_langs,
         max_workers=workers,
     )
     #%%
