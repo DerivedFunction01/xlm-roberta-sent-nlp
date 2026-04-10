@@ -96,25 +96,25 @@ LANGUAGE_BUCKETS = {
     },
     "WesternLatin": {
         "langs": ["ca", "gl", "oc"],
-        "weight": 1.05,
+        "weight": 1.2,
         "min_chars": 1_500,
         "latin": True,
     },
     "CelticLatin": {
         "langs": ["br", "ga", "gd", "cy"],
-        "weight": 0.85,
+        "weight": 1.3,
         "min_chars": 1_500,
         "latin": True,
     },
     "AdriaticLatin": {
         "langs": ["bs", "hr", "sl", "sk"],
-        "weight": 1.1,
+        "weight": 1.4,
         "min_chars": 1_500,
         "latin": True,
     },
     "BalticLatin": {
         "langs": ["et", "lv", "lt"],
-        "weight": 0.95,
+        "weight": 1.2,
         "min_chars": 1_500,
         "latin": True,
     },
@@ -206,7 +206,7 @@ LANGUAGE_BUCKETS = {
     # kk ~0.038%, mn ~0.016% of CC — very thin corpus, weight is already a large relative boost
     "CentralAsianCaucusCyrillic": {
         "langs": ["kk", "mn", "tt", "ky", "tg", "ba", "ce"],
-        "weight": 1.05,
+        "weight": 1.1,
         "min_chars": 2_000,
         "latin": False,
     },
@@ -227,13 +227,13 @@ LANGUAGE_BUCKETS = {
     },
     "AfricanLatin": {
         "langs": ["sw", "tl", "eu", "yo", "zu", "ny"],
-        "weight": 0.9,
+        "weight": 1.0,
         "min_chars": 1_500,
         "latin": True,
     },
     "PeripheralLatin": {
         "langs": ["eo", "jv", "lb", "mg", "mt", "om", "rm", "so", "su", "uz"],
-        "weight": 0.9,
+        "weight": 1.0,
         "min_chars": 1_500,
         "latin": True,
     },
@@ -247,7 +247,7 @@ LANGUAGE_BUCKETS = {
     },
     "OtherScriptsEast": {
         "langs": ["km", "lo", "my", "th", "si", "bo"],
-        "weight": 0.9,
+        "weight": 1.0,
         "min_chars": 2_000,
         "latin": False,
     },
