@@ -29,6 +29,7 @@ LATEX_MAX_CHARS = 300
 SYNTH_MATH_N = 50_000
 NOISE_N = 30_000
 GIBBERISH_N = 30_000
+NUMERIC_NOISE_N = 30_000
 
 _LATEX_WRAP = __import__("re").compile(r"^\s*\$+|\$+\s*$|^\\\[|\\\]$|^\\begin\{.*?\}|\\end\{.*?\}$")
 
@@ -93,10 +94,67 @@ def generate_symbol_noise(min_len: int = 3, max_len: int = 20) -> str:
     return "".join(out)
 
 
+def generate_numeric_noise() -> str:
+    style = random.choice(["float_row", "money", "csv_row", "table_row", "table_block"])
+    if style == "money":
+        currency = random.choice(["$", "€", "£", "¥", "₩", "₹"])
+        value = random.uniform(0.01, 9_999.99)
+        if currency in {"¥", "₩"}:
+            return f"{currency}{int(round(value)):,}"
+        if random.random() < 0.35:
+            return f"{random.choice(['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'CAD', 'AUD', 'CHF', 'SEK', 'NZD', 'BRL','RUB', 'INR', 'MXN', 'ZAR', 'TRY', 'SGD', 'HKD', 'NOK', 'DKK', 'PLN', 'THB', 'IDR'])} {value:,.2f}"
+        return f"{currency}{value:,.2f}"
+
+    if style == "float_row":
+        count = random.randint(3, 8)
+        values = [f"{random.uniform(0, 99999):.6f}" for _ in range(count)]
+        return " ".join(values)
+
+    if style == "csv_row":
+        count = random.randint(3, 8)
+        values = [
+            random.choice(
+                [
+                    f"{random.uniform(0, 99999):.3f}",
+                    f"{random.randint(0, 99999)}",
+                    f"{random.uniform(0, 1):.6f}",
+                    f"{random.randint(1_000, 99_999):,}",
+                ]
+            )
+            for _ in range(count)
+        ]
+        return ", ".join(values)
+
+    if style == "table_row":
+        count = random.randint(3, 6)
+        values = [f"{random.uniform(0, 9999):.4f}" for _ in range(count)]
+        return " | ".join(values)
+
+    row_count = random.randint(2, 4)
+    col_count = random.randint(3, 5)
+    header = ", ".join(f"col{i + 1}" for i in range(col_count))
+    rows = [header]
+    for _ in range(row_count):
+        row = ", ".join(
+            random.choice(
+                [
+                    f"{random.uniform(0, 99999):.4f}",
+                    f"{random.randint(0, 99999)}",
+                    f"{random.uniform(0, 1):.6f}",
+                    f"{random.randint(1_000, 99_999):,}",
+                ]
+            )
+            for _ in range(col_count)
+        )
+        rows.append(row)
+    return "\n".join(rows)
+
+
 @dataclass
 class NeutralSources:
     latex_formulas: list[str]
     synth_math_pool: list[str]
+    numeric_noise_pool: list[str]
     html_noise_pool: list[str]
     css_noise_pool: list[str]
     code_noise_pool: list[str]
@@ -107,13 +165,14 @@ class NeutralSources:
         pools = [
             self.latex_formulas,
             self.synth_math_pool,
+            self.numeric_noise_pool,
             self.html_noise_pool,
             self.css_noise_pool,
             self.code_noise_pool,
             self.noise_pool,
             self.gibberish_pool,
         ]
-        weights = [0.28, 0.22, 0.14, 0.08, 0.10, 0.09, 0.09]
+        weights = [0.24, 0.18, 0.12, 0.07, 0.08, 0.08, 0.08, 0.15]
         pool = random.choices(pools, weights=weights, k=1)[0]
         return random.choice(pool)
 
@@ -141,6 +200,14 @@ def build_neutral_sources(
         "synthetic math expressions",
     )
     print(f"math_gen:    {len(synth_math_pool):>6} expressions")
+
+    numeric_noise_pool = _load_or_build_text_pool(
+        os.path.join(sentences_dir, "numeric_noise_pool.parquet"),
+        "snippet",
+        lambda: [generate_numeric_noise() for _ in range(NUMERIC_NOISE_N)],
+        "numeric noise snippets",
+    )
+    print(f"numeric:     {len(numeric_noise_pool):>6} snippets")
 
     html_noise_pool = _load_or_build_text_pool(
         os.path.join(sentences_dir, "html_noise_pool.parquet"),
@@ -193,6 +260,7 @@ def build_neutral_sources(
     return NeutralSources(
         latex_formulas=latex_formulas,
         synth_math_pool=synth_math_pool,
+        numeric_noise_pool=numeric_noise_pool,
         html_noise_pool=html_noise_pool,
         css_noise_pool=css_noise_pool,
         code_noise_pool=code_noise_pool,
