@@ -156,7 +156,7 @@ LANGUAGE_BUCKETS = {
     # combined ~2.0% of CC — was drastically overweighted at 6.0
     # note: Swedish Wikipedia is heavily bot-generated stubs, don't rely on article count
     "NordicCore": {
-        "langs": ["sv", "da", "no", "is", "af", "fi"],
+        "langs": ["sv", "da", "no", "nn", "is", "af", "fi"],
         "weight": 1.8,
         "min_chars": 2_000,
         "latin": True,
@@ -327,7 +327,7 @@ FT = {
     "max_row": 50_000,
     "miss": 1_000,
     "include_en": True,
-    "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms", "ckb"},
+    "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms", "ckb", "nn"},
     "lang_overrides": {
         "zh": "yue",
     },
