@@ -11,7 +11,7 @@ from smol_sources import load_smol_sentences
 #%%
 def refresh_sources() -> None:
     #%%
-    workers = max(1, mp.cpu_count() // 5)
+    workers = max(1, mp.cpu_count() // 4)
     #%%
     print("Refreshing wiki caches ...")
     _ = load_wiki_sentences(
