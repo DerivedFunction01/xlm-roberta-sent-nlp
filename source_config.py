@@ -185,26 +185,26 @@ LANGUAGE_BUCKETS = {
     },
     # combined ~0.27% of CC — upweighted for script diversity
     "IndicOther": {
-        "langs": ["ur", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "as", "or"],
+        "langs": ["ur", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "as", "or", "ne"],
         "weight": 0.9,
         "min_chars": 2_000,
         "latin": False,
     },
     # kk ~0.038%, mn ~0.016% of CC — very thin corpus, weight is already a large relative boost
     "CentralAsianCyrillic": {
-        "langs": ["kk", "mn"],
+        "langs": ["kk", "mn", "tt"],
         "weight": 0.9,
         "min_chars": 2_000,
         "latin": False,
     },
     "AfricanLatin": {
-        "langs": ["sw", "tl", "eu"],
+        "langs": ["sw", "tl", "eu", "yo"],
         "weight": 0.8,
         "min_chars": 1_500,
         "latin": True,
     },
     "PeripheralLatin": {
-        "langs": ["eo", "jv", "mg", "om", "so", "su", "uz"],
+        "langs": ["eo", "jv", "lb", "mg", "mt", "om", "rm", "so", "su", "uz"],
         "weight": 0.8,
         "min_chars": 1_500,
         "latin": True,
