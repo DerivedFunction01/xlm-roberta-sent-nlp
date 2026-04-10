@@ -49,10 +49,12 @@ PATHS["tokenized"] = {
 }
 PATHS["multilabel_dataset"] = {
     "cache_dir": os.path.join(PATHS["sentences_dir"], "multilabel_dataset"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "multilabel_dataset", "multilabel_dataset.meta.json"),
 }
 PATHS["versions"] = {
     "cache": 10,
     "tokenized": 2,
+    "multilabel": 2,
 }
 
 for path in [

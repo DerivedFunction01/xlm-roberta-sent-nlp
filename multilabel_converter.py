@@ -10,6 +10,8 @@ from datasets import Dataset, DatasetDict, load_from_disk
 from language import ALL_LANGS
 from paths import PATHS
 
+MULTILABEL_CACHE_VERSION = PATHS["versions"]["multilabel"]
+
 
 def build_label_maps(all_langs: list[str]) -> tuple[dict[str, int], dict[int, str]]:
     """Build NER label maps from the canonical language list."""
@@ -95,8 +97,23 @@ def convert_tokenized_dataset(
     )
 
 
-def load_tokenized_cache(path: Path) -> DatasetDict:
+def load_tokenized_cache(path: Path) -> DatasetDict | None:
     """Load a tokenized NER dataset cache saved with Hugging Face datasets."""
+    meta_path = Path(PATHS["multilabel_dataset"]["cache_meta"])
+    if meta_path.exists():
+        try:
+            with meta_path.open(encoding="utf-8") as f:
+                meta = json.load(f)
+            if meta.get("cache_version") != MULTILABEL_CACHE_VERSION:
+                return None
+            if meta.get("all_langs") != ALL_LANGS:
+                return None
+        except Exception:
+            return None
+    else:
+        # If no manifest exists, treat the cache as unvalidated and allow the caller
+        # to rebuild if the loaded dataset is incompatible.
+        pass
     return load_from_disk(str(path))
 
 
@@ -121,6 +138,16 @@ def convert_and_save_multilabel_dataset(
     )
 
     multilabel_dataset.save_to_disk(str(output_path))
+    with Path(PATHS["multilabel_dataset"]["cache_meta"]).open("w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "cache_version": MULTILABEL_CACHE_VERSION,
+                "all_langs": ALL_LANGS,
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
     return multilabel_dataset
 
 
