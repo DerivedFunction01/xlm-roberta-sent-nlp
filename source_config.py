@@ -213,7 +213,7 @@ LANGUAGE_BUCKETS = {
         "latin": False,
     },
     "AfricanLatin": {
-        "langs": ["sw", "tl", "eu", "yo"],
+        "langs": ["sw", "tl", "eu", "yo", "zu", "ny"],
         "weight": 0.8,
         "min_chars": 1_500,
         "latin": True,
