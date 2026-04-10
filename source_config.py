@@ -197,6 +197,21 @@ LANGUAGE_BUCKETS = {
         "min_chars": 2_000,
         "latin": False,
     },
+    # Kurdish is split by script/source:
+    # - ku: Wikipedia / Latin-script Kurdish
+    # - ckb: FineTranslations / Arabic-script Kurdish
+    "KurdishLatin": {
+        "langs": ["ku"],
+        "weight": 0.95,
+        "min_chars": 1_500,
+        "latin": True,
+    },
+    "KurdishArabic": {
+        "langs": ["ckb"],
+        "weight": 0.95,
+        "min_chars": 2_000,
+        "latin": False,
+    },
     "AfricanLatin": {
         "langs": ["sw", "tl", "eu", "yo"],
         "weight": 0.8,
@@ -312,7 +327,7 @@ FT = {
     "max_row": 50_000,
     "miss": 1_000,
     "include_en": True,
-    "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms"},
+    "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms", "ckb"},
     "lang_overrides": {
         "zh": "yue",
     },
