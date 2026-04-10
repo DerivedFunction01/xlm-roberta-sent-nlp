@@ -328,7 +328,7 @@ INSTRUCT = {
     "use": True,
     "rebuild": False,
     "max_lang": 50_000,
-    "overflow_lang": 75_000,
+    "overflow_lang": 55_000,
     "sources": DEFAULT_INSTRUCTION_SOURCE_SPECS,
 }
 
@@ -336,7 +336,7 @@ FT = {
     "use": True,
     "rebuild": False,
     "max_lang": 50_000,
-    "overflow_lang": 75_000,
+    "overflow_lang": 55_000,
     "max_row": 50_000,
     "miss": 1_000,
     "include_en": True,
