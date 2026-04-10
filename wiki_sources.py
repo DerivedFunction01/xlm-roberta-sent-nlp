@@ -55,6 +55,37 @@ LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG = {
 LENGTH_PRIORITY_LANGS = set(LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG)
 LENGTH_PRIORITY_SENTENCE_CAP = 25_000
 
+
+def _is_missing_wiki_config_error(exc: Exception, lang: str) -> bool:
+    message = str(exc).lower()
+    config_name = f"20231101.{lang}".lower()
+    return (
+        config_name in message
+        and (
+            "config" in message
+            or "configuration" in message
+            or "available configs" in message
+            or "not found" in message
+            or "does not exist" in message
+        )
+    )
+
+
+def _load_wiki_dataset(lang: str, *, seed: int):
+    try:
+        dataset = load_dataset(
+            "wikimedia/wikipedia",
+            f"20231101.{lang}",
+            split="train",
+            streaming=True,
+        )
+    except Exception as exc:
+        if _is_missing_wiki_config_error(exc, lang):
+            print(f"  Skipping {lang}: Wikipedia config 20231101.{lang} was not found")
+            return None
+        raise
+    return dataset.shuffle(buffer_size=1000, seed=seed)
+
 def parquet_path(sentences_dir: str, lang: str) -> str:
     return os.path.join(sentences_dir, f"{lang}.parquet")
 
@@ -198,13 +229,9 @@ def extract_sentences_from_wiki(
             f"(scan_limit={scan_limit}, sentence_cap={sentence_cap}, "
             f"min_chars={_article_min_chars(lang, lang_to_group)})"
         )
-        dataset = load_dataset(
-            "wikimedia/wikipedia",
-            f"20231101.{lang}",
-            split="train",
-            streaming=True,
-        )
-        dataset = dataset.shuffle(buffer_size=1000, seed=seed)
+        dataset = _load_wiki_dataset(lang, seed=seed)
+        if dataset is None:
+            return ""
         priority_articles = _collect_priority_articles(
             dataset,
             lang,
@@ -306,13 +333,9 @@ def extract_sentences_from_wiki(
             if os.path.exists(path):
                 os.remove(path)
 
-    dataset = load_dataset(
-        "wikimedia/wikipedia",
-        f"20231101.{lang}",
-        split="train",
-        streaming=True,
-    )
-    dataset = dataset.shuffle(buffer_size=1000, seed=seed)
+    dataset = _load_wiki_dataset(lang, seed=seed)
+    if dataset is None:
+        return ""
 
     def _update_progress(bar, scanned_articles: int) -> None:
         bar.set_postfix_str(
@@ -439,7 +462,7 @@ def load_or_extract(
     seed: int = 42,
     sentences_dir: str = PATHS["sentences_dir"],
     articles_per_lang: int = ARTICLES_PER_LANG,
-) -> tuple[str, str]:
+) -> tuple[str, str | None]:
     path = parquet_path(sentences_dir, lang)
     if os.path.exists(path):
         cached = pd.read_parquet(path)["sentence"].tolist()
@@ -454,6 +477,8 @@ def load_or_extract(
         seed=seed,
         sentences_dir=sentences_dir,
     )
+    if not extracted_path:
+        return lang, None
     return lang, extracted_path
 
 
@@ -484,6 +509,9 @@ def load_wiki_sentences(
         }
         for future in tqdm(as_completed(futures), total=len(langs), desc="Languages"):
             lang, cache_path = future.result()
+            if not cache_path:
+                tqdm.write(f"  {lang}: skipped (Wikipedia config missing)")
+                continue
             sentences = pd.read_parquet(cache_path)["sentence"].tolist()
             result[lang] = sentences
             tqdm.write(f"  {lang}: {len(sentences)} sentences -> {cache_path}")
