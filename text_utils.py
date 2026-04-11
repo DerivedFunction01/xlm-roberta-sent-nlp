@@ -158,7 +158,7 @@ def _nltk_english_secondary_word_set() -> set[str]:
             word = word.lower().strip()
             if not word or not word.isalpha() or word in ENGLISH_STOP_WORD_SET:
                 continue
-            secondary.add(word)
+            if len(word) > 3: secondary.add(word)
             if len(secondary) >= NLTK_ENGLISH_SECONDARY_LIMIT:
                 break
         return secondary
