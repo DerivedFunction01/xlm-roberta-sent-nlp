@@ -21,6 +21,7 @@ from source_config import (
     FT,
 )
 from text_utils import (
+    ENGLISH_FILTER_POLICY,
     LATIN_GROUPS,
     SENT_SPLIT,
     _english_leak_stats,
@@ -33,9 +34,6 @@ from text_utils import (
 
 FINETRANS_DATASET = "HuggingFaceFW/finetranslations"
 FINETRANS_MIN_LANGUAGE_SCORE = 0.90
-FINETRANS_LATIN_STRICT_LANGUAGE_SCORE_CUTOFF = 0.98
-FINETRANS_LATIN_MAX_ENGLISH_RATIO = 0.35
-FINETRANS_LATIN_MIN_TOKENS = 4
 FINETRANS_MIN_TOKEN_COUNT = 20
 FINETRANS_LATIN_LONGEST_CHUNKS = 2
 FINETRANS_MIN_QUALITY_SCORE = 0.80
@@ -224,17 +222,19 @@ def _sentence_token_length(sentence: str) -> int:
 
 def _looks_english_heavy(text: str) -> bool:
     local_hits, ascii_words, alpha_words = _english_leak_stats(text)
-    if alpha_words < 4:
+    policy = ENGLISH_FILTER_POLICY["finetrans"]
+    if alpha_words < policy["min_tokens"]:
         return False
-    if local_hits < 3:
+    if local_hits < ENGLISH_FILTER_POLICY["min_local_hits"]:
         return False
-    if ascii_words / alpha_words < 0.70:
+    if ascii_words / alpha_words < ENGLISH_FILTER_POLICY["ascii_ratio_floor"]:
         return False
     broad_hits = _english_corpus_hits(text)
-    if alpha_words < FINETRANS_LATIN_MIN_TOKENS:
-        return broad_hits >= 3
     english_ratio = broad_hits / max(1, alpha_words)
-    return broad_hits >= 3 and english_ratio >= FINETRANS_LATIN_MAX_ENGLISH_RATIO
+    return (
+        broad_hits >= ENGLISH_FILTER_POLICY["nonlatin"]["corpus_hits_min"]
+        and english_ratio >= policy["max_english_ratio"]
+    )
 
 
 def _row_base_score(row: dict[str, Any], lang: str) -> float:
@@ -265,7 +265,8 @@ def _latin_source_lines(
     lines: list[str] = []
     seen: set[str] = set()
     apply_english_filter = (
-        lang_score is None or lang_score < FINETRANS_LATIN_STRICT_LANGUAGE_SCORE_CUTOFF
+        lang_score is None
+        or lang_score < ENGLISH_FILTER_POLICY["finetrans"]["strict_language_score_cutoff"]
     )
     for chunk in selected_chunks:
         for raw_line in chunk.splitlines():

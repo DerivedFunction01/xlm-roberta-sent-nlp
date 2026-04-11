@@ -8,7 +8,10 @@ from functools import lru_cache
 from pathlib import Path
 
 from language import ENGLISH_STOP_WORDS, LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS, canonical_lang
-from nltk.corpus import words as nltk_words
+try:
+    from nltk.corpus import words as nltk_words
+except Exception:  # pragma: no cover - optional dependency
+    nltk_words = None
 
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+")
@@ -28,6 +31,26 @@ WIKI_DIGITS = re.compile(r"\d")
 WIKI_WORDS = re.compile(r"\b\w+\b", flags=re.UNICODE)
 MAX_DIGIT_RATIO = 0.10
 MIN_LATIN_WORDS = 4
+ENGLISH_FILTER_POLICY = {
+    "min_alpha_words": 4,
+    "min_local_hits": 3,
+    "ascii_ratio_floor": 0.70,
+    "latin": {
+        "corpus_hits_min": 4,
+        "corpus_ratio_min": 0.60,
+        "ascii_ratio_min": 0.80,
+    },
+    "nonlatin": {
+        "corpus_hits_min": 3,
+        "corpus_ratio_min": 0.30,
+        "ascii_ratio_min": 0.50,
+    },
+    "finetrans": {
+        "max_english_ratio": 0.35,
+        "strict_language_score_cutoff": 0.98,
+        "min_tokens": 4,
+    },
+}
 ENGLISH_STOP_WORD_SET = {word.lower() for word in ENGLISH_STOP_WORDS}
 NLTK_ENGLISH_SECONDARY_LIMIT = 50_000
 POOL_TERMINAL_PUNCT_CHOICES = (".", ":", ";", "!", "?")
@@ -247,18 +270,28 @@ def _looks_like_english_sentence(sentence: str, lang: str, lang_to_group: dict[s
     if lang == "en":
         return False
     local_hits, ascii_words, alpha_words = _english_leak_stats(sentence)
-    if alpha_words < 4:
+    if alpha_words < ENGLISH_FILTER_POLICY["min_alpha_words"]:
         return False
-    if local_hits < 3:
+    if local_hits < ENGLISH_FILTER_POLICY["min_local_hits"]:
         return False
     ascii_ratio = ascii_words / alpha_words
-    if ascii_ratio < 0.50:
+    if ascii_ratio < ENGLISH_FILTER_POLICY["ascii_ratio_floor"]:
         return False
     broad_hits = _english_corpus_hits(sentence)
     stop_ratio = broad_hits / alpha_words
     if lang_to_group.get(lang) in LATIN_GROUPS:
-        return broad_hits >= 4 and stop_ratio >= 0.60 and ascii_ratio >= 0.80
-    return broad_hits >= 3 and stop_ratio >= 0.30 and ascii_ratio >= 0.50
+        latin_policy = ENGLISH_FILTER_POLICY["latin"]
+        return (
+            broad_hits >= latin_policy["corpus_hits_min"]
+            and stop_ratio >= latin_policy["corpus_ratio_min"]
+            and ascii_ratio >= latin_policy["ascii_ratio_min"]
+        )
+    nonlatin_policy = ENGLISH_FILTER_POLICY["nonlatin"]
+    return (
+        broad_hits >= nonlatin_policy["corpus_hits_min"]
+        and stop_ratio >= nonlatin_policy["corpus_ratio_min"]
+        and ascii_ratio >= nonlatin_policy["ascii_ratio_min"]
+    )
 
 
 def clean_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> str:
