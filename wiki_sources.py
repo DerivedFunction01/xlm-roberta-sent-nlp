@@ -30,8 +30,19 @@ from text_utils import (
 MAX_WIKI_INDEX = 100_000
 ARTICLES_PER_LANG = 10_000
 MAX_WIKI_SENTENCES = 200_000
-MAX_WIKI_SENTENCES_BY_LANG = {
-    "en": 300_000,
+WIKI_CAP_MULTIPLIERS = {
+    "en": 1.50,
+    "de": 1.25,
+    "fr": 1.25,
+    "es": 1.25,
+    "ru": 1.25,
+    "zh": 1.25,
+    "ja": 1.25,
+    "pt": 1.25,
+    "it": 1.25,
+    "hi": 1.25,
+    "ko": 1.25,
+    "ar": 1.25,
 }
 WIKI_ROLLING_STATS_WINDOW = 250
 LENGTH_PRIORITY_SCAN_LIMIT = int(MAX_WIKI_INDEX // 1.5)
@@ -154,7 +165,8 @@ def temp_meta_path(lang: str) -> str:
 
 
 def max_wiki_sentences_for_lang(lang: str) -> int:
-    return MAX_WIKI_SENTENCES_BY_LANG.get(lang, MAX_WIKI_SENTENCES)
+    multiplier = WIKI_CAP_MULTIPLIERS.get(lang, 1.0)
+    return int(round(MAX_WIKI_SENTENCES * multiplier))
 
 
 def max_length_priority_sentences_for_lang(lang: str) -> int:
