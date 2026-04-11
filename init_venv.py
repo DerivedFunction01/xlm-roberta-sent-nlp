@@ -33,6 +33,8 @@ BASE_PACKAGES = [
     "jupyter",
     "ipywidgets",
     "pysbd",
+    "nltk",
+    "faker"
 ]
 
 # Packages for data serialization and I/O
