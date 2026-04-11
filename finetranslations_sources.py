@@ -6,7 +6,6 @@ import random
 import re
 import time
 from collections import Counter
-from functools import lru_cache
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any
 
@@ -17,13 +16,15 @@ from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic, write_records_parquet, write_sentence_parquet
 from paths import PATHS
-from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3, LANG_TO_GROUP, canonical_lang
+from language import LANG_ISO2_TO_ISO3, LANG_TO_GROUP, canonical_lang
 from source_config import (
     FT,
 )
 from text_utils import (
     LATIN_GROUPS,
     SENT_SPLIT,
+    _english_leak_stats,
+    _english_corpus_hits,
     _get_segmenter,
     post_clean_sentences,
     sanitize_paragraph_for_pysbd,
@@ -213,24 +214,6 @@ def _longest_chunks(chunks: list[str], limit: int = FINETRANS_LATIN_LONGEST_CHUN
     return [chunk for _, chunk in ordered[:limit]]
 
 
-@lru_cache(maxsize=1)
-def _english_stopwords() -> set[str]:
-    return {word.lower() for word in ENGLISH_STOP_WORDS}
-
-
-@lru_cache(maxsize=32_768)
-def _is_english_word(token: str) -> bool:
-    word = token.lower().strip()
-    if not word:
-        return False
-    sw = _english_stopwords()
-    if word in sw:
-        return True
-    if word.endswith("s") and word[:-1] in sw:
-        return True
-    return False
-
-
 def _latin_tokens(text: str) -> list[str]:
     return LATIN_TOKEN_RE.findall(text.lower())
 
@@ -240,12 +223,14 @@ def _sentence_token_length(sentence: str) -> int:
 
 
 def _looks_english_heavy(text: str) -> bool:
-    tokens = _latin_tokens(text)
-    if len(tokens) < FINETRANS_LATIN_MIN_TOKENS:
-        return any(_is_english_word(token) for token in tokens)
-    stopword_hits = sum(1 for token in tokens if _is_english_word(token))
-    english_ratio = stopword_hits / max(1, len(tokens))
-    return stopword_hits >= 3 and english_ratio >= FINETRANS_LATIN_MAX_ENGLISH_RATIO
+    local_hits, _, word_count = _english_leak_stats(text)
+    if local_hits < 3:
+        return False
+    broad_hits = _english_corpus_hits(text)
+    if word_count < FINETRANS_LATIN_MIN_TOKENS:
+        return broad_hits >= 3
+    english_ratio = broad_hits / max(1, word_count)
+    return broad_hits >= 3 and english_ratio >= FINETRANS_LATIN_MAX_ENGLISH_RATIO
 
 
 def _row_base_score(row: dict[str, Any], lang: str) -> float:

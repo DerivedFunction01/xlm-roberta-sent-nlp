@@ -4,9 +4,12 @@ import hashlib
 import re
 import unicodedata
 import traceback
+from functools import lru_cache
 from pathlib import Path
 
 from language import ENGLISH_STOP_WORDS, LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS, canonical_lang
+from nltk.corpus import words as nltk_words
+
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
@@ -121,6 +124,34 @@ DEFAULT_BOUNDS = (30, 600)
 _PROC_SEGMENTERS: dict[str, object] = {}
 
 
+@lru_cache(maxsize=1)
+def _nltk_english_word_set() -> set[str]:
+    if nltk_words is None:
+        return set()
+    try:
+        return {word.lower() for word in nltk_words.words()}
+    except LookupError:
+        return set()
+
+
+@lru_cache(maxsize=262_144)
+def _is_local_english_stopword(token: str) -> bool:
+    word = token.lower().strip()
+    return bool(word) and word in ENGLISH_STOP_WORD_SET
+
+
+@lru_cache(maxsize=262_144)
+def _is_broad_english_word(token: str) -> bool:
+    word = token.lower().strip()
+    if not word:
+        return False
+    if word in _nltk_english_word_set():
+        return True
+    if word.endswith("s") and word[:-1] in _nltk_english_word_set():
+        return True
+    return False
+
+
 def _non_punct_char_count(s: str) -> int:
     return len(WIKI_NON_CONTENT.sub("", s))
 
@@ -187,24 +218,34 @@ def _english_leak_stats(sentence: str) -> tuple[int, int, int]:
     words = [word.lower() for word in WIKI_WORDS.findall(sentence)]
     if not words:
         return 0, 0, 0
-    stop_hits = sum(word in ENGLISH_STOP_WORD_SET for word in words)
+    local_hits = sum(_is_local_english_stopword(word) for word in words)
     ascii_words = sum(word.isascii() and word.isalpha() for word in words)
-    return stop_hits, ascii_words, len(words)
+    return local_hits, ascii_words, len(words)
+
+
+def _english_corpus_hits(sentence: str) -> int:
+    words = [word.lower() for word in WIKI_WORDS.findall(sentence)]
+    if not words:
+        return 0
+    broad_hits = sum(_is_broad_english_word(word) for word in words)
+    return broad_hits
 
 
 def _looks_like_english_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
     lang = canonical_lang(lang)
     if lang == "en":
         return False
-    stop_hits, ascii_words, word_count = _english_leak_stats(sentence)
+    local_hits, ascii_words, word_count = _english_leak_stats(sentence)
     if word_count < 4:
         return False
-
-    stop_ratio = stop_hits / word_count
+    if local_hits < 3:
+        return False
+    broad_hits = _english_corpus_hits(sentence)
+    stop_ratio = broad_hits / word_count
     ascii_ratio = ascii_words / word_count
     if lang_to_group.get(lang) in LATIN_GROUPS:
-        return stop_hits >= 4 and stop_ratio >= 0.55 and ascii_ratio >= 0.80
-    return stop_hits >= 2 and stop_ratio >= 0.25 and ascii_ratio >= 0.50
+        return broad_hits >= 4 and stop_ratio >= 0.60 and ascii_ratio >= 0.80
+    return broad_hits >= 3 and stop_ratio >= 0.30 and ascii_ratio >= 0.50
 
 
 def clean_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> str:
