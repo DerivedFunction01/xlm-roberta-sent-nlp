@@ -6,7 +6,7 @@ import unicodedata
 import traceback
 from pathlib import Path
 
-from language import LATIN_GROUPS, LANGUAGE_GROUP_MIN_CHARS
+from language import LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
@@ -64,17 +64,68 @@ PYSBD_FALLBACKS = {
     "bn": "hi", "ta": "hi", "te": "hi", "gu": "hi", "kn": "hi",
     "ml": "hi", "pa": "hi", "as": "hi", "or": "hi", "sd": "hi",
     "ka": "en", "km": "zh", "ko": "zh", "lo": "zh", "th": "zh",
+    # Languages that previously fell all the way back to SENT_SPLIT.
+    # These are conservative proxy choices for sentence-boundary rules only.
+    "si": "hi", "bo": "zh", "dv": "ar", "ti": "am",
+    "sw": "en", "eu": "es", "tl": "en", "ca": "es", "gl": "es", "oc": "fr",
+    "br": "fr", "ga": "en", "gd": "en", "cy": "en",
+    "bs": "pl", "hr": "pl", "sl": "pl", "sk": "pl",
+    "et": "pl", "lv": "pl", "lt": "pl",
+    "eo": "en", "jv": "en", "mg": "fr", "om": "en", "so": "en", "su": "en",
+    "uz": "en", "ku": "en", "ckb": "ar", "hbo": "he", "grc": "el",
+    "ne": "hi", "mt": "it", "lb": "de", "rm": "it",
+    "tt": "ru", "ky": "ru", "tg": "ru", "ba": "ru",
+    "yo": "en", "zu": "en", "ny": "en", "nn": "da", "ce": "ru",
+}
+
+GROUP_SENT_BOUNDS: dict[str, tuple[int, int]] = {
+    "English": (24, 600),
+    "Russian": (35, 650),
+    "German": (40, 600),
+    "Spanish": (30, 600),
+    "French": (30, 600),
+    "Portuguese": (30, 600),
+    "Italian": (30, 600),
+    "Dutch": (30, 600),
+    "Polish": (30, 600),
+    "Turkish": (20, 450),
+    "Japanese": (10, 180),
+    "Chinese": (8, 180),
+    "Korean": (15, 220),
+    "Arabic": (25, 450),
+    "ArabicOther": (25, 450),
+    "Hindi": (30, 500),
+    "IndicOther": (30, 500),
+    "SoutheastAsianLatin": (15, 300),
+    "WesternLatin": (20, 450),
+    "CelticLatin": (20, 450),
+    "AdriaticLatin": (20, 450),
+    "BalticLatin": (20, 450),
+    "CentralEuropeanLatin": (20, 450),
+    "Norwegian": (20, 450),
+    "NordicCore": (20, 450),
+    "EastSlavicCyrillic": (35, 650),
+    "BalkanCyrillic": (35, 650),
+    "CentralAsianCaucusCyrillic": (35, 650),
+    "KurdishLatin": (20, 450),
+    "KurdishArabic": (25, 450),
+    "AfricanLatin": (15, 300),
+    "PeripheralLatin": (15, 300),
+    "OtherScriptsWest": (25, 450),
+    "OtherScriptsEast": (15, 250),
+}
+
+LANG_SENT_BOUNDS_OVERRIDES: dict[str, tuple[int, int]] = {
+    "hy": (30, 500),
 }
 
 SENT_BOUNDS: dict[str, tuple[int, int]] = {
-    "zh": (8, 180), "ja": (10, 180),
-    "ko": (15, 220), "th": (15, 250), "km": (15, 250), "lo": (15, 250), "my": (15, 250),
-    "ar": (25, 450), "fa": (25, 450), "he": (25, 400), "ur": (25, 450),
-    "hi": (30, 500), "bn": (30, 500), "ta": (30, 500), "te": (30, 500), "am": (25, 400),
-    "fi": (20, 450), "hu": (20, 450), "tr": (20, 450), "vi": (15, 300),
-    "de": (40, 600), "ru": (35, 650), "uk": (35, 650), "el": (35, 650),
-    "hy": (30, 500), "ka": (25, 450), "en": (24, 600),
+    lang: GROUP_SENT_BOUNDS[group]
+    for group, langs in LANGUAGE_GROUPS.items()
+    if group in GROUP_SENT_BOUNDS
+    for lang in langs
 }
+SENT_BOUNDS.update(LANG_SENT_BOUNDS_OVERRIDES)
 DEFAULT_BOUNDS = (30, 600)
 _PROC_SEGMENTERS: dict[str, object] = {}
 
