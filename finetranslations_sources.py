@@ -223,13 +223,17 @@ def _sentence_token_length(sentence: str) -> int:
 
 
 def _looks_english_heavy(text: str) -> bool:
-    local_hits, _, word_count = _english_leak_stats(text)
+    local_hits, ascii_words, alpha_words = _english_leak_stats(text)
+    if alpha_words < 4:
+        return False
     if local_hits < 3:
         return False
+    if ascii_words / alpha_words < 0.70:
+        return False
     broad_hits = _english_corpus_hits(text)
-    if word_count < FINETRANS_LATIN_MIN_TOKENS:
+    if alpha_words < FINETRANS_LATIN_MIN_TOKENS:
         return broad_hits >= 3
-    english_ratio = broad_hits / max(1, word_count)
+    english_ratio = broad_hits / max(1, alpha_words)
     return broad_hits >= 3 and english_ratio >= FINETRANS_LATIN_MAX_ENGLISH_RATIO
 
 

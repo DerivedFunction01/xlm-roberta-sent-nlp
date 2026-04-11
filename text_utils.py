@@ -29,6 +29,7 @@ WIKI_WORDS = re.compile(r"\b\w+\b", flags=re.UNICODE)
 MAX_DIGIT_RATIO = 0.10
 MIN_LATIN_WORDS = 4
 ENGLISH_STOP_WORD_SET = {word.lower() for word in ENGLISH_STOP_WORDS}
+NLTK_ENGLISH_SECONDARY_LIMIT = 50_000
 POOL_TERMINAL_PUNCT_CHOICES = (".", ":", ";", "!", "?")
 POOL_WRAPPER_PAIRS = (
     ("(", ")"),
@@ -125,11 +126,19 @@ _PROC_SEGMENTERS: dict[str, object] = {}
 
 
 @lru_cache(maxsize=1)
-def _nltk_english_word_set() -> set[str]:
+def _nltk_english_secondary_word_set() -> set[str]:
     if nltk_words is None:
         return set()
     try:
-        return {word.lower() for word in nltk_words.words()}
+        secondary: set[str] = set()
+        for word in nltk_words.words():
+            word = word.lower().strip()
+            if not word or not word.isalpha() or word in ENGLISH_STOP_WORD_SET:
+                continue
+            secondary.add(word)
+            if len(secondary) >= NLTK_ENGLISH_SECONDARY_LIMIT:
+                break
+        return secondary
     except LookupError:
         return set()
 
@@ -145,9 +154,10 @@ def _is_broad_english_word(token: str) -> bool:
     word = token.lower().strip()
     if not word:
         return False
-    if word in _nltk_english_word_set():
+    secondary = _nltk_english_secondary_word_set()
+    if word in secondary:
         return True
-    if word.endswith("s") and word[:-1] in _nltk_english_word_set():
+    if word.endswith("s") and word[:-1] in secondary:
         return True
     return False
 
@@ -220,7 +230,8 @@ def _english_leak_stats(sentence: str) -> tuple[int, int, int]:
         return 0, 0, 0
     local_hits = sum(_is_local_english_stopword(word) for word in words)
     ascii_words = sum(word.isascii() and word.isalpha() for word in words)
-    return local_hits, ascii_words, len(words)
+    alpha_words = sum(word.isalpha() for word in words)
+    return local_hits, ascii_words, alpha_words
 
 
 def _english_corpus_hits(sentence: str) -> int:
@@ -235,14 +246,16 @@ def _looks_like_english_sentence(sentence: str, lang: str, lang_to_group: dict[s
     lang = canonical_lang(lang)
     if lang == "en":
         return False
-    local_hits, ascii_words, word_count = _english_leak_stats(sentence)
-    if word_count < 4:
+    local_hits, ascii_words, alpha_words = _english_leak_stats(sentence)
+    if alpha_words < 4:
         return False
     if local_hits < 3:
         return False
+    ascii_ratio = ascii_words / alpha_words
+    if ascii_ratio < 0.50:
+        return False
     broad_hits = _english_corpus_hits(sentence)
-    stop_ratio = broad_hits / word_count
-    ascii_ratio = ascii_words / word_count
+    stop_ratio = broad_hits / alpha_words
     if lang_to_group.get(lang) in LATIN_GROUPS:
         return broad_hits >= 4 and stop_ratio >= 0.60 and ascii_ratio >= 0.80
     return broad_hits >= 3 and stop_ratio >= 0.30 and ascii_ratio >= 0.50
