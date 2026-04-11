@@ -54,66 +54,56 @@ PYSBD_SUPPORTED = {
     "en", "hi", "mr", "bg", "es", "ru", "ar", "am", "hy", "fa",
     "ur", "pl", "zh", "nl", "da", "fr", "it", "el", "my", "ja", "de", "kk",
 }
-PYSBD_FALLBACKS = {
-    "uk": "ru", "be": "ru", "sr": "ru", "mk": "ru", "mn": "ru",
-    "pt": "es", "ro": "fr", "la": "it", "sq": "it",
-    "sv": "da", "no": "da", "is": "da",
-    "fi": "en", "hu": "en", "cs": "pl",
-    "vi": "en", "id": "en", "ms": "en", "af": "nl", "tr": "en",
-    "he": "ar", "ps": "fa", "ug": "ar",
-    "bn": "hi", "ta": "hi", "te": "hi", "gu": "hi", "kn": "hi",
-    "ml": "hi", "pa": "hi", "as": "hi", "or": "hi", "sd": "hi",
-    "ka": "en", "km": "zh", "ko": "zh", "lo": "zh", "th": "zh",
-    # Languages that previously fell all the way back to SENT_SPLIT.
-    # These are conservative proxy choices for sentence-boundary rules only.
-    "si": "hi", "bo": "zh", "dv": "ar", "ti": "am",
-    "sw": "en", "eu": "es", "tl": "en", "ca": "es", "gl": "es", "oc": "fr",
-    "br": "fr", "ga": "en", "gd": "en", "cy": "en",
-    "bs": "pl", "hr": "pl", "sl": "pl", "sk": "pl",
-    "et": "pl", "lv": "pl", "lt": "pl",
-    "eo": "en", "jv": "en", "mg": "fr", "om": "en", "so": "en", "su": "en",
-    "uz": "en", "ku": "en", "ckb": "ar", "hbo": "he", "grc": "el",
-    "ne": "hi", "mt": "it", "lb": "de", "rm": "it",
-    "tt": "ru", "ky": "ru", "tg": "ru", "ba": "ru",
-    "yo": "en", "zu": "en", "ny": "en", "nn": "da", "ce": "ru",
+
+PYSBD_FALLBACK_GROUPS: dict[str, list[str]] = {}
+
+
+def _assign_pysbd_fallbacks(proxy: str, *langs: str) -> None:
+    PYSBD_FALLBACK_GROUPS[proxy] = list(langs)
+
+
+_assign_pysbd_fallbacks("ru", "uk", "be", "sr", "mk", "mn", "tt", "ky", "tg", "ba", "ce")
+_assign_pysbd_fallbacks("es", "pt", "eu", "ca", "gl")
+_assign_pysbd_fallbacks("fr", "ro", "oc", "br", "mg")
+_assign_pysbd_fallbacks("it", "la", "sq", "rm", "mt")
+_assign_pysbd_fallbacks("da", "sv", "no", "is", "nn")
+_assign_pysbd_fallbacks("pl", "cs", "bs", "hr", "sl", "sk", "et", "lv", "lt")
+_assign_pysbd_fallbacks("en", "fi", "hu", "vi", "id", "ms", "af", "tr", "sw", "tl", "ga", "gd", "cy", "eo", "jv", "om", "so", "su", "uz", "ku", "yo", "zu", "ny", "ka")
+_assign_pysbd_fallbacks("ar", "he", "ps", "ug", "dv", "ckb")
+_assign_pysbd_fallbacks("hi", "bn", "ta", "te", "gu", "kn", "ml", "pa", "as", "or", "sd", "si", "ne")
+_assign_pysbd_fallbacks("zh", "km", "ko", "lo", "th", "bo")
+_assign_pysbd_fallbacks("am", "ti")
+_assign_pysbd_fallbacks("he", "hbo")
+_assign_pysbd_fallbacks("el", "grc")
+_assign_pysbd_fallbacks("nl", "af")
+_assign_pysbd_fallbacks("de", "lb")
+
+PYSBD_FALLBACKS: dict[str, str] = {
+    lang: proxy
+    for proxy, langs in PYSBD_FALLBACK_GROUPS.items()
+    for lang in langs
 }
 
-GROUP_SENT_BOUNDS: dict[str, tuple[int, int]] = {
-    "English": (24, 600),
-    "Russian": (35, 650),
-    "German": (40, 600),
-    "Spanish": (30, 600),
-    "French": (30, 600),
-    "Portuguese": (30, 600),
-    "Italian": (30, 600),
-    "Dutch": (30, 600),
-    "Polish": (30, 600),
-    "Turkish": (20, 450),
-    "Japanese": (10, 180),
-    "Chinese": (8, 180),
-    "Korean": (15, 220),
-    "Arabic": (25, 450),
-    "ArabicOther": (25, 450),
-    "Hindi": (30, 500),
-    "IndicOther": (30, 500),
-    "SoutheastAsianLatin": (15, 300),
-    "WesternLatin": (20, 450),
-    "CelticLatin": (20, 450),
-    "AdriaticLatin": (20, 450),
-    "BalticLatin": (20, 450),
-    "CentralEuropeanLatin": (20, 450),
-    "Norwegian": (20, 450),
-    "NordicCore": (20, 450),
-    "EastSlavicCyrillic": (35, 650),
-    "BalkanCyrillic": (35, 650),
-    "CentralAsianCaucusCyrillic": (35, 650),
-    "KurdishLatin": (20, 450),
-    "KurdishArabic": (25, 450),
-    "AfricanLatin": (15, 300),
-    "PeripheralLatin": (15, 300),
-    "OtherScriptsWest": (25, 450),
-    "OtherScriptsEast": (15, 250),
-}
+GROUP_SENT_BOUNDS: dict[str, tuple[int, int]] = {}
+
+
+def _assign_group_bounds(bounds: tuple[int, int], *groups: str) -> None:
+    for group in groups:
+        GROUP_SENT_BOUNDS[group] = bounds
+
+
+_assign_group_bounds((24, 600), "English")
+_assign_group_bounds((35, 650), "Russian", "EastSlavicCyrillic", "BalkanCyrillic", "CentralAsianCaucusCyrillic")
+_assign_group_bounds((40, 600), "German")
+_assign_group_bounds((30, 600), "Spanish", "French", "Portuguese", "Italian", "Dutch", "Polish")
+_assign_group_bounds((20, 450), "Turkish", "WesternLatin", "CelticLatin", "AdriaticLatin", "BalticLatin", "CentralEuropeanLatin", "Norwegian", "NordicCore", "KurdishLatin")
+_assign_group_bounds((10, 180), "Japanese")
+_assign_group_bounds((8, 180), "Chinese")
+_assign_group_bounds((15, 220), "Korean")
+_assign_group_bounds((25, 450), "Arabic", "ArabicOther", "KurdishArabic", "OtherScriptsWest")
+_assign_group_bounds((30, 500), "Hindi", "IndicOther")
+_assign_group_bounds((15, 300), "SoutheastAsianLatin", "AfricanLatin", "PeripheralLatin")
+_assign_group_bounds((15, 250), "OtherScriptsEast")
 
 LANG_SENT_BOUNDS_OVERRIDES: dict[str, tuple[int, int]] = {
     "hy": (30, 500),
