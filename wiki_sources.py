@@ -12,7 +12,7 @@ from datasets import load_dataset
 from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic as _write_json_atomic, write_sentence_parquet as _write_sentence_parquet
-from language import ALL_LANGS, LANG_TO_GROUP, canonical_lang
+from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUP_MIN_CHARS, canonical_lang
 from paths import PATHS
 from text_utils import (
     _article_min_chars,
@@ -31,6 +31,10 @@ from text_utils import (
 MAX_WIKI_INDEX = 100_000
 ARTICLES_PER_LANG = 10_000
 MAX_WIKI_SENTENCES = 200_000
+WIKI_PARAGRAPH_FRACTION_DEFAULT = 0.60
+WIKI_PARAGRAPH_FRACTIONS_BY_GROUP: dict[str, float] = {}
+WIKI_LONG_PARAGRAPH_STREAK = 2
+WIKI_LONG_PARAGRAPH_BONUS = 0.10
 WIKI_CAP_MULTIPLIERS = {
     "en": 1.50,
     "de": 1.25,
@@ -89,6 +93,25 @@ def _wiki_cache_meta_path(sentences_dir: str, lang: str) -> str:
     return os.path.join(sentences_dir, f"{lang}.meta.json")
 
 
+def _assign_wiki_paragraph_fraction(fraction: float, *groups: str) -> None:
+    for group in groups:
+        WIKI_PARAGRAPH_FRACTIONS_BY_GROUP[group] = fraction
+
+
+_assign_wiki_paragraph_fraction(0.75, "English")
+
+
+def _wiki_paragraph_fraction(lang: str, lang_to_group: dict[str, str]) -> float:
+    group = lang_to_group.get(canonical_lang(lang))
+    return WIKI_PARAGRAPH_FRACTIONS_BY_GROUP.get(group, WIKI_PARAGRAPH_FRACTION_DEFAULT)
+
+
+def _wiki_long_paragraph_chars(lang: str, lang_to_group: dict[str, str]) -> int:
+    group = lang_to_group.get(canonical_lang(lang))
+    group_min_chars = LANGUAGE_GROUP_MIN_CHARS.get(group or "", 2_000)
+    return max(250, group_min_chars // 4)
+
+
 def _load_wiki_dataset(source_lang: str, *, seed: int):
     try:
         dataset = load_dataset(
@@ -113,7 +136,18 @@ def prepare_wiki_paragraphs(text: str, lang: str, lang_to_group: dict[str, str])
     if paragraphs is None:
         return None
 
-    fraction = 0.75 if lang == "en" else 0.50
+    fraction = _wiki_paragraph_fraction(lang, lang_to_group)
+    long_paragraph_chars = _wiki_long_paragraph_chars(lang, lang_to_group)
+    long_streak = 0
+    for paragraph in paragraphs:
+        if len(paragraph) >= long_paragraph_chars:
+            long_streak += 1
+            if long_streak >= WIKI_LONG_PARAGRAPH_STREAK:
+                fraction = min(0.90, fraction + WIKI_LONG_PARAGRAPH_BONUS)
+                break
+        else:
+            long_streak = 0
+
     cutoff = max(1, int(len(paragraphs) * fraction))
     selected = paragraphs[:cutoff]
     selected.sort(key=len, reverse=True)
