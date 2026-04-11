@@ -8,7 +8,7 @@ from pathlib import Path
 
 from language import LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
-SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
 BRACKET_NOTES = re.compile(r"\s*[\(\[【（][^\)\]】）]{0,60}[\)\]】）]\s*")
 WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
