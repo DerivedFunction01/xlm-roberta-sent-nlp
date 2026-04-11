@@ -257,7 +257,7 @@ POOL = {
     "wiki": {
         "reserve": 0.60,
         "min": 4,
-        "max": 120_000,
+        "max": 90_000,
     },
     "instruct": {
         "reserve": 0.60,
@@ -349,7 +349,7 @@ FT["every"] = len(FT["langs"])
 
 RUN = {
     "len": 512,
-    "target": 4_500_000, 
+    "target": 3_500_000, 
     "syn_cache": True,
     "syn_rebuild": False,
     "tok_cache": True,
