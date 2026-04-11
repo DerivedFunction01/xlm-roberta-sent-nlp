@@ -22,14 +22,9 @@ from text_utils import (
     log_segmentation_failure,
     post_clean_sentences,
     sanitize_paragraph_for_pysbd,
+    SENT_SPLIT,
 )
 
-try:
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-except ImportError:
-    pa = None
-    pq = None
 
 
 MAX_WIKI_INDEX = 100_000
@@ -39,8 +34,6 @@ MAX_WIKI_SENTENCES_BY_LANG = {
     "en": 300_000,
 }
 WIKI_ROLLING_STATS_WINDOW = 250
-WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
-SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 LENGTH_PRIORITY_SCAN_LIMIT = int(MAX_WIKI_INDEX // 1.5)
 LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG = {
     "vi": 50_000,
