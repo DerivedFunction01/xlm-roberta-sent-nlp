@@ -6,13 +6,13 @@ import unicodedata
 import traceback
 from pathlib import Path
 
-from language import LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS
+from language import ENGLISH_STOP_WORDS, LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
 BRACKET_NOTES = re.compile(r"\s*[\(\[【（][^\)\]】）]{0,60}[\)\]】）]\s*")
 WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
-WIKI_SPACES = re.compile(r"\s{2,}")
+WIKI_SPACES = re.compile(r"\s+")
 WIKI_PUNCT_REPEAT = re.compile(r"([,.;:!?…،。！？])\1+")
 WIKI_TRAILING_ORPHAN_LETTER = re.compile(r"[\s,.;:!?…،。！？]+([^\W\d_])$")
 WIKI_LEADING_ORPHAN_LETTER = re.compile(r"^[\"'“”‘’«»‹›\s,.;:!?…،。！？]+([^\W\d_])\s+")
@@ -25,6 +25,7 @@ WIKI_DIGITS = re.compile(r"\d")
 WIKI_WORDS = re.compile(r"\b\w+\b", flags=re.UNICODE)
 MAX_DIGIT_RATIO = 0.10
 MIN_LATIN_WORDS = 4
+ENGLISH_STOP_WORD_SET = {word.lower() for word in ENGLISH_STOP_WORDS}
 POOL_TERMINAL_PUNCT_CHOICES = (".", ":", ";", "!", "?")
 POOL_WRAPPER_PAIRS = (
     ("(", ")"),
@@ -180,12 +181,37 @@ def _strip_ascii_for_lang(lang: str, lang_to_group: dict[str, str]) -> bool:
     return lang_to_group.get(lang) not in LATIN_GROUPS
 
 
+def _english_leak_stats(sentence: str) -> tuple[int, int, int]:
+    words = [word.lower() for word in WIKI_WORDS.findall(sentence)]
+    if not words:
+        return 0, 0, 0
+    stop_hits = sum(word in ENGLISH_STOP_WORD_SET for word in words)
+    ascii_words = sum(word.isascii() and word.isalpha() for word in words)
+    return stop_hits, ascii_words, len(words)
+
+
+def _looks_like_english_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
+    if lang == "en":
+        return False
+    stop_hits, ascii_words, word_count = _english_leak_stats(sentence)
+    if word_count < 4:
+        return False
+
+    stop_ratio = stop_hits / word_count
+    ascii_ratio = ascii_words / word_count
+    if lang_to_group.get(lang) in LATIN_GROUPS:
+        return stop_hits >= 4 and stop_ratio >= 0.55 and ascii_ratio >= 0.80
+    return stop_hits >= 2 and stop_ratio >= 0.25 and ascii_ratio >= 0.50
+
+
 def clean_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> str:
     if "\\" in sentence:
         sentence = sentence.replace("\\", "")
     sentence = HTML_TAG_RE.sub(" ", sentence)
     sentence = _strip_bracket_notes(sentence)
     sentence = _collapse_repeated_punct(sentence)
+    if _looks_like_english_sentence(sentence, lang, lang_to_group):
+        return ""
     if _strip_ascii_for_lang(lang, lang_to_group):
         sentence = WIKI_ASCII_WORDS.sub("", sentence)
     sentence = _collapse_spaces(sentence)
