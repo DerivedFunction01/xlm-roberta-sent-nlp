@@ -10,6 +10,9 @@ LANGUAGE_GROUPS = {group: cfg["langs"] for group, cfg in LANGUAGE_BUCKETS.items(
 LANGUAGE_GROUP_WEIGHTS = {group: float(cfg["weight"]) for group, cfg in LANGUAGE_BUCKETS.items()}
 LANGUAGE_GROUP_MIN_CHARS = {group: int(cfg["min_chars"]) for group, cfg in LANGUAGE_BUCKETS.items()}
 LATIN_GROUPS = {group for group, cfg in LANGUAGE_BUCKETS.items() if cfg.get("latin")}
+LANG_ALIASES = {
+    "nn": "no",
+}
 
 LANGS_JSON = Path(__file__).with_name("all_langs.json")
 
@@ -21,6 +24,10 @@ with open(LANGS_JSON) as f:
 
 ALL_LANGS = list(LANG_ISO2_TO_ISO3.keys())
 LANG_TO_GROUP = {lang: group for group, langs in LANGUAGE_GROUPS.items() for lang in langs}
+
+
+def canonical_lang(lang: str) -> str:
+    return LANG_ALIASES.get(lang, lang)
 
 
 def write_all_langs_json(path: str | os.PathLike[str] = LANGS_JSON) -> None:

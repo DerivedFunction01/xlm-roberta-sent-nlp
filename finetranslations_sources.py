@@ -17,7 +17,7 @@ from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic, write_records_parquet, write_sentence_parquet
 from paths import PATHS
-from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3, LANG_TO_GROUP
+from language import ENGLISH_STOP_WORDS, LANG_ISO2_TO_ISO3, LANG_TO_GROUP, canonical_lang
 from source_config import (
     FT,
 )
@@ -54,7 +54,8 @@ FINETRANS_WORKER_COLUMNS = [
 FINETRANS_FINAL_COLUMNS = ["lang", "sentence"]
 LATIN_TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 WIKIPEDIA_URL_RE = re.compile(r"wikipedia(?:\.org)?", flags=re.IGNORECASE)
-FT_ISO3_TO_LANG = {iso3: lang for lang, iso3 in LANG_ISO2_TO_ISO3.items()}
+FT_ISO3_TO_LANG = {iso3: canonical_lang(lang) for lang, iso3 in LANG_ISO2_TO_ISO3.items()}
+FT_ISO3_TO_LANG["nno"] = "no"
 
 disable_progress_bar()
 
@@ -106,16 +107,18 @@ def _config_name_to_lang(
     if isinstance(lang_overrides, dict):
         for lang, override_config in lang_overrides.items():
             if override_config == base and isinstance(lang, str) and lang in lang_to_group:
-                return lang
+                return canonical_lang(lang)
+    if base in {"no", "nn", "nno"}:
+        return "no"
     if len(base) == 2 and base in lang_to_group:
         if lang_to_group.get(base) not in LATIN_GROUPS and config_name.endswith("_Latn"):
             return None
-        return base
+        return canonical_lang(base)
     lang = FT_ISO3_TO_LANG.get(base)
     if lang in lang_to_group:
         if lang_to_group.get(lang) not in LATIN_GROUPS and config_name.endswith("_Latn"):
             return None
-        return lang
+        return canonical_lang(lang)
     return None
 
 
@@ -188,8 +191,10 @@ def _row_source_language(row: dict[str, Any]) -> str | None:
     if isinstance(lang, str) and lang.strip():
         base = lang.strip().split("_", 1)[0]
         if len(base) == 2:
-            return base
-        return FT_ISO3_TO_LANG.get(base)
+            return canonical_lang(base)
+        mapped = FT_ISO3_TO_LANG.get(base)
+        if mapped is not None:
+            return canonical_lang(mapped)
     return None
 
 

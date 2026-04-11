@@ -147,7 +147,7 @@ LANGUAGE_BUCKETS = {
         "latin": False,
     },
     "Norwegian": {
-        "langs": ["no", "nn"],
+        "langs": ["no"],
         "weight": 1.0,
         "min_chars": 2_000,
         "latin": True,

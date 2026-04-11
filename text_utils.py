@@ -6,7 +6,7 @@ import unicodedata
 import traceback
 from pathlib import Path
 
-from language import ENGLISH_STOP_WORDS, LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS
+from language import ENGLISH_STOP_WORDS, LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS, canonical_lang
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
@@ -67,7 +67,7 @@ _assign_pysbd_fallbacks("ru", "uk", "be", "sr", "mk", "mn", "tt", "ky", "tg", "b
 _assign_pysbd_fallbacks("es", "pt", "eu", "ca", "gl")
 _assign_pysbd_fallbacks("fr", "ro", "oc", "br", "mg")
 _assign_pysbd_fallbacks("it", "la", "sq", "rm", "mt")
-_assign_pysbd_fallbacks("da", "sv", "no", "is", "nn")
+_assign_pysbd_fallbacks("da", "sv", "no", "is")
 _assign_pysbd_fallbacks("pl", "cs", "bs", "hr", "sl", "sk", "et", "lv", "lt")
 _assign_pysbd_fallbacks("en", "fi", "hu", "vi", "id", "ms", "af", "tr", "sw", "tl", "ga", "gd", "cy", "eo", "jv", "om", "so", "su", "uz", "ku", "yo", "zu", "ny", "ka")
 _assign_pysbd_fallbacks("ar", "he", "ps", "ug", "dv", "ckb")
@@ -163,6 +163,7 @@ def _collapse_repeated_punct(sentence: str) -> str:
 
 
 def _strip_trailing_orphan_letter(sentence: str, lang_to_group: dict[str, str], lang: str) -> str:
+    lang = canonical_lang(lang)
     if lang_to_group.get(lang) in LATIN_GROUPS:
         return sentence
     return WIKI_TRAILING_ORPHAN_LETTER.sub("", sentence).rstrip()
@@ -178,6 +179,7 @@ def _has_blocked_artifact(sentence: str) -> bool:
 
 
 def _strip_ascii_for_lang(lang: str, lang_to_group: dict[str, str]) -> bool:
+    lang = canonical_lang(lang)
     return lang_to_group.get(lang) not in LATIN_GROUPS
 
 
@@ -191,6 +193,7 @@ def _english_leak_stats(sentence: str) -> tuple[int, int, int]:
 
 
 def _looks_like_english_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
+    lang = canonical_lang(lang)
     if lang == "en":
         return False
     stop_hits, ascii_words, word_count = _english_leak_stats(sentence)
@@ -205,6 +208,7 @@ def _looks_like_english_sentence(sentence: str, lang: str, lang_to_group: dict[s
 
 
 def clean_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> str:
+    lang = canonical_lang(lang)
     if "\\" in sentence:
         sentence = sentence.replace("\\", "")
     sentence = HTML_TAG_RE.sub(" ", sentence)
@@ -291,6 +295,7 @@ def _is_valid_sentence(
     sent_bounds: dict[str, tuple[int, int]] | None = None,
     default_bounds: tuple[int, int] = DEFAULT_BOUNDS,
 ) -> bool:
+    lang = canonical_lang(lang)
     sent_bounds = sent_bounds or SENT_BOUNDS
     mn, mx = sent_bounds.get(lang, default_bounds)
     visible = _non_punct_char_count(s)
@@ -309,6 +314,7 @@ def post_clean_sentences(
     sent_bounds: dict[str, tuple[int, int]] | None = None,
     default_bounds: tuple[int, int] = DEFAULT_BOUNDS,
 ) -> list[str]:
+    lang = canonical_lang(lang)
     cleaned: list[str] = []
     seen: set[str] = set()
     for sentence in sentences:
@@ -334,6 +340,7 @@ def post_clean_sentences(
 
 
 def _get_segmenter(lang: str):
+    lang = canonical_lang(lang)
     if lang in _PROC_SEGMENTERS:
         return _PROC_SEGMENTERS[lang]
     try:
@@ -353,12 +360,14 @@ def sanitize_paragraph_for_pysbd(paragraph: str) -> str:
 
 
 def _article_min_chars(lang: str, lang_to_group: dict[str, str]) -> int:
+    lang = canonical_lang(lang)
     group = lang_to_group.get(lang)
     assert group is not None
     return LANGUAGE_GROUP_MIN_CHARS.get(group, 3_000)
 
 
 def _split_paragraphs(text: str, lang: str, lang_to_group: dict[str, str]) -> list[str] | None:
+    lang = canonical_lang(lang)
     if len(text) < _article_min_chars(lang, lang_to_group):
         return None
     text = WIKI_MARKUP.sub("", text)

@@ -5,13 +5,14 @@ import json
 import os
 import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import Any
 
 import pandas as pd
 from datasets import load_dataset
 from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic as _write_json_atomic, write_sentence_parquet as _write_sentence_parquet
-from language import ALL_LANGS, LANG_TO_GROUP
+from language import ALL_LANGS, LANG_TO_GROUP, canonical_lang
 from paths import PATHS
 from text_utils import (
     _article_min_chars,
@@ -43,6 +44,10 @@ WIKI_CAP_MULTIPLIERS = {
     "hi": 1.25,
     "ko": 1.25,
     "ar": 1.25,
+    "no": 0.5,
+}
+WIKI_SOURCE_LANGS = {
+    "no": ("no", "nn"),
 }
 WIKI_ROLLING_STATS_WINDOW = 250
 LENGTH_PRIORITY_SCAN_LIMIT = int(MAX_WIKI_INDEX // 1.5)
@@ -75,17 +80,26 @@ def _is_missing_wiki_config_error(exc: Exception, lang: str) -> bool:
     )
 
 
-def _load_wiki_dataset(lang: str, *, seed: int):
+def _wiki_source_langs(lang: str) -> tuple[str, ...]:
+    lang = canonical_lang(lang)
+    return WIKI_SOURCE_LANGS.get(lang, (lang,))
+
+
+def _wiki_cache_meta_path(sentences_dir: str, lang: str) -> str:
+    return os.path.join(sentences_dir, f"{lang}.meta.json")
+
+
+def _load_wiki_dataset(source_lang: str, *, seed: int):
     try:
         dataset = load_dataset(
             "wikimedia/wikipedia",
-            f"20231101.{lang}",
+            f"20231101.{source_lang}",
             split="train",
             streaming=True,
         )
     except Exception as exc:
-        if _is_missing_wiki_config_error(exc, lang):
-            print(f"  Skipping {lang}: Wikipedia config 20231101.{lang} was not found")
+        if _is_missing_wiki_config_error(exc, source_lang):
+            print(f"  Skipping {source_lang}: Wikipedia config 20231101.{source_lang} was not found")
             return None
         raise
     return dataset.shuffle(buffer_size=1000, seed=seed)
@@ -220,11 +234,21 @@ def extract_sentences_from_wiki(
     seed: int = 42,
     sentences_dir: str = PATHS["wiki"]["cache_dir"],
 ) -> str:
+    lang = canonical_lang(lang)
+    source_langs = _wiki_source_langs(lang)
     segmenter = _get_segmenter(lang)
     fetch_target = n_articles * 20
     final_path = parquet_path(sentences_dir, lang)
     temp_path = temp_parquet_path(lang)
     meta_path = temp_meta_path(lang)
+    cache_meta_path = _wiki_cache_meta_path(sentences_dir, lang)
+    datasets: list[tuple[str, Any]] = []
+    for source_lang in source_langs:
+        dataset = _load_wiki_dataset(source_lang, seed=seed)
+        if dataset is not None:
+            datasets.append((source_lang, dataset))
+    if not datasets:
+        return ""
 
     if lang in LENGTH_PRIORITY_LANGS:
         scan_limit = min(fetch_target, LENGTH_PRIORITY_SCAN_LIMIT)
@@ -234,9 +258,7 @@ def extract_sentences_from_wiki(
             f"(scan_limit={scan_limit}, sentence_cap={sentence_cap}, "
             f"min_chars={_article_min_chars(lang, lang_to_group)})"
         )
-        dataset = _load_wiki_dataset(lang, seed=seed)
-        if dataset is None:
-            return ""
+        dataset = datasets[0][1]
         priority_articles = _collect_priority_articles(
             dataset,
             lang,
@@ -294,6 +316,13 @@ def extract_sentences_from_wiki(
 
         committed_sentences = post_clean_sentences(committed_sentences, lang, lang_to_group)
         _write_sentence_parquet(final_path, committed_sentences)
+        _write_json_atomic(
+            cache_meta_path,
+            {
+                "lang": lang,
+                "source_langs": list(source_langs),
+            },
+        )
         return final_path
 
     committed_sentences: list[str] = []
@@ -338,10 +367,6 @@ def extract_sentences_from_wiki(
             if os.path.exists(path):
                 os.remove(path)
 
-    dataset = _load_wiki_dataset(lang, seed=seed)
-    if dataset is None:
-        return ""
-
     def _update_progress(bar, scanned_articles: int) -> None:
         bar.set_postfix_str(
             f"acc {accepted_articles}/{n_articles} | "
@@ -361,38 +386,80 @@ def extract_sentences_from_wiki(
             leave=False,
             dynamic_ncols=True,
         ) as bar:
-            for article_idx, article in enumerate(dataset.take(fetch_target)):
-                if article_idx < next_article_idx:
-                    _update_progress(bar, article_idx + 1)
-                    continue
-                if article_idx >= MAX_WIKI_INDEX:
-                    print(
-                        f"  Stopping {lang} at article index {article_idx} "
-                        f"(MAX_WIKI_INDEX={MAX_WIKI_INDEX})"
-                    )
+            global_article_idx = 0
+            stop_extracting = False
+            for source_lang, dataset in datasets:
+                if stop_extracting:
                     break
+                for article_idx, article in enumerate(dataset.take(fetch_target)):
+                    if global_article_idx < next_article_idx:
+                        global_article_idx += 1
+                        _update_progress(bar, global_article_idx)
+                        continue
+                    if global_article_idx >= MAX_WIKI_INDEX:
+                        print(
+                            f"  Stopping {lang} at article index {global_article_idx} "
+                            f"(MAX_WIKI_INDEX={MAX_WIKI_INDEX})"
+                        )
+                        stop_extracting = True
+                        break
 
-                article_text = article.get("text", "")
-                article_title = article.get("title", "")
-                article_lengths_window.append(len(article_text))
+                    article_text = article.get("text", "")
+                    article_title = article.get("title", "")
+                    article_lengths_window.append(len(article_text))
 
-                article_batch = _extract_article_sentences(
-                    article_text,
-                    lang,
-                    segmenter,
-                    article_idx,
-                    lang_to_group=lang_to_group,
-                    article_title=article_title,
-                )
-                if not article_batch:
-                    next_article_idx = article_idx + 1
-                    miss_streak += 1
+                    article_batch = _extract_article_sentences(
+                        article_text,
+                        lang,
+                        segmenter,
+                        global_article_idx,
+                        lang_to_group=lang_to_group,
+                        article_title=article_title,
+                    )
+                    if not article_batch:
+                        next_article_idx = global_article_idx + 1
+                        miss_streak += 1
+                        _write_sentence_parquet(temp_path, committed_sentences)
+                        _write_json_atomic(
+                            meta_path,
+                            _wiki_checkpoint_payload(
+                                lang,
+                                next_article_idx,
+                                accepted_articles,
+                                miss_streak,
+                                n_articles,
+                                committed_sentences,
+                                article_lengths_window,
+                                sentence_lengths_window,
+                                seed,
+                            ),
+                        )
+                        global_article_idx += 1
+                        _update_progress(bar, global_article_idx)
+                        continue
+
+                    remaining_sentences = sentence_cap - len(committed_sentences)
+                    if remaining_sentences <= 0:
+                        print(
+                            f"  Stopping {lang} after reaching sentence cap="
+                            f"{sentence_cap}"
+                        )
+                        stop_extracting = True
+                        break
+
+                    if len(article_batch) > remaining_sentences:
+                        article_batch = article_batch[:remaining_sentences]
+
+                    committed_sentences.extend(article_batch)
+                    sentence_lengths_window.extend(len(s) for s in article_batch)
+                    accepted_articles += 1
+                    miss_streak = 0
                     _write_sentence_parquet(temp_path, committed_sentences)
                     _write_json_atomic(
                         meta_path,
                         _wiki_checkpoint_payload(
                             lang,
-                            next_article_idx,
+                            global_article_idx + 1,
                             accepted_articles,
                             miss_streak,
                             n_articles,
@@ -402,53 +469,32 @@ def extract_sentences_from_wiki(
                             seed,
                         ),
                     )
-                    _update_progress(bar, article_idx + 1)
-                    continue
-
-                remaining_sentences = sentence_cap - len(committed_sentences)
-                if remaining_sentences <= 0:
-                    print(
-                        f"  Stopping {lang} after reaching sentence cap="
-                        f"{sentence_cap}"
-                    )
-                    break
-
-                if len(article_batch) > remaining_sentences:
-                    article_batch = article_batch[:remaining_sentences]
-
-                committed_sentences.extend(article_batch)
-                sentence_lengths_window.extend(len(s) for s in article_batch)
-                accepted_articles += 1
-                miss_streak = 0
-                _write_sentence_parquet(temp_path, committed_sentences)
-                _write_json_atomic(
-                    meta_path,
-                    _wiki_checkpoint_payload(
-                        lang,
-                        article_idx + 1,
-                        accepted_articles,
-                        miss_streak,
-                        n_articles,
-                        committed_sentences,
-                        article_lengths_window,
-                        sentence_lengths_window,
-                        seed,
-                    ),
-                )
-                next_article_idx = article_idx + 1
-                bar.update(len(article_batch))
-                _update_progress(bar, article_idx + 1)
-                if len(committed_sentences) >= sentence_cap:
-                    print(
-                        f"  Stopping {lang} after reaching sentence cap="
-                        f"{sentence_cap}"
-                    )
-                    break
-                if accepted_articles >= n_articles:
+                    next_article_idx = global_article_idx + 1
+                    bar.update(len(article_batch))
+                    _update_progress(bar, global_article_idx + 1)
+                    if len(committed_sentences) >= sentence_cap:
+                        print(
+                            f"  Stopping {lang} after reaching sentence cap="
+                            f"{sentence_cap}"
+                        )
+                        stop_extracting = True
+                        break
+                    if accepted_articles >= n_articles:
+                        stop_extracting = True
+                        break
+                    global_article_idx += 1
+                if stop_extracting:
                     break
 
         committed_sentences = post_clean_sentences(committed_sentences, lang, lang_to_group)
         _write_sentence_parquet(final_path, committed_sentences)
+        _write_json_atomic(
+            cache_meta_path,
+            {
+                "lang": lang,
+                "source_langs": list(source_langs),
+            },
+        )
         completed_cleanly = True
     finally:
         if completed_cleanly:
@@ -468,13 +514,34 @@ def load_or_extract(
     sentences_dir: str = PATHS["sentences_dir"],
     articles_per_lang: int = ARTICLES_PER_LANG,
 ) -> tuple[str, str | None]:
+    lang = canonical_lang(lang)
     path = parquet_path(sentences_dir, lang)
+    cache_meta_path = _wiki_cache_meta_path(sentences_dir, lang)
+    source_langs = list(_wiki_source_langs(lang))
     if os.path.exists(path):
-        cached = pd.read_parquet(path)["sentence"].tolist()
-        cleaned = post_clean_sentences(cached, lang, lang_to_group)
-        if cleaned != cached:
-            _write_sentence_parquet(path, cleaned)
-        return lang, path
+        meta_valid = True
+        if len(source_langs) > 1 or os.path.exists(cache_meta_path):
+            try:
+                with open(cache_meta_path, encoding="utf-8") as f:
+                    meta = json.load(f)
+            except Exception:
+                meta = None
+            meta_valid = bool(
+                isinstance(meta, dict)
+                and meta.get("lang") == lang
+                and meta.get("source_langs") == source_langs
+            )
+        if meta_valid:
+            cached = pd.read_parquet(path)["sentence"].tolist()
+            cleaned = post_clean_sentences(cached, lang, lang_to_group)
+            if cleaned != cached:
+                _write_sentence_parquet(path, cleaned)
+            return lang, path
+        stale_temp_path = temp_parquet_path(lang)
+        stale_meta_path = temp_meta_path(lang)
+        for stale_path in (path, cache_meta_path, stale_temp_path, stale_meta_path):
+            if os.path.exists(stale_path):
+                os.remove(stale_path)
     extracted_path = extract_sentences_from_wiki(
         lang,
         n_articles=articles_per_lang,
