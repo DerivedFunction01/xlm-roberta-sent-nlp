@@ -9,6 +9,10 @@ from pathlib import Path
 
 from language import ENGLISH_STOP_WORDS, LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS, canonical_lang
 try:
+    import nltk as nltk_module
+except Exception:  # pragma: no cover - optional dependency
+    nltk_module = None
+try:
     from nltk.corpus import words as nltk_words
 except Exception:  # pragma: no cover - optional dependency
     nltk_words = None
@@ -52,7 +56,9 @@ ENGLISH_FILTER_POLICY = {
     },
 }
 ENGLISH_STOP_WORD_SET = {word.lower() for word in ENGLISH_STOP_WORDS}
-NLTK_ENGLISH_SECONDARY_LIMIT = 50_000
+# Use the full corpus when available so later entries are not arbitrarily dropped.
+NLTK_ENGLISH_SECONDARY_LIMIT: int | None = None
+_NLTK_WORDS_DOWNLOAD_ATTEMPTED = False
 POOL_TERMINAL_PUNCT_CHOICES = (".", ":", ";", "!", "?")
 POOL_WRAPPER_PAIRS = (
     ("(", ")"),
@@ -120,6 +126,31 @@ def _assign_group_bounds(bounds: tuple[int, int], *groups: str) -> None:
         GROUP_SENT_BOUNDS[group] = bounds
 
 
+def _ensure_nltk_words_corpus() -> bool:
+    global _NLTK_WORDS_DOWNLOAD_ATTEMPTED
+    if nltk_words is None or nltk_module is None:
+        return False
+    try:
+        nltk_module.data.find("corpora/words")
+        return True
+    except LookupError:
+        pass
+    if _NLTK_WORDS_DOWNLOAD_ATTEMPTED:
+        return False
+    _NLTK_WORDS_DOWNLOAD_ATTEMPTED = True
+    try:
+        nltk_module.download("words", quiet=True, raise_on_error=True)
+    except TypeError:
+        nltk_module.download("words", quiet=True)
+    except Exception:
+        return False
+    try:
+        nltk_module.data.find("corpora/words")
+        return True
+    except LookupError:
+        return False
+
+
 _assign_group_bounds((24, 600), "English")
 _assign_group_bounds((35, 650), "Russian", "EastSlavicCyrillic", "BalkanCyrillic", "CentralAsianCaucusCyrillic")
 _assign_group_bounds((40, 600), "German")
@@ -152,6 +183,8 @@ _PROC_SEGMENTERS: dict[str, object] = {}
 def _nltk_english_secondary_word_set() -> set[str]:
     if nltk_words is None:
         return set()
+    if not _ensure_nltk_words_corpus():
+        return set()
     try:
         secondary: set[str] = set()
         for word in nltk_words.words():
@@ -159,7 +192,10 @@ def _nltk_english_secondary_word_set() -> set[str]:
             if not word or not word.isalpha() or word in ENGLISH_STOP_WORD_SET:
                 continue
             if len(word) > 3: secondary.add(word)
-            if len(secondary) >= NLTK_ENGLISH_SECONDARY_LIMIT:
+            if (
+                NLTK_ENGLISH_SECONDARY_LIMIT is not None
+                and len(secondary) >= NLTK_ENGLISH_SECONDARY_LIMIT
+            ):
                 break
         return secondary
     except LookupError:

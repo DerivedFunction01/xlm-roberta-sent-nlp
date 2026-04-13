@@ -12,7 +12,7 @@ from datasets import load_dataset
 from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic as _write_json_atomic, write_sentence_parquet as _write_sentence_parquet
-from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUP_MIN_CHARS, canonical_lang
+from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUP_MIN_CHARS, LATIN_GROUPS, canonical_lang
 from paths import PATHS
 from text_utils import (
     _article_min_chars,
@@ -212,14 +212,19 @@ def temp_meta_path(lang: str) -> str:
     return os.path.join(PATHS["wiki"]["temp_dir"], f"{lang}.meta.json")
 
 
-def max_wiki_sentences_for_lang(lang: str) -> int:
-    multiplier = WIKI_CAP_MULTIPLIERS.get(lang, 1.0)
+def _wiki_cap_multiplier(source_langs: tuple[str, ...]) -> float:
+    return sum(WIKI_CAP_MULTIPLIERS.get(canonical_lang(source_lang), 1.0) for source_lang in source_langs)
+
+
+def max_wiki_sentences_for_lang(lang: str, *, source_langs: tuple[str, ...] | None = None) -> int:
+    source_langs = source_langs or (lang,)
+    multiplier = _wiki_cap_multiplier(source_langs)
     return int(round(MAX_WIKI_SENTENCES * multiplier))
 
 
-def max_length_priority_sentences_for_lang(lang: str) -> int:
+def max_length_priority_sentences_for_lang(lang: str, *, source_langs: tuple[str, ...] | None = None) -> int:
     return min(
-        max_wiki_sentences_for_lang(lang),
+        max_wiki_sentences_for_lang(lang, source_langs=source_langs),
         LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG.get(lang, LENGTH_PRIORITY_SENTENCE_CAP),
     )
 
@@ -286,7 +291,7 @@ def extract_sentences_from_wiki(
 
     if lang in LENGTH_PRIORITY_LANGS:
         scan_limit = min(fetch_target, LENGTH_PRIORITY_SCAN_LIMIT)
-        sentence_cap = max_length_priority_sentences_for_lang(lang)
+        sentence_cap = max_length_priority_sentences_for_lang(lang, source_langs=source_langs)
         print(
             f"  Length-priority mode enabled for {lang} "
             f"(scan_limit={scan_limit}, sentence_cap={sentence_cap}, "
@@ -360,7 +365,7 @@ def extract_sentences_from_wiki(
         return final_path
 
     committed_sentences: list[str] = []
-    sentence_cap = max_wiki_sentences_for_lang(lang)
+    sentence_cap = max_wiki_sentences_for_lang(lang, source_langs=source_langs)
     sentence_lengths_window: deque[int] = deque(
         (len(s) for s in committed_sentences[-WIKI_ROLLING_STATS_WINDOW:]),
         maxlen=WIKI_ROLLING_STATS_WINDOW,
@@ -622,3 +627,26 @@ def load_wiki_sentences(
             result[lang] = sentences
             tqdm.write(f"  {lang}: {len(sentences)} sentences -> {cache_path}")
     return result
+
+
+def refilter_cached_wiki_sentences(
+    langs: list[str] = ALL_LANGS,
+    *,
+    lang_to_group: dict[str, str] = LANG_TO_GROUP,
+    sentences_dir: str = PATHS["wiki"]["cache_dir"],
+    latin_only: bool = True,
+) -> dict[str, int]:
+    updated_counts: dict[str, int] = {}
+    for raw_lang in langs:
+        lang = canonical_lang(raw_lang)
+        if latin_only and lang_to_group.get(lang) not in LATIN_GROUPS:
+            continue
+        path = parquet_path(sentences_dir, lang)
+        if not os.path.exists(path):
+            continue
+        cached = pd.read_parquet(path)["sentence"].tolist()
+        cleaned = post_clean_sentences(cached, lang, lang_to_group)
+        if cleaned != cached:
+            _write_sentence_parquet(path, cleaned)
+        updated_counts[lang] = len(cleaned)
+    return updated_counts
