@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import multiprocessing as mp
 from finetranslations_sources import load_finetranslations_sentences
-from instruction_sources import load_instruction_sentences
 from wiki_sources import load_wiki_sentences
 from smol_sources import load_smol_sentences
 from huggingface_hub import login
@@ -32,11 +31,6 @@ def refresh_sources() -> None:
     #%%
     print("Refreshing FineTranslations caches ...")
     _ = load_finetranslations_sentences(
-        max_workers=workers,
-    )
-    #%%
-    print("Refreshing instruction-source caches ...")
-    _ = load_instruction_sentences(
         max_workers=workers,
     )
     #%%

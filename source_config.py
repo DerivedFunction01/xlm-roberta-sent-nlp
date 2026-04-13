@@ -1,7 +1,4 @@
 from __future__ import annotations
-
-from instruction_dataset_sources import DEFAULT_INSTRUCTION_SOURCE_SPECS
-
 LANGUAGE_BUCKETS = {
     # ~41% of CC — intentionally capped to avoid crowding out other languages
     "English": {
@@ -259,11 +256,6 @@ POOL = {
         "min": 4,
         "max": 90_000,
     },
-    "instruct": {
-        "reserve": 0.60,
-        "min": 1,
-        "max": 30_000,
-    },
     "smol": {
         "reserve": 0.95,
         "min": 1,
@@ -322,14 +314,6 @@ DOC_MIX = {
 SMOL = {
     "use": True,
     "rebuild": False,
-}
-
-INSTRUCT = {
-    "use": True,
-    "rebuild": False,
-    "max_lang": 50_000,
-    "overflow_lang": 55_000,
-    "sources": DEFAULT_INSTRUCTION_SOURCE_SPECS,
 }
 
 FT = {
