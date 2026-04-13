@@ -12,7 +12,7 @@ import nltk as nltk_module
 from nltk.corpus import words as nltk_words
 
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
-SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+")
+SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s*")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
 BRACKET_NOTES = re.compile(r"\s*[\(\[【（][^\)\]】）]{0,60}[\)\]】）]\s*")
 WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
@@ -29,6 +29,12 @@ WIKI_DIGITS = re.compile(r"\d")
 WIKI_WORDS = re.compile(r"\b\w+\b", flags=re.UNICODE)
 MAX_DIGIT_RATIO = 0.10
 MIN_VALID_TOKENS = 4
+NO_SPACE_VALIDATION_GROUPS = {
+    "Chinese",
+    "Japanese",
+    "Korean",
+    "OtherScriptsEast",
+}
 ENGLISH_FILTER_POLICY = {
     "min_alpha_words": 4,
     "min_local_hits": 3,
@@ -228,6 +234,9 @@ def _valid_non_digit_non_symbol_token_count(s: str) -> int:
     for ch in s:
         category = unicodedata.category(ch)
         if category.startswith(("L", "M", "N", "P", "S")):
+            if category.startswith("P"):
+                flush_token()
+                continue
             in_token = True
             if category.startswith(("L", "M")):
                 token_has_letter = True
@@ -240,6 +249,16 @@ def _valid_non_digit_non_symbol_token_count(s: str) -> int:
 
     flush_token()
     return count
+
+
+def _valid_sentence_token_count(s: str, lang: str, lang_to_group: dict[str, str]) -> int:
+    lang = canonical_lang(lang)
+    group = lang_to_group.get(lang)
+    if group in NO_SPACE_VALIDATION_GROUPS:
+        # CJK and related scripts often do not use whitespace between words, so
+        # a token counter based on spaces would reject nearly every sentence.
+        return _non_punct_char_count(s)
+    return _valid_non_digit_non_symbol_token_count(s)
 
 
 def _strip_bracket_notes(text: str) -> str:
@@ -467,7 +486,7 @@ def _is_valid_sentence(
     visible = _non_punct_char_count(s)
     if not (mn < visible < mx):
         return False
-    if _valid_non_digit_non_symbol_token_count(s) < MIN_VALID_TOKENS:
+    if _valid_sentence_token_count(s, lang, lang_to_group) < MIN_VALID_TOKENS:
         return False
     digits = _digit_count(s)
     return digits <= visible * MAX_DIGIT_RATIO

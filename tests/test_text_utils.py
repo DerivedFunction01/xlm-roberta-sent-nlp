@@ -115,6 +115,26 @@ class TokenCountTests(unittest.TestCase):
             5,
         )
 
+    def test_valid_non_digit_non_symbol_token_count_ignores_trailing_punctuation(self) -> None:
+        self.assertEqual(
+            text_utils._valid_non_digit_non_symbol_token_count("This is a valid sentence."),
+            5,
+        )
+
+    def test_valid_sentence_accepts_cjk_without_whitespace_tokens(self) -> None:
+        lang_to_group = {
+            lang: group
+            for group, langs in LANGUAGE_GROUPS.items()
+            for lang in langs
+        }
+        self.assertTrue(
+            text_utils._is_valid_sentence("今天天气很好啊啊啊。", "zh", lang_to_group)
+        )
+
+    def test_sentence_split_fallback_handles_cjk_without_spaces(self) -> None:
+        pieces = [piece for piece in text_utils.SENT_SPLIT.split("句子一。句子二。") if piece]
+        self.assertEqual(pieces, ["句子一。", "句子二。"])
+
 
 if __name__ == "__main__":
     unittest.main()
