@@ -135,6 +135,10 @@ class TokenCountTests(unittest.TestCase):
         pieces = [piece for piece in text_utils.SENT_SPLIT.split("句子一。句子二。") if piece]
         self.assertEqual(pieces, ["句子一。", "句子二。"])
 
+    def test_sentence_split_handles_ascii_and_cjk_punctuation(self) -> None:
+        pieces = [piece for piece in text_utils.SENT_SPLIT.split("Hello world. 你好世界。Next.") if piece]
+        self.assertEqual(pieces, ["Hello world.", "你好世界。", "Next."])
+
 
 if __name__ == "__main__":
     unittest.main()

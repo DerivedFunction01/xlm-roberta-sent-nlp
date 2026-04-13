@@ -12,7 +12,10 @@ import nltk as nltk_module
 from nltk.corpus import words as nltk_words
 
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
-SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s*")
+# Split on standard ASCII sentence punctuation plus CJK sentence punctuation.
+# CJK text often omits spaces after the terminator, so the CJK branch does not
+# require trailing whitespace.
+SENT_SPLIT = re.compile(r"(?<=[.!?])\s+|(?<=[。！？])\s*")
 WIKI_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
 BRACKET_NOTES = re.compile(r"\s*[\(\[【（][^\)\]】）]{0,60}[\)\]】）]\s*")
 WIKI_ASCII_WORDS = re.compile(r"[A-Za-z]+")
