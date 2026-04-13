@@ -103,6 +103,18 @@ def _wiki_cache_meta_path(sentences_dir: str, lang: str) -> str:
     return os.path.join(sentences_dir, f"{lang}.meta.json")
 
 
+def _write_wiki_cache_meta(cache_meta_path: str, lang: str, source_langs: list[str]) -> None:
+    _write_json_atomic(
+        cache_meta_path,
+        {
+            "lang": canonical_lang(lang),
+            "source_langs": source_langs,
+            "status": "complete",
+            "cache_origin": "external_parquet",
+        },
+    )
+
+
 def _assign_wiki_paragraph_fraction(fraction: float, *groups: str) -> None:
     for group in groups:
         WIKI_PARAGRAPH_FRACTIONS_BY_GROUP[group] = fraction
@@ -595,8 +607,11 @@ def load_or_extract(
     cache_meta_path = _wiki_cache_meta_path(sentences_dir, lang)
     source_langs = list(_wiki_source_langs(lang))
     if os.path.exists(path):
+        meta_missing = not os.path.exists(cache_meta_path)
         meta_valid = True
-        if len(source_langs) > 1 or os.path.exists(cache_meta_path):
+        if meta_missing:
+            _write_wiki_cache_meta(cache_meta_path, lang, source_langs)
+        else:
             try:
                 with open(cache_meta_path, encoding="utf-8") as f:
                     meta = json.load(f)
@@ -617,6 +632,8 @@ def load_or_extract(
             )
             if cleaned != cached:
                 _write_sentence_parquet(path, cleaned)
+            if meta_missing and not os.path.exists(cache_meta_path):
+                _write_wiki_cache_meta(cache_meta_path, lang, source_langs)
             return lang, path
         stale_temp_path = temp_parquet_path(lang)
         stale_meta_path = temp_meta_path(lang)

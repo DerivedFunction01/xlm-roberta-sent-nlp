@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 
@@ -11,6 +12,7 @@ from wiki_sources import (
     _wiki_cap_multiplier,
     _wiki_use_nltk_secondary,
     collect_rejected_english_sentences,
+    load_or_extract,
     max_wiki_sentences_for_lang,
 )
 
@@ -76,6 +78,24 @@ class WikiCapTests(unittest.TestCase):
 
         self.assertEqual(len(rejected), 1)
         self.assertEqual(rejected[0]["sentence"], "This is the simple English clear speech leak.")
+
+    def test_load_or_extract_creates_meta_for_external_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            write_sentence_parquet(f"{tmpdir}/su.parquet", ["Ngeunaan basa Sunda."])
+
+            lang, path = load_or_extract(
+                "su",
+                lang_to_group=LANG_TO_GROUP,
+                sentences_dir=tmpdir,
+            )
+
+            self.assertEqual(lang, "su")
+            self.assertEqual(path, f"{tmpdir}/su.parquet")
+            with open(f"{tmpdir}/su.meta.json", encoding="utf-8") as f:
+                meta = json.load(f)
+            self.assertEqual(meta["lang"], "su")
+            self.assertEqual(meta["source_langs"], ["su"])
+            self.assertEqual(meta["status"], "complete")
 
 
 if __name__ == "__main__":
