@@ -132,8 +132,7 @@ def generate_numeric_noise() -> str:
 
     row_count = random.randint(2, 4)
     col_count = random.randint(3, 5)
-    header = ", ".join(f"col{i + 1}" for i in range(col_count))
-    rows = [header]
+    rows = []
     for _ in range(row_count):
         row = ", ".join(
             random.choice(
