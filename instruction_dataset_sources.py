@@ -60,6 +60,22 @@ def _extract_texts_from_fields(row: dict[str, Any], fields: tuple[str, ...]) -> 
     return texts
 
 
+def _extract_hindi_text_after_colon(row: dict[str, Any], fields: tuple[str, ...]) -> list[str]:
+    texts: list[str] = []
+    for field in fields:
+        value = row.get(field)
+        if not isinstance(value, str):
+            continue
+        cleaned = _normalize_text(value)
+        if not cleaned:
+            continue
+        _, separator, tail = cleaned.partition(":")
+        if separator and tail.strip():
+            cleaned = tail.strip()
+        texts.append(cleaned)
+    return texts
+
+
 def _extract_french_instruct_texts(row: dict[str, Any], spec: dict[str, Any]) -> list[str]:
     texts = _extract_texts_from_message_list(row, "conversation")
     if texts:
@@ -75,7 +91,7 @@ def _extract_due_chiacchiere_texts(row: dict[str, Any], spec: dict[str, Any]) ->
 
 
 def _extract_aya_hindi_texts(row: dict[str, Any], spec: dict[str, Any]) -> list[str]:
-    texts = _extract_texts_from_fields(row, ("inputs", "targets"))
+    texts = _extract_hindi_text_after_colon(row, ("inputs", "targets"))
     return texts
 
 

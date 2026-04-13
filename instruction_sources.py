@@ -20,7 +20,7 @@ from source_config import INSTRUCT
 from text_utils import _collapse_spaces, _strip_bracket_notes, clean_sentence
 
 
-INSTRUCTION_CACHE_VERSION = 4
+INSTRUCTION_CACHE_VERSION = 5
 DEFAULT_MAX_SENTENCES_PER_LANG = INSTRUCT["max_lang"]
 DEFAULT_SOURCE_SPECS = DEFAULT_INSTRUCTION_SOURCE_SPECS
 _HAS_WORD_OR_IDEOGRAPH = re.compile(r"\w", flags=re.UNICODE)
@@ -30,16 +30,6 @@ _HTML_TAG_RE = re.compile(r"</?[A-Za-z][^>\n]{0,80}>")
 _REPEATED_PUNCT_RE = re.compile(r"([,.;:!?…،。！？])\1+")
 _MATH_SYMBOL_RE = re.compile(r"[=+\-*/^<>|~]")
 _URL_RE = re.compile(r"https?://|www\.", flags=re.IGNORECASE)
-_PROMPT_MARKER_RE = re.compile(
-    r"\b("
-    r"BEGININPUT|ENDINPUT|BEGINCONTEXT|ENDCONTEXT|BEGININSTRUCTION|ENDINSTRUCTION|"
-    r"INICIOINPUT|FININPUT|INICIOCONTEXTO|FINCONTEXTO|INICIOINSTRUCCIÓN|FININSTRUCCIÓN|"
-    r"НАЧАТЬВВОД|КОНЕЧНЫЙ\s+ПУТЬ|НАЧАТЬКОНТЕКСТ|КОНЕЦКОНТЕКСТА|"
-    r"STARTINPUT|STOPINPUT|STARTCONTEXT|STOPCONTEXT|STARTINSTRUCTION|STOPINSTRUCTION|"
-    r"INPUT|CONTEXT|INSTRUCTION"
-    r")\b",
-    flags=re.IGNORECASE,
-)
 _TABLEISH_RE = re.compile(r"\|.+\|.+\|")
 _LATEX_COMMAND_RE = re.compile(r"\\[A-Za-z]+")
 _LATEX_BRACE_RE = re.compile(r"\{[^{}]{0,80}\}")
@@ -235,8 +225,6 @@ def _is_valid_instruction_text(
     if not any(ch.isalpha() for ch in cleaned):
         return False
     if _URL_RE.search(cleaned):
-        return False
-    if _PROMPT_MARKER_RE.search(cleaned):
         return False
     if "\\" in cleaned:
         if _LATEX_COMMAND_RE.search(cleaned) or _LATEX_BRACE_RE.search(cleaned):
