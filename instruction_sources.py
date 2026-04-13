@@ -35,19 +35,6 @@ _CODE_FENCE_RE = re.compile(r"```|~~~")
 _CODE_KEYWORD_RE = re.compile(
     r"\b(import|from|def|class|return|lambda|function|const|let|var|public|private|protected|static|if|else|elif|for|while|try|catch|except|throw|throws|new|switch|case|package|include|using|namespace)\b"
 )
-_CODE_PATTERN_RE = re.compile(
-    r"(^|\n)\s*(?:"
-    r"(?:def|class|function|const|let|var)\s+\w+\s*(?:\(|=)|"
-    r"(?:import|from)\s+\w+|"
-    r"#include\s*<|"
-    r"[{}\[\]();]{2,}|"
-    r"[A-Za-z_][A-Za-z0-9_]*\s*=\s*[^=].*;|"
-    r"<[A-Za-z][^>]*>|"
-    r".*=>.*"
-    r")",
-    flags=re.UNICODE,
-)
-
 
 def _instruction_cache_dir(sentences_dir: str) -> str:
     return (
@@ -189,9 +176,7 @@ def _dedupe_sentence_list(sentences: list[str]) -> tuple[list[str], int]:
 def _looks_like_code(text: str) -> bool:
     if _CODE_FENCE_RE.search(text):
         return True
-    if _CODE_KEYWORD_RE.search(text) and any(ch in text for ch in (";", "{", "}", "(", ")", "[", "]", "<", ">", "=>", "::")):
-        return True
-    if _CODE_PATTERN_RE.search(text):
+    if _CODE_KEYWORD_RE.search(text) and any(ch in text for ch in (";", "{", "}", "(", ")", "[", "]", "<", ">", "=>", "::", ":", "#")):
         return True
     lines = [line for line in text.splitlines() if line.strip()]
     if len(lines) >= 3:
