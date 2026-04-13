@@ -43,14 +43,7 @@ ENGLISH_FILTER_POLICY = {
         "corpus_ratio_min": 0.30,
         "ascii_ratio_min": 0.50,
     },
-    "finetrans": {
-        "max_english_ratio": 0.35,
-        "strict_language_score_cutoff": 0.98,
-        "min_tokens": 4,
-    },
 }
-ENGLISH_STOP_WORD_SET = {word.lower() for word in ENGLISH_STOP_WORDS}
-# Use the full corpus when available so later entries are not arbitrarily dropped.
 NLTK_ENGLISH_SECONDARY_LIMIT: int | None = None
 POOL_TERMINAL_PUNCT_CHOICES = (".", ":", ";", "!", "?")
 POOL_WRAPPER_PAIRS = (
@@ -124,7 +117,9 @@ def _ensure_nltk_words_corpus() -> None:
         nltk_module.data.find("corpora/words")
     except LookupError:
         nltk_module.download("words", quiet=True, raise_on_error=True)
-        nltk_module.data.find("corpora/words")
+
+
+ENGLISH_STOP_WORD_SET = {word.lower() for word in ENGLISH_STOP_WORDS}
 
 
 _assign_group_bounds((24, 600), "English")
@@ -271,7 +266,7 @@ def _english_corpus_hits(sentence: str) -> int:
     return broad_hits
 
 
-def _looks_like_english_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
+def _looks_like_english_text(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
     lang = canonical_lang(lang)
     if lang == "en":
         return False
@@ -300,6 +295,10 @@ def _looks_like_english_sentence(sentence: str, lang: str, lang_to_group: dict[s
     )
 
 
+def _looks_like_english_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
+    return _looks_like_english_text(sentence, lang, lang_to_group)
+
+
 def clean_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> str:
     lang = canonical_lang(lang)
     if "\\" in sentence:
@@ -307,7 +306,7 @@ def clean_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> s
     sentence = HTML_TAG_RE.sub(" ", sentence)
     sentence = _strip_bracket_notes(sentence)
     sentence = _collapse_repeated_punct(sentence)
-    if _looks_like_english_sentence(sentence, lang, lang_to_group):
+    if _looks_like_english_text(sentence, lang, lang_to_group):
         return ""
     if _strip_ascii_for_lang(lang, lang_to_group):
         sentence = WIKI_ASCII_WORDS.sub("", sentence)

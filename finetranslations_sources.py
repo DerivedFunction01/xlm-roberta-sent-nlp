@@ -21,12 +21,10 @@ from source_config import (
     FT,
 )
 from text_utils import (
-    ENGLISH_FILTER_POLICY,
     LATIN_GROUPS,
     SENT_SPLIT,
-    _english_leak_stats,
-    _english_corpus_hits,
     _get_segmenter,
+    _looks_like_english_text,
     post_clean_sentences,
     sanitize_paragraph_for_pysbd,
 )
@@ -220,23 +218,6 @@ def _sentence_token_length(sentence: str) -> int:
     return len(_latin_tokens(sentence))
 
 
-def _looks_english_heavy(text: str) -> bool:
-    local_hits, ascii_words, alpha_words = _english_leak_stats(text)
-    policy = ENGLISH_FILTER_POLICY["finetrans"]
-    if alpha_words < policy["min_tokens"]:
-        return False
-    if local_hits < ENGLISH_FILTER_POLICY["min_local_hits"]:
-        return False
-    if ascii_words / alpha_words < ENGLISH_FILTER_POLICY["ascii_ratio_floor"]:
-        return False
-    broad_hits = _english_corpus_hits(text)
-    english_ratio = broad_hits / max(1, alpha_words)
-    return (
-        broad_hits >= ENGLISH_FILTER_POLICY["nonlatin"]["corpus_hits_min"]
-        and english_ratio >= policy["max_english_ratio"]
-    )
-
-
 def _row_base_score(row: dict[str, Any], lang: str) -> float:
     score = 0.0
     quality = _row_quality_score(row)
@@ -259,21 +240,18 @@ def _sentence_base_score(row: dict[str, Any], lang: str, sentence_token_length: 
 def _latin_source_lines(
     chunks: list[str],
     *,
-    lang_score: float | None = None,
+    lang: str,
+    lang_to_group: dict[str, str],
 ) -> list[str]:
     selected_chunks = _longest_chunks(chunks)
     lines: list[str] = []
     seen: set[str] = set()
-    apply_english_filter = (
-        lang_score is None
-        or lang_score < ENGLISH_FILTER_POLICY["finetrans"]["strict_language_score_cutoff"]
-    )
     for chunk in selected_chunks:
         for raw_line in chunk.splitlines():
             line = raw_line.strip()
             if not line:
                 continue
-            if apply_english_filter and _looks_english_heavy(line):
+            if _looks_like_english_text(line, lang, lang_to_group):
                 continue
             if line in seen:
                 continue
@@ -304,7 +282,11 @@ def _sentence_records_from_row(
         cleaned_sentences = post_clean_sentences(raw_sentences, lang, lang_to_group)
     elif lang_to_group.get(lang) in LATIN_GROUPS:
         cleaned_sentences = post_clean_sentences(
-            _latin_source_lines(chunks, lang_score=_row_language_score(row)),
+            _latin_source_lines(
+                chunks,
+                lang=lang,
+                lang_to_group=lang_to_group,
+            ),
             lang,
             lang_to_group,
         )
