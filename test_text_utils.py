@@ -67,6 +67,23 @@ class EnglishLeakFilterTests(unittest.TestCase):
             "",
         )
 
+    def test_minor_latin_groups_allow_one_local_hit(self) -> None:
+        original_local = text_utils._is_local_english_stopword
+        original_broad = text_utils._is_broad_english_word
+        text_utils._is_local_english_stopword = lambda token: token == "alpha"  # type: ignore[assignment]
+        text_utils._is_broad_english_word = lambda token: token in {"alpha", "beta", "gamma", "delta"}  # type: ignore[assignment]
+        try:
+            sentence = "alpha beta gamma delta"
+            self.assertTrue(
+                text_utils._looks_like_english_text(sentence, "su", self._lang_to_group)
+            )
+            self.assertFalse(
+                text_utils._looks_like_english_text(sentence, "fr", self._lang_to_group)
+            )
+        finally:
+            text_utils._is_local_english_stopword = original_local
+            text_utils._is_broad_english_word = original_broad
+
 
 if __name__ == "__main__":
     unittest.main()

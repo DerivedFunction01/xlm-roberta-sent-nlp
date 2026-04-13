@@ -32,6 +32,7 @@ MIN_LATIN_WORDS = 4
 ENGLISH_FILTER_POLICY = {
     "min_alpha_words": 4,
     "min_local_hits": 3,
+    "minor_latin_min_local_hits": 1,
     "ascii_ratio_floor": 0.70,
     "latin": {
         "corpus_hits_min": 4,
@@ -43,6 +44,15 @@ ENGLISH_FILTER_POLICY = {
         "corpus_ratio_min": 0.30,
         "ascii_ratio_min": 0.50,
     },
+}
+ENGLISH_MINOR_LATIN_GROUPS = {
+    "AfricanLatin",
+    "AdriaticLatin",
+    "BalticLatin",
+    "CelticLatin",
+    "KurdishLatin",
+    "PeripheralLatin",
+    "WesternLatin",
 }
 NLTK_ENGLISH_SECONDARY_LIMIT: int | None = None
 POOL_TERMINAL_PUNCT_CHOICES = (".", ":", ";", "!", "?")
@@ -258,6 +268,13 @@ def _english_leak_stats(sentence: str) -> tuple[int, int, int]:
     return local_hits, ascii_words, alpha_words
 
 
+def _english_local_hits_min(lang: str, lang_to_group: dict[str, str]) -> int:
+    group = lang_to_group.get(canonical_lang(lang))
+    if group in ENGLISH_MINOR_LATIN_GROUPS:
+        return ENGLISH_FILTER_POLICY["minor_latin_min_local_hits"]
+    return ENGLISH_FILTER_POLICY["min_local_hits"]
+
+
 def _english_corpus_hits(sentence: str) -> int:
     words = [word.lower() for word in WIKI_WORDS.findall(sentence)]
     if not words:
@@ -279,7 +296,7 @@ def _looks_like_english_text(
     local_hits, ascii_words, alpha_words = _english_leak_stats(sentence)
     if alpha_words < ENGLISH_FILTER_POLICY["min_alpha_words"]:
         return False
-    if local_hits < ENGLISH_FILTER_POLICY["min_local_hits"]:
+    if local_hits < _english_local_hits_min(lang, lang_to_group):
         return False
     ascii_ratio = ascii_words / alpha_words
     if ascii_ratio < ENGLISH_FILTER_POLICY["ascii_ratio_floor"]:

@@ -4,7 +4,6 @@ from __future__ import annotations
 import multiprocessing as mp
 from finetranslations_sources import load_finetranslations_sentences
 from instruction_sources import load_instruction_sentences
-from language import ALL_LANGS
 from wiki_sources import load_wiki_sentences
 from smol_sources import load_smol_sentences
 

@@ -21,6 +21,7 @@ from text_utils import (
     _split_paragraphs,
     clean_sentence,
     log_segmentation_failure,
+    _looks_like_english_text,
     post_clean_sentences,
     sanitize_paragraph_for_pysbd,
     SENT_SPLIT,
@@ -696,3 +697,34 @@ def refilter_cached_wiki_sentences(
             _write_sentence_parquet(path, cleaned)
         updated_counts[lang] = len(cleaned)
     return updated_counts
+
+
+def collect_rejected_english_sentences(
+    lang: str,
+    *,
+    lang_to_group: dict[str, str] = LANG_TO_GROUP,
+    sentences_dir: str = PATHS["wiki"]["cache_dir"],
+) -> list[dict[str, Any]]:
+    lang = canonical_lang(lang)
+    path = parquet_path(sentences_dir, lang)
+    if not os.path.exists(path):
+        return []
+    cached = pd.read_parquet(path)["sentence"].tolist()
+    use_nltk_secondary = _wiki_use_nltk_secondary(lang, lang_to_group)
+    rejected: list[dict[str, Any]] = []
+    for idx, sentence in enumerate(cached):
+        if _looks_like_english_text(
+            sentence,
+            lang,
+            lang_to_group,
+            use_nltk_secondary=use_nltk_secondary,
+        ):
+            rejected.append(
+                {
+                    "lang": lang,
+                    "source_index": idx,
+                    "sentence": sentence,
+                    "use_nltk_secondary": use_nltk_secondary,
+                }
+            )
+    return rejected
