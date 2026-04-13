@@ -32,15 +32,15 @@ BASE_PACKAGES = [
     "plotly",
     "jupyter",
     "ipywidgets",
+    "pyarrow",
+    "fastparquet", 
+]
+    
+CUSTOM_PACKAGES = [
     "pysbd",
     "nltk",
-    "faker"
-]
-
-# Packages for data serialization and I/O
-DATA_PACKAGES = [
-    "pyarrow",  # For Parquet file support (required by pandas.to_parquet)
-    "fastparquet",  # Alternative Parquet engine (backup)
+    "faker",
+    "randomname",
 ]
 
 # Packages for the classification server
@@ -49,13 +49,12 @@ CLASSIFICATION_PACKAGES = [
     "transformers",
     "evaluate",
     "datasets",
-    'sentence_transformers',
     "seqeval"
 ]
 
 # For the old "install all" option, kept for compatibility if needed
 # but the new menu provides more granular control.
-PACKAGES = CLASSIFICATION_PACKAGES + BASE_PACKAGES + DATA_PACKAGES
+PACKAGES = CLASSIFICATION_PACKAGES + BASE_PACKAGES + CUSTOM_PACKAGES
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +411,7 @@ def show_menu():
     print(f"Torch Status        : {torch_status}")
 
     print("\nOptions:")
-    print("  0. Basic setup (includes data packages)")
+    print("  0. Basic setup (includes custom packages)")
     print("  1. Install ML Packages (Classification Server)")
     print("  2. Install ML Packages (Full Training Setup)")
     print("  3. Check current installation")
@@ -514,7 +513,7 @@ def main():
         if choice == "0":
             print("\nBasic setup starting...")
             install_packages(BASE_PACKAGES, "base packages")
-            install_packages(DATA_PACKAGES, "data packages (pyarrow, fastparquet)")
+            install_packages(CUSTOM_PACKAGES, "custom packages")
             print("\n✅ Basic setup complete!")
             sys.exit(0)
 
@@ -525,7 +524,7 @@ def main():
             else:
                 install_pytorch()
             install_packages(CLASSIFICATION_PACKAGES, "classification packages")
-            install_packages(DATA_PACKAGES, "data packages (pyarrow, fastparquet)")
+            install_packages(CUSTOM_PACKAGES, "custom packages")
             install_packages(BASE_PACKAGES, "base packages")
             print("\n✅ Classification Server setup complete!")
             sys.exit(0)
@@ -537,7 +536,7 @@ def main():
             else:
                 install_pytorch()
             install_packages(CLASSIFICATION_PACKAGES, "classification packages")
-            install_packages(DATA_PACKAGES, "data packages (pyarrow, fastparquet)")
+            install_packages(CUSTOM_PACKAGES, "custom packages")
             install_packages(BASE_PACKAGES, "base packages")
             print("\n✅ Full Training Environment setup complete!")
             sys.exit(0)
