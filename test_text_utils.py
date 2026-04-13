@@ -61,7 +61,6 @@ class EnglishLeakFilterTests(unittest.TestCase):
         text_utils.nltk_module = self._orig_nltk_module
         text_utils.nltk_words = self._orig_nltk_words
         text_utils._nltk_english_secondary_word_set.cache_clear()
-        text_utils._NLTK_WORDS_DOWNLOAD_ATTEMPTED = False
 
     def test_secondary_word_set_keeps_late_corpus_entries(self) -> None:
         corpus_words = [_alpha_token(i) for i in range(50_001)]
