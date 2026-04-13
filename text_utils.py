@@ -32,16 +32,21 @@ MIN_LATIN_WORDS = 4
 ENGLISH_FILTER_POLICY = {
     "min_alpha_words": 4,
     "min_local_hits": 3,
-    "minor_latin_min_local_hits": 1,
     "ascii_ratio_floor": 0.70,
+    "minor_latin": {
+        "min_local_hits": 1,
+        "combined_hits_min": 2,
+        "combined_ratio_min": 0.35,
+        "ascii_ratio_min": 0.75,
+    },
     "latin": {
-        "corpus_hits_min": 4,
-        "corpus_ratio_min": 0.60,
+        "combined_hits_min": 4,
+        "combined_ratio_min": 0.60,
         "ascii_ratio_min": 0.80,
     },
     "nonlatin": {
-        "corpus_hits_min": 3,
-        "corpus_ratio_min": 0.30,
+        "combined_hits_min": 3,
+        "combined_ratio_min": 0.30,
         "ascii_ratio_min": 0.50,
     },
 }
@@ -271,8 +276,17 @@ def _english_leak_stats(sentence: str) -> tuple[int, int, int]:
 def _english_local_hits_min(lang: str, lang_to_group: dict[str, str]) -> int:
     group = lang_to_group.get(canonical_lang(lang))
     if group in ENGLISH_MINOR_LATIN_GROUPS:
-        return ENGLISH_FILTER_POLICY["minor_latin_min_local_hits"]
+        return ENGLISH_FILTER_POLICY["minor_latin"]["min_local_hits"]
     return ENGLISH_FILTER_POLICY["min_local_hits"]
+
+
+def _english_policy_for_lang(lang: str, lang_to_group: dict[str, str]) -> dict[str, float]:
+    group = lang_to_group.get(canonical_lang(lang))
+    if group in ENGLISH_MINOR_LATIN_GROUPS:
+        return ENGLISH_FILTER_POLICY["minor_latin"]
+    if group in LATIN_GROUPS:
+        return ENGLISH_FILTER_POLICY["latin"]
+    return ENGLISH_FILTER_POLICY["nonlatin"]
 
 
 def _english_corpus_hits(sentence: str) -> int:
@@ -304,19 +318,13 @@ def _looks_like_english_text(
     if not use_nltk_secondary:
         return True
     broad_hits = _english_corpus_hits(sentence)
-    stop_ratio = broad_hits / alpha_words
-    if lang_to_group.get(lang) in LATIN_GROUPS:
-        latin_policy = ENGLISH_FILTER_POLICY["latin"]
-        return (
-            broad_hits >= latin_policy["corpus_hits_min"]
-            and stop_ratio >= latin_policy["corpus_ratio_min"]
-            and ascii_ratio >= latin_policy["ascii_ratio_min"]
-        )
-    nonlatin_policy = ENGLISH_FILTER_POLICY["nonlatin"]
+    combined_hits = local_hits + broad_hits
+    combined_ratio = combined_hits / alpha_words
+    policy = _english_policy_for_lang(lang, lang_to_group)
     return (
-        broad_hits >= nonlatin_policy["corpus_hits_min"]
-        and stop_ratio >= nonlatin_policy["corpus_ratio_min"]
-        and ascii_ratio >= nonlatin_policy["ascii_ratio_min"]
+        combined_hits >= policy["combined_hits_min"]
+        and combined_ratio >= policy["combined_ratio_min"]
+        and ascii_ratio >= policy["ascii_ratio_min"]
     )
 
 

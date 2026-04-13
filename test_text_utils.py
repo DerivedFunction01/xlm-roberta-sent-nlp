@@ -84,6 +84,23 @@ class EnglishLeakFilterTests(unittest.TestCase):
             text_utils._is_local_english_stopword = original_local
             text_utils._is_broad_english_word = original_broad
 
+    def test_minor_latin_groups_catch_short_english_leak_sentence(self) -> None:
+        text_utils.nltk_words = DummyWordsCorpus(
+            [
+                "combines",
+                "neuroscience",
+                "economics",
+                "psychology",
+                "study",
+                "choices",
+            ]
+        )
+        sentence = "This combines neuroscience, economics, and psychology to study how we make choices."
+
+        self.assertTrue(
+            text_utils.clean_sentence(sentence, "su", self._lang_to_group) == ""
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
