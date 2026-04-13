@@ -28,7 +28,7 @@ WIKI_NON_CONTENT = re.compile(r"[\W_]+", flags=re.UNICODE)
 WIKI_DIGITS = re.compile(r"\d")
 WIKI_WORDS = re.compile(r"\b\w+\b", flags=re.UNICODE)
 MAX_DIGIT_RATIO = 0.10
-MIN_LATIN_WORDS = 4
+MIN_VALID_TOKENS = 4
 ENGLISH_FILTER_POLICY = {
     "min_alpha_words": 4,
     "min_local_hits": 3,
@@ -209,8 +209,37 @@ def _digit_count(s: str) -> int:
     return len(WIKI_DIGITS.findall(s))
 
 
-def _word_count(s: str) -> int:
-    return len(WIKI_WORDS.findall(s))
+def _valid_non_digit_non_symbol_token_count(s: str) -> int:
+    count = 0
+    token_has_letter = False
+    token_has_digit = False
+    token_has_symbol = False
+    in_token = False
+
+    def flush_token() -> None:
+        nonlocal count, token_has_letter, token_has_digit, token_has_symbol, in_token
+        if in_token and token_has_letter and not token_has_digit and not token_has_symbol:
+            count += 1
+        token_has_letter = False
+        token_has_digit = False
+        token_has_symbol = False
+        in_token = False
+
+    for ch in s:
+        category = unicodedata.category(ch)
+        if category.startswith(("L", "M", "N", "P", "S")):
+            in_token = True
+            if category.startswith(("L", "M")):
+                token_has_letter = True
+            elif category.startswith("N"):
+                token_has_digit = True
+            else:
+                token_has_symbol = True
+            continue
+        flush_token()
+
+    flush_token()
+    return count
 
 
 def _strip_bracket_notes(text: str) -> str:
@@ -438,7 +467,7 @@ def _is_valid_sentence(
     visible = _non_punct_char_count(s)
     if not (mn < visible < mx):
         return False
-    if lang_to_group.get(lang) in LATIN_GROUPS and _word_count(s) < MIN_LATIN_WORDS:
+    if _valid_non_digit_non_symbol_token_count(s) < MIN_VALID_TOKENS:
         return False
     digits = _digit_count(s)
     return digits <= visible * MAX_DIGIT_RATIO

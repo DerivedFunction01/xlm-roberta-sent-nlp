@@ -102,5 +102,19 @@ class EnglishLeakFilterTests(unittest.TestCase):
         )
 
 
+class TokenCountTests(unittest.TestCase):
+    def test_valid_non_digit_non_symbol_token_count_ignores_math_tokens(self) -> None:
+        self.assertEqual(
+            text_utils._valid_non_digit_non_symbol_token_count("3 + 2 x 5"),
+            1,
+        )
+
+    def test_valid_non_digit_non_symbol_token_count_counts_real_words(self) -> None:
+        self.assertEqual(
+            text_utils._valid_non_digit_non_symbol_token_count("यह एक सादा वाक्य है"),
+            5,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
