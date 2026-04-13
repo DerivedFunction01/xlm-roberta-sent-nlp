@@ -94,7 +94,6 @@ def _normalize_source_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "split": str(spec.get("split", "train")),
         "lang": str(spec.get("lang", "")),
         "extractor": str(spec.get("extractor", "generic")),
-        "trust_remote_code": bool(spec.get("trust_remote_code", False)),
         "max_rows": int(spec.get("max_rows", 0) or 0),
         "allow_code": bool(spec.get("allow_code", False)),
     }
@@ -310,7 +309,6 @@ def _process_source_spec(
     config_name = spec.get("config_name")
     lang = str(spec.get("lang", ""))
     extractor_name = str(spec.get("extractor", "generic"))
-    trust_remote_code = bool(spec.get("trust_remote_code", False))
     max_rows = int(spec.get("max_rows", 0) or 0)
     allow_code = bool(spec.get("allow_code", False))
     extractor = INSTRUCTION_SOURCE_EXTRACTORS.get(extractor_name)
@@ -327,7 +325,6 @@ def _process_source_spec(
         load_kwargs: dict[str, Any] = {
             "split": split,
             "streaming": True,
-            "trust_remote_code": trust_remote_code,
         }
         if config_name is not None:
             load_kwargs["name"] = config_name

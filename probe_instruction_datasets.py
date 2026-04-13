@@ -182,7 +182,6 @@ def _probe_split(
     config_name: str | None,
     split_name: str,
     num_examples: int,
-    trust_remote_code: bool,
     max_chars: int,
     max_list_items: int,
 ) -> None:
@@ -193,7 +192,6 @@ def _probe_split(
         load_kwargs: dict[str, Any] = {
             "split": split_name,
             "streaming": True,
-            "trust_remote_code": trust_remote_code,
         }
         if config_name is not None:
             load_kwargs["name"] = config_name
@@ -236,7 +234,6 @@ def probe_dataset(
     num_examples: int,
     max_configs: int,
     all_splits: bool,
-    trust_remote_code: bool,
     max_chars: int,
     max_list_items: int,
 ) -> None:
@@ -260,7 +257,6 @@ def probe_dataset(
                 config_name=config_name,
                 split_name=split_name,
                 num_examples=num_examples,
-                trust_remote_code=trust_remote_code,
                 max_chars=max_chars,
                 max_list_items=max_list_items,
             )
@@ -275,7 +271,6 @@ def main() -> None:
             num_examples=args.num_examples,
             max_configs=args.max_configs,
             all_splits=args.all_splits,
-            trust_remote_code=args.trust_remote_code,
             max_chars=args.max_chars,
             max_list_items=args.max_list_items,
         )
