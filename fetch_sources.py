@@ -27,7 +27,6 @@ def refresh_sources() -> None:
     print("Refreshing wiki caches ...")
     _ = load_wiki_sentences(
         max_workers=workers,
-        langs=["zh"]
     )
     #%%
     print("Refreshing FineTranslations caches ...")
