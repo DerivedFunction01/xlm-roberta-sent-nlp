@@ -6,7 +6,20 @@ from finetranslations_sources import load_finetranslations_sentences
 from instruction_sources import load_instruction_sentences
 from wiki_sources import load_wiki_sentences
 from smol_sources import load_smol_sentences
+from huggingface_hub import login
+from pathlib import Path
+#%%
+def _maybe_login() -> None:
+    token_path = Path("hf_token")
+    if not token_path.exists():
+        return
+    with token_path.open() as f:
+        token = f.read().strip()
+    if token:
+        login(token=token)
+        print("Logged in to Hugging Face Hub")
 
+_maybe_login()
 #%%
 def refresh_sources() -> None:
     #%%
