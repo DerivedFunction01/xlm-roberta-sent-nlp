@@ -53,6 +53,15 @@ WIKI_CAP_MULTIPLIERS = {
 WIKI_SOURCE_LANGS = {
     "no": ("no", "nn"),
 }
+WIKI_LATIN_SECONDARY_GROUPS = {
+    "AfricanLatin",
+    "AdriaticLatin",
+    "BalticLatin",
+    "CelticLatin",
+    "KurdishLatin",
+    "PeripheralLatin",
+    "WesternLatin",
+}
 WIKI_ROLLING_STATS_WINDOW = 250
 LENGTH_PRIORITY_SCAN_LIMIT = int(MAX_WIKI_INDEX // 1.5)
 LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG = {
@@ -112,6 +121,15 @@ def _wiki_long_paragraph_chars(lang: str, lang_to_group: dict[str, str]) -> int:
     return max(250, group_min_chars // 4)
 
 
+def _wiki_use_nltk_secondary(lang: str, lang_to_group: dict[str, str]) -> bool:
+    group = lang_to_group.get(canonical_lang(lang))
+    if group is None:
+        return True
+    if group not in LATIN_GROUPS:
+        return True
+    return group in WIKI_LATIN_SECONDARY_GROUPS
+
+
 def _load_wiki_dataset(source_lang: str, *, seed: int):
     try:
         dataset = load_dataset(
@@ -166,6 +184,7 @@ def _extract_article_sentences(
     paragraphs = prepare_wiki_paragraphs(article_text, lang, lang_to_group)
     if paragraphs is None:
         return []
+    use_nltk_secondary = _wiki_use_nltk_secondary(lang, lang_to_group)
 
     article_batch: list[str] = []
     for paragraph_idx, paragraph in enumerate(paragraphs):
@@ -184,7 +203,12 @@ def _extract_article_sentences(
             )
             sents = SENT_SPLIT.split(safe_paragraph)
         for s in sents:
-            s = clean_sentence(s, lang, lang_to_group)
+            s = clean_sentence(
+                s,
+                lang,
+                lang_to_group,
+                use_nltk_secondary=use_nltk_secondary,
+            )
             if _is_valid_sentence(s, lang, lang_to_group):
                 article_batch.append(s)
 
@@ -292,6 +316,7 @@ def extract_sentences_from_wiki(
     if lang in LENGTH_PRIORITY_LANGS:
         scan_limit = min(fetch_target, LENGTH_PRIORITY_SCAN_LIMIT)
         sentence_cap = max_length_priority_sentences_for_lang(lang, source_langs=source_langs)
+        use_nltk_secondary = _wiki_use_nltk_secondary(lang, lang_to_group)
         print(
             f"  Length-priority mode enabled for {lang} "
             f"(scan_limit={scan_limit}, sentence_cap={sentence_cap}, "
@@ -353,7 +378,12 @@ def extract_sentences_from_wiki(
                     f"avgS {_rolling_avg(sentence_lengths_window):.0f}"
                 )
 
-        committed_sentences = post_clean_sentences(committed_sentences, lang, lang_to_group)
+        committed_sentences = post_clean_sentences(
+            committed_sentences,
+            lang,
+            lang_to_group,
+            use_nltk_secondary=use_nltk_secondary,
+        )
         _write_sentence_parquet(final_path, committed_sentences)
         _write_json_atomic(
             cache_meta_path,
@@ -366,6 +396,7 @@ def extract_sentences_from_wiki(
 
     committed_sentences: list[str] = []
     sentence_cap = max_wiki_sentences_for_lang(lang, source_langs=source_langs)
+    use_nltk_secondary = _wiki_use_nltk_secondary(lang, lang_to_group)
     sentence_lengths_window: deque[int] = deque(
         (len(s) for s in committed_sentences[-WIKI_ROLLING_STATS_WINDOW:]),
         maxlen=WIKI_ROLLING_STATS_WINDOW,
@@ -525,7 +556,12 @@ def extract_sentences_from_wiki(
                 if stop_extracting:
                     break
 
-        committed_sentences = post_clean_sentences(committed_sentences, lang, lang_to_group)
+        committed_sentences = post_clean_sentences(
+            committed_sentences,
+            lang,
+            lang_to_group,
+            use_nltk_secondary=use_nltk_secondary,
+        )
         _write_sentence_parquet(final_path, committed_sentences)
         _write_json_atomic(
             cache_meta_path,
@@ -572,7 +608,12 @@ def load_or_extract(
             )
         if meta_valid:
             cached = pd.read_parquet(path)["sentence"].tolist()
-            cleaned = post_clean_sentences(cached, lang, lang_to_group)
+            cleaned = post_clean_sentences(
+                cached,
+                lang,
+                lang_to_group,
+                use_nltk_secondary=_wiki_use_nltk_secondary(lang, lang_to_group),
+            )
             if cleaned != cached:
                 _write_sentence_parquet(path, cleaned)
             return lang, path
@@ -645,7 +686,12 @@ def refilter_cached_wiki_sentences(
         if not os.path.exists(path):
             continue
         cached = pd.read_parquet(path)["sentence"].tolist()
-        cleaned = post_clean_sentences(cached, lang, lang_to_group)
+        cleaned = post_clean_sentences(
+            cached,
+            lang,
+            lang_to_group,
+            use_nltk_secondary=_wiki_use_nltk_secondary(lang, lang_to_group),
+        )
         if cleaned != cached:
             _write_sentence_parquet(path, cleaned)
         updated_counts[lang] = len(cleaned)

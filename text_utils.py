@@ -266,7 +266,13 @@ def _english_corpus_hits(sentence: str) -> int:
     return broad_hits
 
 
-def _looks_like_english_text(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
+def _looks_like_english_text(
+    sentence: str,
+    lang: str,
+    lang_to_group: dict[str, str],
+    *,
+    use_nltk_secondary: bool = True,
+) -> bool:
     lang = canonical_lang(lang)
     if lang == "en":
         return False
@@ -278,6 +284,8 @@ def _looks_like_english_text(sentence: str, lang: str, lang_to_group: dict[str, 
     ascii_ratio = ascii_words / alpha_words
     if ascii_ratio < ENGLISH_FILTER_POLICY["ascii_ratio_floor"]:
         return False
+    if not use_nltk_secondary:
+        return True
     broad_hits = _english_corpus_hits(sentence)
     stop_ratio = broad_hits / alpha_words
     if lang_to_group.get(lang) in LATIN_GROUPS:
@@ -295,18 +303,30 @@ def _looks_like_english_text(sentence: str, lang: str, lang_to_group: dict[str, 
     )
 
 
-def _looks_like_english_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
-    return _looks_like_english_text(sentence, lang, lang_to_group)
+def _looks_like_english_sentence(
+    sentence: str,
+    lang: str,
+    lang_to_group: dict[str, str],
+    *,
+    use_nltk_secondary: bool = True,
+) -> bool:
+    return _looks_like_english_text(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary)
 
 
-def clean_sentence(sentence: str, lang: str, lang_to_group: dict[str, str]) -> str:
+def clean_sentence(
+    sentence: str,
+    lang: str,
+    lang_to_group: dict[str, str],
+    *,
+    use_nltk_secondary: bool = True,
+) -> str:
     lang = canonical_lang(lang)
     if "\\" in sentence:
         sentence = sentence.replace("\\", "")
     sentence = HTML_TAG_RE.sub(" ", sentence)
     sentence = _strip_bracket_notes(sentence)
     sentence = _collapse_repeated_punct(sentence)
-    if _looks_like_english_text(sentence, lang, lang_to_group):
+    if _looks_like_english_text(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary):
         return ""
     if _strip_ascii_for_lang(lang, lang_to_group):
         sentence = WIKI_ASCII_WORDS.sub("", sentence)
@@ -405,6 +425,8 @@ def post_clean_sentences(
     lang_to_group: dict[str, str],
     sent_bounds: dict[str, tuple[int, int]] | None = None,
     default_bounds: tuple[int, int] = DEFAULT_BOUNDS,
+    *,
+    use_nltk_secondary: bool = True,
 ) -> list[str]:
     lang = canonical_lang(lang)
     cleaned: list[str] = []
@@ -414,7 +436,7 @@ def post_clean_sentences(
             continue
         if _has_blocked_artifact(sentence):
             continue
-        sentence = clean_sentence(sentence, lang, lang_to_group)
+        sentence = clean_sentence(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary)
         sentence = _strip_leading_punct(sentence)
         sentence = _strip_leading_orphan_letter(sentence)
         sentence = _collapse_repeated_punct(sentence)

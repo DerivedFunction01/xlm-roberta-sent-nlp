@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from wiki_sources import MAX_WIKI_SENTENCES, _wiki_cap_multiplier, max_wiki_sentences_for_lang
+from language import LANG_TO_GROUP
+from wiki_sources import (
+    MAX_WIKI_SENTENCES,
+    _wiki_cap_multiplier,
+    _wiki_use_nltk_secondary,
+    max_wiki_sentences_for_lang,
+)
 
 
 class WikiCapTests(unittest.TestCase):
@@ -16,6 +22,10 @@ class WikiCapTests(unittest.TestCase):
             max_wiki_sentences_for_lang("en", source_langs=("en",)),
             int(round(MAX_WIKI_SENTENCES * 1.5)),
         )
+
+    def test_wiki_nltk_secondary_is_only_for_minor_latin_groups(self) -> None:
+        self.assertTrue(_wiki_use_nltk_secondary("su", LANG_TO_GROUP))
+        self.assertFalse(_wiki_use_nltk_secondary("fr", LANG_TO_GROUP))
 
 
 if __name__ == "__main__":
