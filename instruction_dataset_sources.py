@@ -161,23 +161,6 @@ def _extract_alpaca_texts(row: dict[str, Any], spec: dict[str, Any]) -> list[str
     return []
 
 
-def _extract_latin_english_parallel_texts(row: dict[str, Any], spec: dict[str, Any]) -> list[str]:
-    texts = _extract_texts_from_fields(row, ("la",))
-    if texts:
-        return texts
-    return []
-
-
-def _extract_generic_texts(row: dict[str, Any], spec: dict[str, Any]) -> list[str]:
-    texts = _extract_texts_from_message_list(row, "messages")
-    if texts:
-        return texts
-    for field in ("conversation", "conversations", "conversations_nl", "conversations_spanish", "instruction", "input", "output", "text", "content"):
-        texts.extend(_extract_texts_from_message_list(row, field, role_key="from"))
-        texts.extend(_extract_texts_from_fields(row, (field,)))
-    return texts
-
-
 INSTRUCTION_SOURCE_EXTRACTORS: dict[str, SourceExtractor] = {
     "french_instruct": _extract_french_instruct_texts,
     "due_chiacchiere": _extract_due_chiacchiere_texts,
@@ -194,8 +177,6 @@ INSTRUCTION_SOURCE_EXTRACTORS: dict[str, SourceExtractor] = {
     "turkish_openhermes": _extract_turkish_openhermes_texts,
     "japanese_self_instruct": _extract_japanese_self_instruct_texts,
     "alpaca": _extract_alpaca_texts,
-    "latin_english_parallel": _extract_latin_english_parallel_texts,
-    "generic": _extract_generic_texts,
 }
 
 
@@ -206,7 +187,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "en",
         "extractor": "alpaca",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -215,7 +196,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "fr",
         "extractor": "french_instruct",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -224,7 +205,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "it",
         "extractor": "due_chiacchiere",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -234,7 +215,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "hi",
         "extractor": "aya_hindi",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -243,7 +224,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "id",
         "extractor": "indonesia_sft",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -252,7 +233,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "es",
         "extractor": "openhermes_spanish",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -261,7 +242,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "ru",
         "extractor": "openhermes_ru",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -270,7 +251,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "ar",
         "extractor": "arabic_openhermes",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -279,7 +260,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "ko",
         "extractor": "ko_openhermes",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -288,7 +269,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "de",
         "extractor": "german_openhermes",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -297,7 +278,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "nl",
         "extractor": "dutch_openhermes",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -306,7 +287,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "pt",
         "extractor": "ptbr_enus",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -315,7 +296,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "zh",
         "extractor": "chinese_qwen",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -324,7 +305,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "tr",
         "extractor": "turkish_openhermes",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
     {
@@ -333,7 +314,7 @@ DEFAULT_INSTRUCTION_SOURCE_SPECS = [
         "split": "train",
         "lang": "ja",
         "extractor": "japanese_self_instruct",
-        "trust_remote_code": False,
+        
         "max_rows": 50_000,
     },
 ]
