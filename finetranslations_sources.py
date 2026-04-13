@@ -459,6 +459,15 @@ def _load_finetrans_cache_map(cache_dir: str) -> dict[str, list[str]]:
     return result
 
 
+def _has_finetrans_cache_files(cache_dir: str) -> bool:
+    if not os.path.isdir(cache_dir):
+        return False
+    for name in os.listdir(cache_dir):
+        if name.endswith(".parquet"):
+            return True
+    return False
+
+
 def _write_finetrans_cache_map(cache_dir: str, sentence_map: dict[str, list[str]]) -> dict[str, int]:
     os.makedirs(cache_dir, exist_ok=True)
     lang_counts: dict[str, int] = {}
@@ -992,7 +1001,7 @@ def load_finetranslations_sentences(
 
     if (
         not force_rebuild
-        and (os.path.exists(cache_dir) or os.path.exists(cache_meta))
+        and (_has_finetrans_cache_files(cache_dir) or os.path.exists(cache_meta))
         and not recover_from_temp
         and not incremental_update
     ):
