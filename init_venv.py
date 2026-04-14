@@ -49,7 +49,8 @@ CLASSIFICATION_PACKAGES = [
     "transformers",
     "evaluate",
     "datasets",
-    "seqeval"
+    "seqeval",
+    "accelerate",
 ]
 
 # For the old "install all" option, kept for compatibility if needed
