@@ -138,12 +138,51 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _print_counts(title: str, counts: Iterable[int]) -> None:
-    print(title)
-    for lang, count in sorted(zip(ALL_LANGS, counts), key=lambda item: (-item[1], item[0])):
-        if count:
-            print(f"{lang}\t{int(count)}")
-    print()
+def _print_markdown_table(counts_by_split: dict[str, np.ndarray], total: np.ndarray) -> None:
+    """Print a markdown table with per-split counts and percentages, sorted by total descending."""
+    split_names = list(counts_by_split.keys())
+    split_totals = {name: counts_by_split[name].sum() for name in split_names}
+    grand_total = total.sum()
+
+    # Build header
+    header_cols = ["lang"]
+    for name in split_names:
+        header_cols += [name, f"{name} %"]
+    header_cols += ["all_splits", "all_splits %"]
+
+    sep_cols = [":---"] + ["---:", "---:"] * (len(split_names) + 1)
+
+    print("| " + " | ".join(header_cols) + " |")
+    print("| " + " | ".join(sep_cols) + " |")
+
+    # Sort by total descending, skip zero-count languages
+    rows = sorted(
+        zip(ALL_LANGS, *[counts_by_split[n] for n in split_names], total),
+        key=lambda r: -r[-1],
+    )
+
+    for row in rows:
+        lang = row[0]
+        split_counts = row[1:-1]
+        all_count = row[-1]
+        if all_count == 0:
+            continue
+
+        cells = [lang]
+        for name, count in zip(split_names, split_counts):
+            pct = count / split_totals[name] * 100 if split_totals[name] else 0
+            cells += [str(int(count)), f"{pct:.2f}%"]
+        all_pct = all_count / grand_total * 100 if grand_total else 0
+        cells += [str(int(all_count)), f"{all_pct:.2f}%"]
+
+        print("| " + " | ".join(cells) + " |")
+
+    # Totals row
+    footer = ["**total**"]
+    for name in split_names:
+        footer += [str(int(split_totals[name])), "100.00%"]
+    footer += [str(int(grand_total)), "100.00%"]
+    print("| " + " | ".join(footer) + " |")
 
 
 def main() -> None:
@@ -156,11 +195,10 @@ def main() -> None:
     )
 
     total = np.zeros(len(ALL_LANGS), dtype=np.int64)
-    for split_name, counts in counts_by_split.items():
-        _print_counts(split_name, counts)
+    for counts in counts_by_split.values():
         total += counts
 
-    _print_counts("all_splits", total)
+    _print_markdown_table(counts_by_split, total)
 
 
 if __name__ == "__main__":
