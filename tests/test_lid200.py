@@ -14,6 +14,7 @@ import json
 import os
 from collections import defaultdict
 import sys
+import torch # Added for GPU detection
 
 from datasets import load_dataset
 from tqdm import tqdm
@@ -45,6 +46,12 @@ def _parse_args() -> argparse.Namespace:
         type=str,
         default="test",
         help="Dataset split to evaluate, falling back to the first available split.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Batch size for inference on GPU.",
     )
     return parser.parse_args()
 
@@ -139,6 +146,7 @@ def main() -> None:
         model=model,
         tokenizer=tokenizer,
         aggregation_strategy="simple",
+        device=0 if torch.cuda.is_available() else -1, # Use GPU if available
     )
     print("   ✓ Pipeline ready")
 
@@ -151,26 +159,33 @@ def main() -> None:
     per_lang_stats = defaultdict(lambda: {"correct": 0, "total": 0})
     results_by_lang = defaultdict(list)
 
-    sample_size = len(filtered_test)
-    print(f"Processing {sample_size} examples...\n")
+    # Prepare texts for batch inference, replicating the original text[:512] truncation
+    texts_for_inference = [example[text_column] for example in filtered_test]
 
-    for example in tqdm(
-        filtered_test.select(range(sample_size)),
-        total=sample_size,
-        desc="Running inference",
-    ):
+    # Run inference on all texts at once using the pipeline
+    # The pipeline will handle batching internally for efficiency on GPU
+    all_predictions = nlp(
+        texts_for_inference,
+        batch_size=args.batch_size,
+    )
+
+    print(f"Processing {len(filtered_test)} examples and their predictions...\n")
+
+    for example_idx, (example, predictions) in enumerate(tqdm(
+        zip(filtered_test, all_predictions),
+        total=len(filtered_test),
+        desc="Processing predictions",
+    )):
         text = example[text_column]
         true_lang_name = _label_name_from_example(example, filtered_test, lang_column)
         true_lang_iso2 = iso3_to_iso2.get(_dataset_label_to_iso3(true_lang_name))
         if true_lang_iso2 is None:
             continue
 
-        result = nlp(text[:512])
-
-        if not result:
+        if not predictions:
             continue
 
-        pred = result[0]
+        pred = predictions[0]
         pred_entity = pred.get("entity_group", pred.get("entity", "O"))
         if pred_entity.startswith(("B-", "I-")):
             pred_lang = pred_entity[2:].lower()
