@@ -270,14 +270,14 @@ POOL = {
 
 DOC_MIX = {
     "pure": {
-        "fraction": 0.60,
+        "fraction": 0.55,
         "pool": "reserve",
         "min_sentences": 1,
         "max_sentences": 6,
         "strip_punct_prob": 0.10,
         # Occasionally drop diacritics in Latin-script text so Spanish/Portuguese
         # examples include accentless variants too.
-        "accent_strip_prob": 0.04,
+        "accent_strip_prob": 0.05,
         "foreign_sentence_prob": 0.0,
         "format_noise_prob": 0.30,
         "paragraph_break_prob": 0.25,
@@ -289,13 +289,12 @@ DOC_MIX = {
         "typo_char_prob": 0.02,
     },
     "homogeneous": {
-        "fraction": 0.30,
+        "fraction": 0.25,
         "pool": "main",
         "min_sentences": 2,
         "max_sentences": 6,
         "strip_punct_prob": 0.15,
         "accent_strip_prob": 0.02,
-        # Insert one foreign sentence into a mostly single-language example.
         "foreign_sentence_prob": 0.85,
         "format_noise_prob": 0.20,
         "paragraph_break_prob": 0.20,
@@ -303,6 +302,25 @@ DOC_MIX = {
         "lowercase_word_prob": 0.02,
         "titlecase_word_prob": 0.01,
         "merge_word_prob": 0.02,
+        "split_word_prob": 0.01,
+        "typo_char_prob": 0.01,
+    },
+    "spliced": {
+        "fraction": 0.10,
+        "pool": "main",
+        "min_sentences": 3,
+        "max_sentences": 5,
+        "strip_punct_prob": 0.20,
+        "accent_strip_prob": 0.02,
+        "foreign_sentence_prob": 1.0,
+        "splice_strip_next_punct_prob": 1.0,
+        "splice_lowercase_next_prob": 1.0,
+        "format_noise_prob": 0.15,
+        "paragraph_break_prob": 0.10,
+        "uppercase_word_prob": 0.02,
+        "lowercase_word_prob": 0.02,
+        "titlecase_word_prob": 0.01,
+        "merge_word_prob": 0.01,
         "split_word_prob": 0.01,
         "typo_char_prob": 0.01,
     },

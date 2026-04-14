@@ -445,6 +445,14 @@ def _strip_latin_accents(text: str) -> str:
     return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
 
+def _strip_terminal_punctuation(text: str) -> str:
+    """Remove trailing punctuation characters from a sentence."""
+    end = len(text)
+    while end > 0 and unicodedata.category(text[end - 1]).startswith("P"):
+        end -= 1
+    return text[:end].rstrip()
+
+
 def _apply_random_accent_stripping(sentence: str, *, lang: str, prob: float) -> str:
     """Optionally remove accents from a Latin-script sentence."""
     if prob <= 0 or random.random() >= prob:
@@ -474,6 +482,7 @@ def generate_synthetic_examples_chunk(
     worker_idx: int,
     pure_langs: list[str],
     homogeneous_langs: list[str],
+    spliced_langs: list[str],
     mixed_count: int,
     primary_pool_path: str,
     fallback_pool_path: str | None,
@@ -500,6 +509,7 @@ def generate_synthetic_examples_chunk(
     batch_rows: list[dict] = []
     pure_written = 0
     homogeneous_written = 0
+    spliced_written = 0
     mixed_written = 0
 
     if pq is None:
@@ -520,6 +530,7 @@ def generate_synthetic_examples_chunk(
     )
     try:
         total_jobs = len(pure_langs) + len(homogeneous_langs) + mixed_count
+        total_jobs += len(spliced_langs)
         with tqdm(total=total_jobs, desc=worker_desc, position=worker_idx, leave=False) as pbar:
             for lang in pure_langs:
                 example = build_synthetic_doc_with_retry(
@@ -533,6 +544,8 @@ def generate_synthetic_examples_chunk(
                     strip_punct_prob=PURE_DOC_MIX["strip_punct_prob"],
                     accent_strip_prob=PURE_DOC_MIX.get("accent_strip_prob", 0.0),
                     foreign_sentence_prob=PURE_DOC_MIX.get("foreign_sentence_prob", 0.0),
+                    splice_strip_next_punct_prob=PURE_DOC_MIX.get("splice_strip_next_punct_prob", 0.0),
+                    splice_lowercase_next_prob=PURE_DOC_MIX.get("splice_lowercase_next_prob", 0.0),
                     format_noise_prob=PURE_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=PURE_DOC_MIX.get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=PURE_DOC_MIX.get("uppercase_word_prob", 0.0),
@@ -555,7 +568,7 @@ def generate_synthetic_examples_chunk(
                 pure_written += 1
                 pbar.update(1)
                 pbar.set_postfix_str(
-                    f"pure={pure_written} homogeneous={homogeneous_written} mixed={mixed_written}"
+                    f"pure={pure_written} homogeneous={homogeneous_written} spliced={spliced_written} mixed={mixed_written}"
                 )
                 if len(batch_rows) >= 64:
                     _append_synthetic_rows(writer, batch_rows)
@@ -573,6 +586,8 @@ def generate_synthetic_examples_chunk(
                     strip_punct_prob=HOMOGENEOUS_DOC_MIX["strip_punct_prob"],
                     accent_strip_prob=HOMOGENEOUS_DOC_MIX.get("accent_strip_prob", 0.0),
                     foreign_sentence_prob=HOMOGENEOUS_DOC_MIX.get("foreign_sentence_prob", 0.0),
+                    splice_strip_next_punct_prob=HOMOGENEOUS_DOC_MIX.get("splice_strip_next_punct_prob", 0.0),
+                    splice_lowercase_next_prob=HOMOGENEOUS_DOC_MIX.get("splice_lowercase_next_prob", 0.0),
                     format_noise_prob=HOMOGENEOUS_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=HOMOGENEOUS_DOC_MIX.get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=HOMOGENEOUS_DOC_MIX.get("uppercase_word_prob", 0.0),
@@ -596,7 +611,49 @@ def generate_synthetic_examples_chunk(
                 homogeneous_written += 1
                 pbar.update(1)
                 pbar.set_postfix_str(
-                    f"pure={pure_written} homogeneous={homogeneous_written} mixed={mixed_written}"
+                    f"pure={pure_written} homogeneous={homogeneous_written} spliced={spliced_written} mixed={mixed_written}"
+                )
+                if len(batch_rows) >= 64:
+                    _append_synthetic_rows(writer, batch_rows)
+                    batch_rows.clear()
+
+            for lang in spliced_langs:
+                example = build_synthetic_doc_with_retry(
+                    primary_pool=fallback_pool or primary_pool,
+                    fallback_pool=None,
+                    required_langs=[lang],
+                    pure=True,
+                    pure_lang=lang,
+                    min_sentences=DOC_MIX["spliced"]["min_sentences"],
+                    max_sentences=DOC_MIX["spliced"]["max_sentences"],
+                    strip_punct_prob=DOC_MIX["spliced"]["strip_punct_prob"],
+                    accent_strip_prob=DOC_MIX["spliced"].get("accent_strip_prob", 0.0),
+                    foreign_sentence_prob=DOC_MIX["spliced"].get("foreign_sentence_prob", 0.0),
+                    splice_strip_next_punct_prob=DOC_MIX["spliced"].get("splice_strip_next_punct_prob", 0.0),
+                    splice_lowercase_next_prob=DOC_MIX["spliced"].get("splice_lowercase_next_prob", 0.0),
+                    format_noise_prob=DOC_MIX["spliced"].get("format_noise_prob", 0.0),
+                    paragraph_break_prob=DOC_MIX["spliced"].get("paragraph_break_prob", 0.0),
+                    uppercase_word_prob=DOC_MIX["spliced"].get("uppercase_word_prob", 0.0),
+                    lowercase_word_prob=DOC_MIX["spliced"].get("lowercase_word_prob", 0.0),
+                    titlecase_word_prob=DOC_MIX["spliced"].get("titlecase_word_prob", 0.0),
+                    merge_word_prob=DOC_MIX["spliced"].get("merge_word_prob", 0.0),
+                    split_word_prob=DOC_MIX["spliced"].get("split_word_prob", 0.0),
+                    typo_char_prob=DOC_MIX["spliced"].get("typo_char_prob", 0.0),
+                    worker_idx=worker_idx,
+                    tokenizer=tokenizer,
+                    all_langs=all_langs,
+                    lang_to_group=lang_to_group,
+                    language_group_weights=language_group_weights,
+                    max_length=max_length,
+                    label2id=label2id,
+                    sample_o_span=sample_o_span,
+                    sample_code_span=sample_code_span,
+                )
+                batch_rows.append(_synthetic_example_to_row("spliced", example))
+                spliced_written += 1
+                pbar.update(1)
+                pbar.set_postfix_str(
+                    f"pure={pure_written} homogeneous={homogeneous_written} spliced={spliced_written} mixed={mixed_written}"
                 )
                 if len(batch_rows) >= 64:
                     _append_synthetic_rows(writer, batch_rows)
@@ -625,7 +682,7 @@ def generate_synthetic_examples_chunk(
                 mixed_written += 1
                 pbar.update(1)
                 pbar.set_postfix_str(
-                    f"pure={pure_written} homogeneous={homogeneous_written} mixed={mixed_written}"
+                    f"pure={pure_written} homogeneous={homogeneous_written} spliced={spliced_written} mixed={mixed_written}"
                 )
                 if len(batch_rows) >= 64:
                     _append_synthetic_rows(writer, batch_rows)
@@ -643,6 +700,7 @@ def generate_synthetic_examples_chunk(
                 "job_count": total_jobs,
                 "pure_count": len(pure_langs),
                 "homogeneous_count": len(homogeneous_langs),
+                "spliced_count": len(spliced_langs),
                 "mixed_count": mixed_count,
             },
         )
@@ -834,6 +892,8 @@ def create_pure_synthetic_doc(
     strip_punct_prob: float = 0.15,
     accent_strip_prob: float = 0.0,
     foreign_sentence_prob: float = 0.0,
+    splice_strip_next_punct_prob: float = 0.0,
+    splice_lowercase_next_prob: float = 0.0,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
     uppercase_word_prob: float = 0.0,
@@ -858,12 +918,17 @@ def create_pure_synthetic_doc(
             if candidate != lang and remaining_sentence_count(candidate, primary_pool, None) > 0
         ]
         if foreign_candidates:
+            if splice_strip_next_punct_prob > 0 or splice_lowercase_next_prob > 0:
+                sent_count = max(sent_count, 3)
             foreign_weights = [
                 remaining_sentence_count(candidate, primary_pool, None)
                 for candidate in foreign_candidates
             ]
             foreign_lang = random.choices(foreign_candidates, weights=foreign_weights, k=1)[0]
-            foreign_pos = random.randrange(sent_count)
+            if splice_strip_next_punct_prob > 0 or splice_lowercase_next_prob > 0:
+                foreign_pos = random.randrange(1, sent_count - 1)
+            else:
+                foreign_pos = random.randrange(sent_count)
 
     for idx in range(sent_count):
         if total_tokens >= MAX_LENGTH - 20:
@@ -872,6 +937,15 @@ def create_pure_synthetic_doc(
         sent = draw_sentence(sent_lang, primary_pool, None)
         if sent is None:
             break
+        if (
+            foreign_lang is not None
+            and foreign_pos is not None
+            and idx == foreign_pos + 1
+        ):
+            if splice_strip_next_punct_prob > 0 and random.random() < splice_strip_next_punct_prob:
+                sent = _strip_terminal_punctuation(sent)
+            if splice_lowercase_next_prob > 0 and random.random() < splice_lowercase_next_prob:
+                sent = sent.lower()
         sent = _apply_random_word_casing(
             sent,
             lang=sent_lang,
@@ -931,6 +1005,8 @@ def build_synthetic_doc_with_retry(
     strip_punct_prob: float = 0.35,
     accent_strip_prob: float = 0.0,
     foreign_sentence_prob: float = 0.0,
+    splice_strip_next_punct_prob: float = 0.0,
+    splice_lowercase_next_prob: float = 0.0,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
     uppercase_word_prob: float = 0.0,
@@ -968,6 +1044,8 @@ def build_synthetic_doc_with_retry(
                 strip_punct_prob=strip_punct_prob,
                 accent_strip_prob=accent_strip_prob,
                 foreign_sentence_prob=foreign_sentence_prob,
+                splice_strip_next_punct_prob=splice_strip_next_punct_prob,
+                splice_lowercase_next_prob=splice_lowercase_next_prob,
                 format_noise_prob=format_noise_prob,
                 paragraph_break_prob=paragraph_break_prob,
                 uppercase_word_prob=uppercase_word_prob,
@@ -1182,7 +1260,8 @@ def build_synthetic_dataset(
 
         pure_target = int(round(EXAMPLES_TARGET * PURE_DOC_MIX["fraction"]))
         homogeneous_target = int(round(EXAMPLES_TARGET * HOMOGENEOUS_DOC_MIX["fraction"]))
-        mixed_target = max(0, EXAMPLES_TARGET - pure_target - homogeneous_target)
+        spliced_target = int(round(EXAMPLES_TARGET * DOC_MIX["spliced"]["fraction"]))
+        mixed_target = max(0, EXAMPLES_TARGET - pure_target - homogeneous_target - spliced_target)
 
         pure_plan = _build_language_doc_plan(
             language_stats,
@@ -1198,13 +1277,21 @@ def build_synthetic_dataset(
             docs_per_sentence_estimate=4,
             seed=seed + 202,
         )
-        mixed_target = max(0, EXAMPLES_TARGET - len(pure_plan) - len(homogeneous_plan))
+        spliced_plan = _build_language_doc_plan(
+            language_stats,
+            source_key="main",
+            target_docs=spliced_target,
+            docs_per_sentence_estimate=4,
+            seed=seed + 303,
+        )
+        mixed_target = max(0, EXAMPLES_TARGET - len(pure_plan) - len(homogeneous_plan) - len(spliced_plan))
 
         _clear_synthetic_cache_dir(SYNTHETIC_CACHE)
         shard_paths: list[str] = []
         synthetic_total_examples = 0
         pure_chunks = chunk_list(pure_plan, generation_workers)
         homogeneous_chunks = chunk_list(homogeneous_plan, generation_workers)
+        spliced_chunks = chunk_list(spliced_plan, generation_workers)
         mixed_counts = [
             mixed_target // generation_workers + (1 if i < (mixed_target % generation_workers) else 0)
             for i in range(generation_workers)
@@ -1216,6 +1303,7 @@ def build_synthetic_dataset(
                 worker_idx=0,
                 pure_langs=pure_plan,
                 homogeneous_langs=homogeneous_plan,
+                spliced_langs=spliced_plan,
                 mixed_count=mixed_target,
                 primary_pool_path=source_pool_manifest["reserved_shards"][0],
                 fallback_pool_path=source_pool_manifest["main_shards"][0],
@@ -1233,19 +1321,26 @@ def build_synthetic_dataset(
             shard_paths.append(final_path)
             with open(final_path.replace(".parquet", ".meta.json"), encoding="utf-8") as f:
                 meta = json.load(f)
-            synthetic_total_examples += int(meta.get("pure_count", 0)) + int(meta.get("homogeneous_count", 0)) + int(meta.get("mixed_count", 0))
+            synthetic_total_examples += (
+                int(meta.get("pure_count", 0))
+                + int(meta.get("homogeneous_count", 0))
+                + int(meta.get("spliced_count", 0))
+                + int(meta.get("mixed_count", 0))
+            )
         else:
             with ProcessPoolExecutor(max_workers=generation_workers) as pool:
                 future_to_worker = {}
                 for worker_idx in range(generation_workers):
                     pure_langs = pure_chunks[worker_idx] if worker_idx < len(pure_chunks) else []
                     homogeneous_langs = homogeneous_chunks[worker_idx] if worker_idx < len(homogeneous_chunks) else []
+                    spliced_langs = spliced_chunks[worker_idx] if worker_idx < len(spliced_chunks) else []
                     future = pool.submit(
                         generate_synthetic_examples_chunk,
                         seed=seed,
                         worker_idx=worker_idx,
                         pure_langs=pure_langs,
                         homogeneous_langs=homogeneous_langs,
+                        spliced_langs=spliced_langs,
                         mixed_count=mixed_counts[worker_idx],
                         primary_pool_path=source_pool_manifest["reserved_shards"][worker_idx],
                         fallback_pool_path=source_pool_manifest["main_shards"][worker_idx],
@@ -1268,7 +1363,12 @@ def build_synthetic_dataset(
                     shard_paths.append(final_path)
                     with open(final_path.replace(".parquet", ".meta.json"), encoding="utf-8") as f:
                         meta = json.load(f)
-                    synthetic_total_examples += int(meta.get("pure_count", 0)) + int(meta.get("homogeneous_count", 0)) + int(meta.get("mixed_count", 0))
+                    synthetic_total_examples += (
+                        int(meta.get("pure_count", 0))
+                        + int(meta.get("homogeneous_count", 0))
+                        + int(meta.get("spliced_count", 0))
+                        + int(meta.get("mixed_count", 0))
+                    )
 
         if USE_SYNTHETIC_CACHE:
             save_synthetic_examples_cache(shard_paths, synthetic_total_examples)
