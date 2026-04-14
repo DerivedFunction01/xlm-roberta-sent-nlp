@@ -160,11 +160,11 @@ def make_trainer(
     data_collator,
     compute_metrics,
     output_dir: str,
-    epochs: int = 3,
-    eval_steps: int = 100,
-    save_steps: int = 100,
-    train_batch_size: int = 16,
-    eval_batch_size: int = 32,
+    epochs: int = 2,
+    eval_steps: int = 2500,
+    save_steps: int = 2500,
+    train_batch_size: int = 8,
+    eval_batch_size: int = 8,
     gradient_accumulation_steps: int = 2,
 
 ):
@@ -296,3 +296,5 @@ multilabel_trainer.train()
 multilabel_trainer.save_model()
 multilabel_trainer.save_state()
 multilabel_trainer.push_to_hub()
+
+# %%
