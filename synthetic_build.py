@@ -439,6 +439,22 @@ def _apply_random_char_noise(sentence: str, *, lang: str, prob: float) -> str:
     return f"{sentence[:match.start()]}{''.join(chars)}{sentence[match.end():]}"
 
 
+def _strip_latin_accents(text: str) -> str:
+    """Remove combining diacritics from Latin-script text."""
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _apply_random_accent_stripping(sentence: str, *, lang: str, prob: float) -> str:
+    """Optionally remove accents from a Latin-script sentence."""
+    if prob <= 0 or random.random() >= prob:
+        return sentence
+    if LANG_TO_GROUP.get(lang) not in LATIN_GROUPS:
+        return sentence
+    stripped = _strip_latin_accents(sentence)
+    return stripped if stripped != sentence else sentence
+
+
 def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 0.02) -> tuple[list[str], list[int]]:
     """Randomly swap tokens between positions to simulate within-sentence code-switching."""
     n = len(tokens)
@@ -515,6 +531,7 @@ def generate_synthetic_examples_chunk(
                     min_sentences=PURE_DOC_MIX["min_sentences"],
                     max_sentences=PURE_DOC_MIX["max_sentences"],
                     strip_punct_prob=PURE_DOC_MIX["strip_punct_prob"],
+                    accent_strip_prob=PURE_DOC_MIX.get("accent_strip_prob", 0.0),
                     format_noise_prob=PURE_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=PURE_DOC_MIX.get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=PURE_DOC_MIX.get("uppercase_word_prob", 0.0),
@@ -553,6 +570,7 @@ def generate_synthetic_examples_chunk(
                     min_sentences=HOMOGENEOUS_DOC_MIX["min_sentences"],
                     max_sentences=HOMOGENEOUS_DOC_MIX["max_sentences"],
                     strip_punct_prob=HOMOGENEOUS_DOC_MIX["strip_punct_prob"],
+                    accent_strip_prob=HOMOGENEOUS_DOC_MIX.get("accent_strip_prob", 0.0),
                     format_noise_prob=HOMOGENEOUS_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=HOMOGENEOUS_DOC_MIX.get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=HOMOGENEOUS_DOC_MIX.get("uppercase_word_prob", 0.0),
@@ -690,6 +708,7 @@ def create_synthetic_doc(
     required_langs: list[str] | None = None,
     n_segments: int = 4,
     strip_punct_prob: float = 0.35,
+    accent_strip_prob: float = 0.0,
     swap_prob: float = 0.12,
     o_inject_prob: float = 0.12,
     allow_repeated_langs: bool = False,
@@ -749,6 +768,7 @@ def create_synthetic_doc(
         sent = draw_sentence(lang, primary_pool, fallback_pool)
         if sent is None:
             continue
+        sent = _apply_random_accent_stripping(sent, lang=lang, prob=accent_strip_prob)
         original_text_parts.append(sent)
         tokens = tokenizer.tokenize(sent)
         if not tokens:
@@ -810,6 +830,7 @@ def create_pure_synthetic_doc(
     min_sentences: int = 1,
     max_sentences: int = 4,
     strip_punct_prob: float = 0.15,
+    accent_strip_prob: float = 0.0,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
     uppercase_word_prob: float = 0.0,
@@ -845,6 +866,7 @@ def create_pure_synthetic_doc(
             split_prob=split_word_prob,
         )
         sent = _apply_random_char_noise(sent, lang=lang, prob=typo_char_prob)
+        sent = _apply_random_accent_stripping(sent, lang=lang, prob=accent_strip_prob)
         original_text_parts.append(sent)
         tokens = tokenizer.tokenize(sent)
         if not tokens:
@@ -887,6 +909,7 @@ def build_synthetic_doc_with_retry(
     max_sentences: int = 4,
     n_segments: int = 4,
     strip_punct_prob: float = 0.35,
+    accent_strip_prob: float = 0.0,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
     uppercase_word_prob: float = 0.0,
@@ -922,6 +945,7 @@ def build_synthetic_doc_with_retry(
                 min_sentences=min_sentences,
                 max_sentences=max_sentences,
                 strip_punct_prob=strip_punct_prob,
+                accent_strip_prob=accent_strip_prob,
                 format_noise_prob=format_noise_prob,
                 paragraph_break_prob=paragraph_break_prob,
                 uppercase_word_prob=uppercase_word_prob,
@@ -939,6 +963,7 @@ def build_synthetic_doc_with_retry(
                 required_langs=required_langs,
                 n_segments=n_segments,
                 strip_punct_prob=strip_punct_prob,
+                accent_strip_prob=accent_strip_prob,
                 swap_prob=swap_prob,
                 o_inject_prob=o_inject_prob,
                 allow_repeated_langs=allow_repeated_langs,

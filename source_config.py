@@ -275,6 +275,9 @@ DOC_MIX = {
         "min_sentences": 1,
         "max_sentences": 6,
         "strip_punct_prob": 0.10,
+        # Occasionally drop diacritics in Latin-script text so Spanish/Portuguese
+        # examples include accentless variants too.
+        "accent_strip_prob": 0.04,
         "format_noise_prob": 0.30,
         "paragraph_break_prob": 0.25,
         "uppercase_word_prob": 0.03,
@@ -290,6 +293,7 @@ DOC_MIX = {
         "min_sentences": 2,
         "max_sentences": 6,
         "strip_punct_prob": 0.15,
+        "accent_strip_prob": 0.02,
         "format_noise_prob": 0.20,
         "paragraph_break_prob": 0.20,
         "uppercase_word_prob": 0.02,
