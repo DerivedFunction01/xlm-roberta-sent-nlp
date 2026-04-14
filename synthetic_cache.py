@@ -7,11 +7,9 @@ from typing import Any
 
 from datasets import Dataset, load_dataset
 from paths import PATHS
+import pyarrow as pa
 
-try:
-    import pyarrow as pa
-except ImportError:
-    pa = None
+
 
 
 def _write_json_atomic(path: str, payload: dict) -> None:

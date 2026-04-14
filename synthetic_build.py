@@ -66,10 +66,7 @@ from synthetic_cache import (
     _synthetic_worker_temp_path,
 )
 
-try:
-    import pyarrow.parquet as pq
-except ImportError:
-    pq = None
+import pyarrow.parquet as pq
 
 
 def _build_language_doc_plan(

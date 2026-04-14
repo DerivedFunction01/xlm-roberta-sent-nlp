@@ -5,12 +5,9 @@ import json
 
 import pandas as pd
 
-try:
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-except ImportError:
-    pa = None
-    pq = None
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 
 
 def write_json_atomic(path: str, payload: dict) -> None:
