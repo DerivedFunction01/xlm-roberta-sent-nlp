@@ -10,16 +10,6 @@ from paths import PATHS
 import pyarrow as pa
 
 
-
-
-def _write_json_atomic(path: str, payload: dict) -> None:
-    """Write JSON through a temporary file so updates are atomic-ish."""
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, path)
-
-
 def _synthetic_worker_temp_path(synthetic_temp_dir: str, worker_idx: int) -> str:
     """Return the temp parquet path for a synthetic-doc worker."""
     return os.path.join(synthetic_temp_dir, f"worker_{worker_idx}.parquet")
