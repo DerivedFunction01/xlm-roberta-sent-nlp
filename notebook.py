@@ -165,7 +165,7 @@ def make_trainer(
     save_steps: int = 2500,
     train_batch_size: int = 8,
     eval_batch_size: int = 8,
-    gradient_accumulation_steps: int = 2,
+    gradient_accumulation_steps: int = 18,
 
 ):
     return Trainer(
