@@ -532,6 +532,7 @@ def generate_synthetic_examples_chunk(
                     max_sentences=PURE_DOC_MIX["max_sentences"],
                     strip_punct_prob=PURE_DOC_MIX["strip_punct_prob"],
                     accent_strip_prob=PURE_DOC_MIX.get("accent_strip_prob", 0.0),
+                    foreign_sentence_prob=PURE_DOC_MIX.get("foreign_sentence_prob", 0.0),
                     format_noise_prob=PURE_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=PURE_DOC_MIX.get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=PURE_DOC_MIX.get("uppercase_word_prob", 0.0),
@@ -571,6 +572,7 @@ def generate_synthetic_examples_chunk(
                     max_sentences=HOMOGENEOUS_DOC_MIX["max_sentences"],
                     strip_punct_prob=HOMOGENEOUS_DOC_MIX["strip_punct_prob"],
                     accent_strip_prob=HOMOGENEOUS_DOC_MIX.get("accent_strip_prob", 0.0),
+                    foreign_sentence_prob=HOMOGENEOUS_DOC_MIX.get("foreign_sentence_prob", 0.0),
                     format_noise_prob=HOMOGENEOUS_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=HOMOGENEOUS_DOC_MIX.get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=HOMOGENEOUS_DOC_MIX.get("uppercase_word_prob", 0.0),
@@ -831,6 +833,7 @@ def create_pure_synthetic_doc(
     max_sentences: int = 4,
     strip_punct_prob: float = 0.15,
     accent_strip_prob: float = 0.0,
+    foreign_sentence_prob: float = 0.0,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
     uppercase_word_prob: float = 0.0,
@@ -845,40 +848,57 @@ def create_pure_synthetic_doc(
     all_tokens, all_labels = [], []
     original_text_parts: list[str] = []
     total_tokens = 0
+    foreign_lang: str | None = None
+    foreign_pos: int | None = None
 
-    for _ in range(sent_count):
+    if foreign_sentence_prob > 0 and random.random() < foreign_sentence_prob:
+        foreign_candidates = [
+            candidate
+            for candidate in primary_pool
+            if candidate != lang and remaining_sentence_count(candidate, primary_pool, None) > 0
+        ]
+        if foreign_candidates:
+            foreign_weights = [
+                remaining_sentence_count(candidate, primary_pool, None)
+                for candidate in foreign_candidates
+            ]
+            foreign_lang = random.choices(foreign_candidates, weights=foreign_weights, k=1)[0]
+            foreign_pos = random.randrange(sent_count)
+
+    for idx in range(sent_count):
         if total_tokens >= MAX_LENGTH - 20:
             break
-        sent = draw_sentence(lang, primary_pool, None)
+        sent_lang = foreign_lang if foreign_lang is not None and idx == foreign_pos else lang
+        sent = draw_sentence(sent_lang, primary_pool, None)
         if sent is None:
             break
         sent = _apply_random_word_casing(
             sent,
-            lang=lang,
+            lang=sent_lang,
             uppercase_prob=uppercase_word_prob,
             lowercase_prob=lowercase_word_prob,
             titlecase_prob=titlecase_word_prob,
         )
         sent = _apply_random_spacing_noise(
             sent,
-            lang=lang,
+            lang=sent_lang,
             merge_prob=merge_word_prob,
             split_prob=split_word_prob,
         )
-        sent = _apply_random_char_noise(sent, lang=lang, prob=typo_char_prob)
-        sent = _apply_random_accent_stripping(sent, lang=lang, prob=accent_strip_prob)
+        sent = _apply_random_char_noise(sent, lang=sent_lang, prob=typo_char_prob)
+        sent = _apply_random_accent_stripping(sent, lang=sent_lang, prob=accent_strip_prob)
         original_text_parts.append(sent)
         tokens = tokenizer.tokenize(sent)
         if not tokens:
             continue
         if strip_punct_prob > 0 and random.random() < strip_punct_prob:
             tokens = augment_boundary(tokens, strip_punct=True)
-        labels = bio_label_tokens(tokens, lang, is_first=(len(all_tokens) == 0), label2id=label2id)
+        labels = bio_label_tokens(tokens, sent_lang, is_first=(len(all_tokens) == 0), label2id=label2id)
         tokens, labels, artifact_parts = _add_formatting_noise(
             tokens,
             labels,
             tokenizer=tokenizer,
-            lang=lang,
+            lang=sent_lang,
             artifact_prob=format_noise_prob,
         )
         if artifact_parts:
@@ -910,6 +930,7 @@ def build_synthetic_doc_with_retry(
     n_segments: int = 4,
     strip_punct_prob: float = 0.35,
     accent_strip_prob: float = 0.0,
+    foreign_sentence_prob: float = 0.0,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
     uppercase_word_prob: float = 0.0,
@@ -946,6 +967,7 @@ def build_synthetic_doc_with_retry(
                 max_sentences=max_sentences,
                 strip_punct_prob=strip_punct_prob,
                 accent_strip_prob=accent_strip_prob,
+                foreign_sentence_prob=foreign_sentence_prob,
                 format_noise_prob=format_noise_prob,
                 paragraph_break_prob=paragraph_break_prob,
                 uppercase_word_prob=uppercase_word_prob,

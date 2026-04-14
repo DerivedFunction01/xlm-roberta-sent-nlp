@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">Polyglot Tagger banner</title>
+  <desc id="desc">Dark gradient banner for a multilingual language identification model.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#08111f"/>
+      <stop offset="50%" stop-color="#10243f"/>
+      <stop offset="100%" stop-color="#1f4b66"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#7be0ff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#7be0ff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blur" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="360" fill="url(#bg)"/>
+  <circle cx="290" cy="135" r="210" fill="url(#glow)" filter="url(#blur)"/>
+  <circle cx="920" cy="265" r="190" fill="#ffcc66" opacity="0.08" filter="url(#blur)"/>
+
+  <g fill="none" stroke="#8fdcff" stroke-opacity="0.18">
+    <path d="M72 258 C 180 180, 290 160, 420 198 S 650 292, 780 218 S 1040 92, 1140 168" stroke-width="3"/>
+    <path d="M70 94 C 190 60, 300 92, 410 130 S 650 220, 760 182 S 1010 54, 1148 102" stroke-width="2"/>
+  </g>
+
+  <g fill="#cfefff" opacity="0.7">
+    <circle cx="140" cy="110" r="3"/>
+    <circle cx="215" cy="166" r="4"/>
+    <circle cx="330" cy="92" r="3"/>
+    <circle cx="470" cy="196" r="4"/>
+    <circle cx="620" cy="126" r="3"/>
+    <circle cx="780" cy="182" r="4"/>
+    <circle cx="955" cy="118" r="3"/>
+    <circle cx="1080" cy="176" r="4"/>
+  </g>
+
+  <text x="72" y="152" fill="#f4fbff" font-family="Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif" font-size="56" font-weight="700" letter-spacing="-0.02em">
+    Polyglot Tagger
+  </text>
+  <text x="72" y="205" fill="#b9d8ea" font-family="Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif" font-size="28" font-weight="500">
+    100-language token classification for multilingual language identification
+  </text>
+
+  <g transform="translate(72 244)">
+    <rect x="0" y="0" rx="18" ry="18" width="168" height="40" fill="#ffffff" fill-opacity="0.09" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="20" y="26" fill="#dff4ff" font-family="Inter, system-ui, sans-serif" font-size="18">XLM-RoBERTa</text>
+  </g>
+  <g transform="translate(252 244)">
+    <rect x="0" y="0" rx="18" ry="18" width="168" height="40" fill="#ffffff" fill-opacity="0.09" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="20" y="26" fill="#dff4ff" font-family="Inter, system-ui, sans-serif" font-size="18">BIO tagging</text>
+  </g>
+  <g transform="translate(432 244)">
+    <rect x="0" y="0" rx="18" ry="18" width="224" height="40" fill="#ffffff" fill-opacity="0.09" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="20" y="26" fill="#dff4ff" font-family="Inter, system-ui, sans-serif" font-size="18">Sentence-level signals</text>
+  </g>
+</svg>
