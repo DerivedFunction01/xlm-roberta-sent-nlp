@@ -20,11 +20,11 @@ print("="*80)
 # ===== LOAD MODEL & TOKENIZER =====
 print("\n1. Loading model and tokenizer...")
 
-MODEL_CHECKPOINT = "DerivedFunction/polyglot-tagger-60L"
+MODEL_CHECKPOINT = "DerivedFunction/lang-ner-xlmr"
 TOKENIZER_MODEL = "xlm-roberta-base"
 
 model = AutoModelForTokenClassification.from_pretrained(MODEL_CHECKPOINT)
-tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
+tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_MODEL)
 
 print(f"   ✓ Model loaded: {MODEL_CHECKPOINT}")
 print(f"   ✓ Tokenizer loaded: {TOKENIZER_MODEL}")

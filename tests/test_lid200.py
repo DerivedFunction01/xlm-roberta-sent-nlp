@@ -11,17 +11,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import defaultdict
+import sys
 
 from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
 
+# Attach the current directory (project root) to sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
+sys.path.insert(0, project_root)
 from language import ALL_LANGS, LANG_ISO2_TO_ISO3
 
-
-MODEL_CHECKPOINT = "DerivedFunction/polyglot-tagger-60L"
-
+MODEL_CHECKPOINT = "DerivedFunction/lang-ner-xlmr"
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -83,7 +87,7 @@ def main() -> None:
     # ===== LOAD MODEL & TOKENIZER =====
     print("\n1. Loading model and tokenizer...")
     model = AutoModelForTokenClassification.from_pretrained(MODEL_CHECKPOINT)
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
+    tokenizer = AutoTokenizer.from_pretrained("xlm-roberta-base")
     print(f"   ✓ Model loaded: {MODEL_CHECKPOINT}")
     print(f"   ✓ Tokenizer loaded")
 
