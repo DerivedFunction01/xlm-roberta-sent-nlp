@@ -281,7 +281,7 @@ class CustomMultiLabelDataCollatorWithPadding(DataCollatorWithPadding):
 
 multilabel_data_collator = CustomMultiLabelDataCollatorWithPadding(tokenizer)
 
-multilabel_trainer = make_trainer(
+trainer = make_trainer(
     model=model,
     train_dataset=multilabel_train_dataset,
     eval_dataset=multilabel_eval_dataset,
@@ -292,9 +292,9 @@ multilabel_trainer = make_trainer(
 
 print("Ready multilabel fine-tuning …")
 # %%
-multilabel_trainer.train()
-multilabel_trainer.save_model()
-multilabel_trainer.save_state()
-multilabel_trainer.push_to_hub()
+trainer.train()
+trainer.save_model()
+trainer.save_state()
+trainer.push_to_hub()
 
 # %%
