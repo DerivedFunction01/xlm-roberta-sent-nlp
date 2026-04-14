@@ -453,6 +453,21 @@ def _strip_terminal_punctuation(text: str) -> str:
     return text[:end].rstrip()
 
 
+def _apply_sentence_casing(
+    sentence: str,
+    *,
+    uppercase_prob: float,
+    lowercase_prob: float,
+) -> str:
+    """Apply one casing transform to the full sentence."""
+    total_prob = max(0.0, uppercase_prob) + max(0.0, lowercase_prob)
+    if total_prob <= 0 or random.random() >= total_prob:
+        return sentence
+    if random.random() * total_prob < uppercase_prob:
+        return sentence.upper()
+    return sentence.lower()
+
+
 def _apply_random_accent_stripping(sentence: str, *, lang: str, prob: float) -> str:
     """Optionally remove accents from a Latin-script sentence."""
     if prob <= 0 or random.random() >= prob:
@@ -544,6 +559,8 @@ def generate_synthetic_examples_chunk(
                     strip_punct_prob=PURE_DOC_MIX["strip_punct_prob"],
                     accent_strip_prob=PURE_DOC_MIX.get("accent_strip_prob", 0.0),
                     foreign_sentence_prob=PURE_DOC_MIX.get("foreign_sentence_prob", 0.0),
+                    sentence_uppercase_prob=PURE_DOC_MIX.get("sentence_uppercase_prob", 0.0),
+                    sentence_lowercase_prob=PURE_DOC_MIX.get("sentence_lowercase_prob", 0.0),
                     splice_strip_next_punct_prob=PURE_DOC_MIX.get("splice_strip_next_punct_prob", 0.0),
                     splice_lowercase_next_prob=PURE_DOC_MIX.get("splice_lowercase_next_prob", 0.0),
                     format_noise_prob=PURE_DOC_MIX.get("format_noise_prob", 0.0),
@@ -586,6 +603,8 @@ def generate_synthetic_examples_chunk(
                     strip_punct_prob=HOMOGENEOUS_DOC_MIX["strip_punct_prob"],
                     accent_strip_prob=HOMOGENEOUS_DOC_MIX.get("accent_strip_prob", 0.0),
                     foreign_sentence_prob=HOMOGENEOUS_DOC_MIX.get("foreign_sentence_prob", 0.0),
+                    sentence_uppercase_prob=HOMOGENEOUS_DOC_MIX.get("sentence_uppercase_prob", 0.0),
+                    sentence_lowercase_prob=HOMOGENEOUS_DOC_MIX.get("sentence_lowercase_prob", 0.0),
                     splice_strip_next_punct_prob=HOMOGENEOUS_DOC_MIX.get("splice_strip_next_punct_prob", 0.0),
                     splice_lowercase_next_prob=HOMOGENEOUS_DOC_MIX.get("splice_lowercase_next_prob", 0.0),
                     format_noise_prob=HOMOGENEOUS_DOC_MIX.get("format_noise_prob", 0.0),
@@ -629,6 +648,8 @@ def generate_synthetic_examples_chunk(
                     strip_punct_prob=DOC_MIX["spliced"]["strip_punct_prob"],
                     accent_strip_prob=DOC_MIX["spliced"].get("accent_strip_prob", 0.0),
                     foreign_sentence_prob=DOC_MIX["spliced"].get("foreign_sentence_prob", 0.0),
+                    sentence_uppercase_prob=DOC_MIX["spliced"].get("sentence_uppercase_prob", 0.0),
+                    sentence_lowercase_prob=DOC_MIX["spliced"].get("sentence_lowercase_prob", 0.0),
                     splice_strip_next_punct_prob=DOC_MIX["spliced"].get("splice_strip_next_punct_prob", 0.0),
                     splice_lowercase_next_prob=DOC_MIX["spliced"].get("splice_lowercase_next_prob", 0.0),
                     format_noise_prob=DOC_MIX["spliced"].get("format_noise_prob", 0.0),
@@ -892,6 +913,8 @@ def create_pure_synthetic_doc(
     strip_punct_prob: float = 0.15,
     accent_strip_prob: float = 0.0,
     foreign_sentence_prob: float = 0.0,
+    sentence_uppercase_prob: float = 0.0,
+    sentence_lowercase_prob: float = 0.0,
     splice_strip_next_punct_prob: float = 0.0,
     splice_lowercase_next_prob: float = 0.0,
     format_noise_prob: float = 0.0,
@@ -960,6 +983,11 @@ def create_pure_synthetic_doc(
             split_prob=split_word_prob,
         )
         sent = _apply_random_char_noise(sent, lang=sent_lang, prob=typo_char_prob)
+        sent = _apply_sentence_casing(
+            sent,
+            uppercase_prob=sentence_uppercase_prob,
+            lowercase_prob=sentence_lowercase_prob,
+        )
         sent = _apply_random_accent_stripping(sent, lang=sent_lang, prob=accent_strip_prob)
         original_text_parts.append(sent)
         tokens = tokenizer.tokenize(sent)
@@ -1005,6 +1033,8 @@ def build_synthetic_doc_with_retry(
     strip_punct_prob: float = 0.35,
     accent_strip_prob: float = 0.0,
     foreign_sentence_prob: float = 0.0,
+    sentence_uppercase_prob: float = 0.0,
+    sentence_lowercase_prob: float = 0.0,
     splice_strip_next_punct_prob: float = 0.0,
     splice_lowercase_next_prob: float = 0.0,
     format_noise_prob: float = 0.0,
@@ -1044,6 +1074,8 @@ def build_synthetic_doc_with_retry(
                 strip_punct_prob=strip_punct_prob,
                 accent_strip_prob=accent_strip_prob,
                 foreign_sentence_prob=foreign_sentence_prob,
+                sentence_uppercase_prob=sentence_uppercase_prob,
+                sentence_lowercase_prob=sentence_lowercase_prob,
                 splice_strip_next_punct_prob=splice_strip_next_punct_prob,
                 splice_lowercase_next_prob=splice_lowercase_next_prob,
                 format_noise_prob=format_noise_prob,

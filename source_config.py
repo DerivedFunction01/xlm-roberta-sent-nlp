@@ -279,6 +279,8 @@ DOC_MIX = {
         # examples include accentless variants too.
         "accent_strip_prob": 0.05,
         "foreign_sentence_prob": 0.0,
+        "sentence_uppercase_prob": 0.02,
+        "sentence_lowercase_prob": 0.03,
         "format_noise_prob": 0.30,
         "paragraph_break_prob": 0.25,
         "uppercase_word_prob": 0.03,
@@ -296,6 +298,8 @@ DOC_MIX = {
         "strip_punct_prob": 0.15,
         "accent_strip_prob": 0.02,
         "foreign_sentence_prob": 0.85,
+        "sentence_uppercase_prob": 0.01,
+        "sentence_lowercase_prob": 0.02,
         "format_noise_prob": 0.20,
         "paragraph_break_prob": 0.20,
         "uppercase_word_prob": 0.02,
