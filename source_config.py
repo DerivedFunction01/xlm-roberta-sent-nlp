@@ -165,12 +165,6 @@ LANGUAGE_BUCKETS = {
         "min_chars": 2_000,
         "latin": False,
     },
-    "ArabicDialects": {
-        "langs": ["arz", "ary"],
-        "weight": 1.0,
-        "min_chars": 2_000,
-        "latin": False,
-    },
     # fas ~0.20% of CC (ignore the one anomalous crawl spike)
     "ArabicOther": {
         "langs": ["fa", "ps", "sd", "ug"],
