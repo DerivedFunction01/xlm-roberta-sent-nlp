@@ -364,7 +364,7 @@ FT["every"] = len(FT["langs"])
 
 RUN = {
     "len": 512,
-    "target": 4_000_000, 
+    "target": 3_500_000, 
     "syn_cache": True,
     "syn_rebuild": False,
     "tok_cache": True,
