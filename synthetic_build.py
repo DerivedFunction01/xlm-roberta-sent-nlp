@@ -5,6 +5,7 @@ import json
 import os
 import random
 import re
+import string
 import unicodedata
 import multiprocessing as mp
 from collections import deque
@@ -486,6 +487,26 @@ def _apply_random_accent_stripping(sentence: str, *, lang: str, prob: float) -> 
     return stripped if stripped != sentence else sentence
 
 
+def _inject_random_letter_into_sentence(sentence: str, *, lang: str, prob: float) -> str:
+    """Insert one random letter between words in a Latin sentence."""
+    if prob <= 0 or random.random() >= prob:
+        return sentence
+    if LANG_TO_GROUP.get(lang) not in LATIN_GROUPS:
+        return sentence
+
+    parts = sentence.split()
+    if len(parts) < 2:
+        return sentence
+
+    letter = random.choice(string.ascii_lowercase)
+    if random.random() < 0.5:
+        letter = letter.upper()
+
+    insert_at = random.randint(1, len(parts) - 1)
+    parts = parts[:insert_at] + [letter] + parts[insert_at:]
+    return " ".join(parts)
+
+
 def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 0.02) -> tuple[list[str], list[int]]:
     """Randomly swap tokens between positions to simulate within-sentence code-switching."""
     n = len(tokens)
@@ -571,6 +592,7 @@ def generate_synthetic_examples_chunk(
                     sentence_lowercase_prob=PURE_DOC_MIX.get("sentence_lowercase_prob", 0.0),
                     splice_strip_next_punct_prob=PURE_DOC_MIX.get("splice_strip_next_punct_prob", 0.0),
                     splice_lowercase_next_prob=PURE_DOC_MIX.get("splice_lowercase_next_prob", 0.0),
+                    random_letter_prob=PURE_DOC_MIX.get("random_letter_prob", 0.0),
                     format_noise_prob=PURE_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=PURE_DOC_MIX.get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=PURE_DOC_MIX.get("uppercase_word_prob", 0.0),
@@ -615,6 +637,7 @@ def generate_synthetic_examples_chunk(
                     sentence_lowercase_prob=HOMOGENEOUS_DOC_MIX.get("sentence_lowercase_prob", 0.0),
                     splice_strip_next_punct_prob=HOMOGENEOUS_DOC_MIX.get("splice_strip_next_punct_prob", 0.0),
                     splice_lowercase_next_prob=HOMOGENEOUS_DOC_MIX.get("splice_lowercase_next_prob", 0.0),
+                    random_letter_prob=HOMOGENEOUS_DOC_MIX.get("random_letter_prob", 0.0),
                     format_noise_prob=HOMOGENEOUS_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=HOMOGENEOUS_DOC_MIX.get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=HOMOGENEOUS_DOC_MIX.get("uppercase_word_prob", 0.0),
@@ -660,6 +683,7 @@ def generate_synthetic_examples_chunk(
                     sentence_lowercase_prob=DOC_MIX["spliced"].get("sentence_lowercase_prob", 0.0),
                     splice_strip_next_punct_prob=DOC_MIX["spliced"].get("splice_strip_next_punct_prob", 0.0),
                     splice_lowercase_next_prob=DOC_MIX["spliced"].get("splice_lowercase_next_prob", 0.0),
+                    random_letter_prob=DOC_MIX["spliced"].get("random_letter_prob", 0.0),
                     format_noise_prob=DOC_MIX["spliced"].get("format_noise_prob", 0.0),
                     paragraph_break_prob=DOC_MIX["spliced"].get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=DOC_MIX["spliced"].get("uppercase_word_prob", 0.0),
@@ -925,6 +949,7 @@ def create_pure_synthetic_doc(
     sentence_lowercase_prob: float = 0.0,
     splice_strip_next_punct_prob: float = 0.0,
     splice_lowercase_next_prob: float = 0.0,
+    random_letter_prob: float = 0.0,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
     uppercase_word_prob: float = 0.0,
@@ -997,6 +1022,7 @@ def create_pure_synthetic_doc(
             lowercase_prob=sentence_lowercase_prob,
         )
         sent = _apply_random_accent_stripping(sent, lang=sent_lang, prob=accent_strip_prob)
+        sent = _inject_random_letter_into_sentence(sent, lang=sent_lang, prob=random_letter_prob)
         original_text_parts.append(sent)
         tokens = tokenizer.tokenize(sent)
         if not tokens:
@@ -1045,6 +1071,7 @@ def build_synthetic_doc_with_retry(
     sentence_lowercase_prob: float = 0.0,
     splice_strip_next_punct_prob: float = 0.0,
     splice_lowercase_next_prob: float = 0.0,
+    random_letter_prob: float = 0.0,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
     uppercase_word_prob: float = 0.0,
@@ -1086,6 +1113,7 @@ def build_synthetic_doc_with_retry(
                 sentence_lowercase_prob=sentence_lowercase_prob,
                 splice_strip_next_punct_prob=splice_strip_next_punct_prob,
                 splice_lowercase_next_prob=splice_lowercase_next_prob,
+                random_letter_prob=random_letter_prob,
                 format_noise_prob=format_noise_prob,
                 paragraph_break_prob=paragraph_break_prob,
                 uppercase_word_prob=uppercase_word_prob,
