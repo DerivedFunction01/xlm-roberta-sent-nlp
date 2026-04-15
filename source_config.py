@@ -250,22 +250,56 @@ LANGUAGE_BUCKETS = {
     },
 }
 
-POOL = {
-    "wiki": {
-        "reserve": 0.60,
-        "min": 4,
-        "max": 90_000,
+WIKI = {
+    "max_wiki_index": 100_000,
+    "articles_per_lang": 10_000,
+    "max_wiki_sentences": 150_000,
+    "paragraph_fraction_default": 0.60,
+    "paragraph_fractions_by_group": {
+        "English": 0.75,
     },
-    "smol": {
-        "reserve": 0.95,
-        "min": 1,
-        "max": 1_000,
+    "long_paragraph_streak": 2,
+    "long_paragraph_bonus": 0.10,
+    "cap_multipliers": {
+        "en": 1.50,
+        "de": 1.25,
+        "fr": 1.25,
+        "es": 1.25,
+        "ru": 1.25,
+        "zh": 1.25,
+        "ja": 1.25,
+        "pt": 1.25,
+        "it": 1.25,
+        "hi": 1.25,
+        "ko": 1.25,
+        "ar": 1.25,
+        "no": 0.5,
     },
-    "ft": {
-        "reserve": 0.60,
-        "min": 1,
-        "max": 30_000,
+    "source_langs": {
+        "no": ("no", "nn"),
     },
+    "latin_secondary_groups": {
+        "AfricanLatin",
+        "AdriaticLatin",
+        "BalticLatin",
+        "CelticLatin",
+        "KurdishLatin",
+        "PeripheralLatin",
+        "WesternLatin",
+    },
+    "rolling_stats_window": 250,
+    "length_priority_scan_limit": 66_666,
+    "length_priority_sentence_cap_by_lang": {
+        "vi": 50_000,
+        "sv": 50_000,
+        "lo": 20_000,
+        "sd": 20_000,
+        "am": 20_000,
+        "km": 20_000,
+        "ug": 20_000,
+        "my": 20_000,
+    },
+    "length_priority_sentence_cap": 25_000,
 }
 
 DOC_MIX = {
@@ -361,6 +395,26 @@ FT = {
     },
 }
 FT["every"] = len(FT["langs"])
+
+PURE_DOC_FRACTION = DOC_MIX["pure"]["fraction"]
+
+POOL = {
+    "wiki": {
+        "reserve": PURE_DOC_FRACTION,
+        "min": 4,
+        "max": int(WIKI["max_wiki_sentences"] * PURE_DOC_FRACTION),
+    },
+    "smol": {
+        "reserve": 0.95,
+        "min": 1,
+        "max": 1_000,
+    },
+    "ft": {
+        "reserve": PURE_DOC_FRACTION,
+        "min": 1,
+        "max": int(FT["max_row"] * PURE_DOC_FRACTION),
+    },
+}
 
 RUN = {
     "len": 512,

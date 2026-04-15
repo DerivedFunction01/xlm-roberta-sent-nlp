@@ -14,6 +14,7 @@ from tqdm.auto import tqdm
 from io_utils import write_json_atomic as _write_json_atomic, write_sentence_parquet as _write_sentence_parquet
 from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUP_MIN_CHARS, LATIN_GROUPS, canonical_lang
 from paths import PATHS
+from source_config import WIKI
 from text_utils import (
     _article_min_chars,
     _get_segmenter,
@@ -27,56 +28,21 @@ from text_utils import (
     SENT_SPLIT,
 )
 
-
-
-MAX_WIKI_INDEX = 100_000
-ARTICLES_PER_LANG = 10_000
-MAX_WIKI_SENTENCES = 150_000
-WIKI_PARAGRAPH_FRACTION_DEFAULT = 0.60
-WIKI_PARAGRAPH_FRACTIONS_BY_GROUP: dict[str, float] = {}
-WIKI_LONG_PARAGRAPH_STREAK = 2
-WIKI_LONG_PARAGRAPH_BONUS = 0.10
-WIKI_CAP_MULTIPLIERS = {
-    "en": 1.50,
-    "de": 1.25,
-    "fr": 1.25,
-    "es": 1.25,
-    "ru": 1.25,
-    "zh": 1.25,
-    "ja": 1.25,
-    "pt": 1.25,
-    "it": 1.25,
-    "hi": 1.25,
-    "ko": 1.25,
-    "ar": 1.25,
-    "no": 0.5,
-}
-WIKI_SOURCE_LANGS = {
-    "no": ("no", "nn"),
-}
-WIKI_LATIN_SECONDARY_GROUPS = {
-    "AfricanLatin",
-    "AdriaticLatin",
-    "BalticLatin",
-    "CelticLatin",
-    "KurdishLatin",
-    "PeripheralLatin",
-    "WesternLatin",
-}
-WIKI_ROLLING_STATS_WINDOW = 250
-LENGTH_PRIORITY_SCAN_LIMIT = int(MAX_WIKI_INDEX // 1.5)
-LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG = {
-    "vi": 50_000,
-    "sv": 50_000,
-    "lo": 20_000,
-    "sd": 20_000,
-    "am": 20_000,
-    "km": 20_000,
-    "ug": 20_000,
-    "my": 20_000,
-}
+MAX_WIKI_INDEX = int(WIKI["max_wiki_index"])
+ARTICLES_PER_LANG = int(WIKI["articles_per_lang"])
+MAX_WIKI_SENTENCES = int(WIKI["max_wiki_sentences"])
+WIKI_PARAGRAPH_FRACTION_DEFAULT = float(WIKI["paragraph_fraction_default"])
+WIKI_PARAGRAPH_FRACTIONS_BY_GROUP: dict[str, float] = dict(WIKI["paragraph_fractions_by_group"])
+WIKI_LONG_PARAGRAPH_STREAK = int(WIKI["long_paragraph_streak"])
+WIKI_LONG_PARAGRAPH_BONUS = float(WIKI["long_paragraph_bonus"])
+WIKI_CAP_MULTIPLIERS = dict(WIKI["cap_multipliers"])
+WIKI_SOURCE_LANGS = dict(WIKI["source_langs"])
+WIKI_LATIN_SECONDARY_GROUPS = set(WIKI["latin_secondary_groups"])
+WIKI_ROLLING_STATS_WINDOW = int(WIKI["rolling_stats_window"])
+LENGTH_PRIORITY_SCAN_LIMIT = int(WIKI["length_priority_scan_limit"])
+LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG = dict(WIKI["length_priority_sentence_cap_by_lang"])
 LENGTH_PRIORITY_LANGS = set(LENGTH_PRIORITY_SENTENCE_CAP_BY_LANG)
-LENGTH_PRIORITY_SENTENCE_CAP = 25_000
+LENGTH_PRIORITY_SENTENCE_CAP = int(WIKI["length_priority_sentence_cap"])
 
 
 def _is_missing_wiki_config_error(exc: Exception, lang: str) -> bool:
