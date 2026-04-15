@@ -352,8 +352,8 @@ FT = {
     "overflow_lang": 55_000,
     "max_row": 50_000,
     "miss": 1_000,
-    "include_en": True,
-        "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms"},
+    "include_en": True, # Langs are those that will create an english parquet. Do not add any more to this list.
+    "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms"},
     "lang_overrides": {
         "he": "hbo",
         "el": "grc",
