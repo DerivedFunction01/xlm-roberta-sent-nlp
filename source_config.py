@@ -353,8 +353,10 @@ FT = {
     "max_row": 50_000,
     "miss": 1_000,
     "include_en": True,
-    "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms"},
+        "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms", "he", "el"},
     "lang_overrides": {
+        "he": "hbo",
+        "el": "grc",
         "zh": "yue",
     },
 }
