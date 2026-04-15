@@ -440,7 +440,7 @@ POOL = {
 
 RUN = {
     "len": 512,
-    "target": 3_500_000, 
+    "target": 4_500_000, 
     "syn_cache": True,
     "syn_rebuild": False,
     "tok_cache": True,
