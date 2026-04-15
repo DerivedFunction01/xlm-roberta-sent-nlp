@@ -40,7 +40,7 @@ wiki_english_seed_sentences = load_language_sentences_from_parquet(PATHS["wiki"]
 ft_english_seed_sentences = load_language_sentences_from_parquet(PATHS["finetrans"]["cache_dir"], "en")
 tatoeba_english_seed_sentences = load_language_sentences_from_parquet(PATHS["tatoeba"]["cache_dir"], "en")
 neutral_sources = build_neutral_sources(
-    english_seed_sentences=wiki_english_seed_sentences + ft_english_seed_sentences + tatoeba_english_seed_sentences,
+    english_seed_sentences=wiki_english_seed_sentences + ft_english_seed_sentences,
 )
 #%%
 print("Building synthetic dataset cache ...")
