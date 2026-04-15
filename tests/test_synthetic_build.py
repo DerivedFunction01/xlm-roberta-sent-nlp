@@ -19,7 +19,7 @@ class AccentStrippingTests(unittest.TestCase):
             "manana como esta Sao Tome",
         )
 
-    def test_random_accent_stripping_is_latin_only(self) -> None:
+    def test_random_accent_stripping_is_allowlisted_only(self) -> None:
         with patch("synthetic_build.random.random", return_value=0.0):
             self.assertEqual(
                 synthetic_build._apply_random_accent_stripping(
@@ -28,6 +28,14 @@ class AccentStrippingTests(unittest.TestCase):
                     prob=1.0,
                 ),
                 "manana como esta",
+            )
+            self.assertEqual(
+                synthetic_build._apply_random_accent_stripping(
+                    "kırmızı ışık",
+                    lang="tr",
+                    prob=1.0,
+                ),
+                "kırmızı ışık",
             )
             self.assertEqual(
                 synthetic_build._apply_random_accent_stripping(

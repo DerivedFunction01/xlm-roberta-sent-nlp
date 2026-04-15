@@ -48,6 +48,17 @@ USE_FINETRANS_AUGMENTATION = FT["use"]
 PURE_DOC_MIX = DOC_MIX["pure"]
 HOMOGENEOUS_DOC_MIX = DOC_MIX["homogeneous"]
 MIXED_DOC_MIX = DOC_MIX["mixed"]
+
+# Accent stripping is only useful as a noise model for languages where an
+# accentless variant is still a plausible user input or OCR artifact.
+SAFE_ACCENT_STRIP_LANGS = {
+    "en",
+    "es",
+    "fr",
+    "it",
+    "nl",
+    "pt",
+}
 from source_pools import (
     build_disk_sentence_pool_shards,
     chunk_list,
@@ -466,10 +477,10 @@ def _apply_sentence_casing(
 
 
 def _apply_random_accent_stripping(sentence: str, *, lang: str, prob: float) -> str:
-    """Optionally remove accents from a Latin-script sentence."""
+    """Optionally remove accents from a sentence in a safe language code."""
     if prob <= 0 or random.random() >= prob:
         return sentence
-    if LANG_TO_GROUP.get(lang) not in LATIN_GROUPS:
+    if lang not in SAFE_ACCENT_STRIP_LANGS:
         return sentence
     stripped = _strip_latin_accents(sentence)
     return stripped if stripped != sentence else sentence
