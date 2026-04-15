@@ -16,12 +16,9 @@ import code_noise
 import math_gen
 from paths import PATHS
 
-try:
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-except ImportError:
-    pa = None
-    pq = None
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 
 
 LATEX_MIN_CHARS = 8
