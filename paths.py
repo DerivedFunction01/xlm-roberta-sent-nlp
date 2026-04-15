@@ -28,6 +28,12 @@ PATHS["finetrans"] = {
     "temp_dir": os.path.join(PATHS["sentences_dir"], "_finetrans_tmp"),
     "temp_file": os.path.join(PATHS["sentences_dir"], "_finetrans_tmp", "finetranslations_sentences.parquet"),
 }
+PATHS["tatoeba"] = {
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "tatoeba"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "tatoeba", "tatoeba.meta.json"),
+    "temp_dir": os.path.join(PATHS["sentences_dir"], "_tatoeba_tmp"),
+    "source_file": os.path.join(PATHS["sentences_dir"], "sentences.csv"),
+}
 PATHS["neutral"] = {
     "cache_dir": os.path.join(PATHS["sentences_dir"], "neutral_sentences"),
 }
@@ -61,6 +67,8 @@ for path in [
     PATHS["smol"]["cache_dir"],
     PATHS["finetrans"]["temp_dir"],
     PATHS["finetrans"]["cache_dir"],
+    PATHS["tatoeba"]["temp_dir"],
+    PATHS["tatoeba"]["cache_dir"],
     PATHS["synthetic"]["cache_dir"],
     PATHS["synthetic"]["temp_dir"],
     PATHS["source_pools"]["cache_dir"],

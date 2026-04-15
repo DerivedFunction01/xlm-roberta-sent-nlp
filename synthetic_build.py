@@ -1271,6 +1271,16 @@ def build_synthetic_dataset(
                     "max_reserved": FT_MAX_RESERVED_SENTENCES,
                 }
             )
+        if os.path.isdir(PATHS["tatoeba"]["cache_dir"]):
+            source_specs.append(
+                {
+                    "name": "tatoeba",
+                    "cache_dir": PATHS["tatoeba"]["cache_dir"],
+                    "reserve_fraction": POOL["tatoeba"]["reserve"],
+                    "min_reserved": POOL["tatoeba"]["min"],
+                    "max_reserved": POOL["tatoeba"]["max"],
+                }
+            )
 
         source_pool_manifest = build_disk_sentence_pool_shards(
             source_specs,

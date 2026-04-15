@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+from convert_tatoeba_sentences import convert_tatoeba_sentences
 from finetranslations_sources import load_finetranslations_sentences
 from wiki_sources import load_wiki_sentences
 from smol_sources import load_smol_sentences
@@ -33,6 +34,9 @@ def refresh_sources() -> None:
     _ = load_finetranslations_sentences(
         max_workers=workers,
     )
+    #%%
+    print("Refreshing Tatoeba caches ...")
+    _ = convert_tatoeba_sentences()
     #%%
     _ = load_smol_sentences()
 

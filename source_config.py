@@ -414,6 +414,11 @@ POOL = {
         "min": 1,
         "max": int(FT["max_row"] * PURE_DOC_FRACTION),
     },
+    "tatoeba": {
+        "reserve": PURE_DOC_FRACTION,
+        "min": 1,
+        "max": 50_000,
+    },
 }
 
 RUN = {

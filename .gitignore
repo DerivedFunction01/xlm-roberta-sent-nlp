@@ -211,3 +211,5 @@ __marimo__/
 *.parquet
 hf_token
 sentences_cache/*
+
+*.csv
