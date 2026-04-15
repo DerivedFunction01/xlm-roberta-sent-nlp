@@ -83,6 +83,9 @@ def _sample_sentence_count(rng: random.Random, phase: str) -> int:
     elif phase == "homogeneous":
         low = int(DOC_MIX["homogeneous"]["min_sentences"])
         high = int(DOC_MIX["homogeneous"]["max_sentences"])
+    elif phase == "spliced":
+        low = int(DOC_MIX["spliced"]["min_sentences"])
+        high = int(DOC_MIX["spliced"]["max_sentences"])
     else:
         return 1
     return rng.randint(low, high)
@@ -103,7 +106,7 @@ def _simulate_single_run(
 
     pure_target = int(round(target_docs * float(DOC_MIX["pure"]["fraction"])))
     homo_target = int(round(target_docs * float(DOC_MIX["homogeneous"]["fraction"])))
-    mixed_target = max(0, target_docs - pure_target - homo_target)
+    spliced_target = int(round(target_docs * float(DOC_MIX["spliced"]["fraction"])))
 
     pure_plan = _build_language_doc_plan(
         language_stats,
@@ -119,9 +122,16 @@ def _simulate_single_run(
         docs_per_sentence_estimate=4,
         seed=seed + 202,
     )
-    mixed_written = mixed_target
+    spliced_plan = _build_language_doc_plan(
+        language_stats,
+        source_key="main",
+        target_docs=spliced_target,
+        docs_per_sentence_estimate=4,
+        seed=seed + 303,
+    )
+    mixed_target = max(0, target_docs - len(pure_plan) - len(homogeneous_plan) - len(spliced_plan))
 
-    used_docs = {"pure": 0, "homogeneous": 0, "mixed": 0}
+    used_docs = {"pure": 0, "homogeneous": 0, "spliced": 0, "mixed": 0}
     used_sentences = {"reserved": defaultdict(int), "main": defaultdict(int)}
     example_presence = defaultdict(int)
     depleted: list[dict[str, Any]] = []
@@ -162,6 +172,21 @@ def _simulate_single_run(
             )
             break
         used_docs["homogeneous"] += 1
+        example_presence[lang] += 1
+
+    for lang in spliced_plan:
+        n_sentences = _sample_sentence_count(rng, "spliced")
+        if not consume(lang, "main", n_sentences):
+            depleted.append(
+                {
+                    "phase": "spliced",
+                    "lang": lang,
+                    "needed": n_sentences,
+                    "available": int(pool_state["main"].get(lang, 0)),
+                }
+            )
+            break
+        used_docs["spliced"] += 1
         example_presence[lang] += 1
 
     # Approximate mixed docs as one main-pool sentence per chosen segment.
@@ -217,7 +242,8 @@ def _simulate_single_run(
         "planned_docs": {
             "pure": len(pure_plan),
             "homogeneous": len(homogeneous_plan),
-            "mixed": mixed_written,
+            "spliced": len(spliced_plan),
+            "mixed": mixed_target,
         },
         "used_docs": used_docs,
         "used_sentences": {
@@ -238,12 +264,14 @@ def _summarize_run(run: dict[str, Any], language_stats: dict[str, dict[str, int]
         "Planned docs: "
         f"pure={run['planned_docs']['pure']:,} "
         f"homogeneous={run['planned_docs']['homogeneous']:,} "
+        f"spliced={run['planned_docs']['spliced']:,} "
         f"mixed={run['planned_docs']['mixed']:,}"
     )
     print(
         "Used docs: "
         f"pure={run['used_docs']['pure']:,} "
         f"homogeneous={run['used_docs']['homogeneous']:,} "
+        f"spliced={run['used_docs']['spliced']:,} "
         f"mixed={run['used_docs']['mixed']:,}"
     )
 
@@ -392,6 +420,7 @@ def main() -> None:
         "Doc mix: "
         f"pure={DOC_MIX['pure']['fraction']:.2f}, "
         f"homogeneous={DOC_MIX['homogeneous']['fraction']:.2f}, "
+        f"spliced={DOC_MIX['spliced']['fraction']:.2f}, "
         f"mixed={DOC_MIX['mixed']['fraction']:.2f}"
     )
     print()
@@ -410,9 +439,11 @@ def main() -> None:
     if len(results) > 1:
         planned_pure = np.array([r["planned_docs"]["pure"] for r in results], dtype=np.float64)
         planned_homo = np.array([r["planned_docs"]["homogeneous"] for r in results], dtype=np.float64)
+        planned_spliced = np.array([r["planned_docs"]["spliced"] for r in results], dtype=np.float64)
         planned_mixed = np.array([r["planned_docs"]["mixed"] for r in results], dtype=np.float64)
         used_pure = np.array([r["used_docs"]["pure"] for r in results], dtype=np.float64)
         used_homo = np.array([r["used_docs"]["homogeneous"] for r in results], dtype=np.float64)
+        used_spliced = np.array([r["used_docs"]["spliced"] for r in results], dtype=np.float64)
         used_mixed = np.array([r["used_docs"]["mixed"] for r in results], dtype=np.float64)
 
         print("\nMonte Carlo summary:")
@@ -423,10 +454,14 @@ def main() -> None:
             f"  planned homogeneous: {planned_homo.mean():,.1f} +/- {planned_homo.std(ddof=0):,.1f}"
         )
         print(
+            f"  planned spliced: {planned_spliced.mean():,.1f} +/- {planned_spliced.std(ddof=0):,.1f}"
+        )
+        print(
             f"  planned mixed: {planned_mixed.mean():,.1f} +/- {planned_mixed.std(ddof=0):,.1f}"
         )
         print(f"  used pure: {used_pure.mean():,.1f} +/- {used_pure.std(ddof=0):,.1f}")
         print(f"  used homogeneous: {used_homo.mean():,.1f} +/- {used_homo.std(ddof=0):,.1f}")
+        print(f"  used spliced: {used_spliced.mean():,.1f} +/- {used_spliced.std(ddof=0):,.1f}")
         print(f"  used mixed: {used_mixed.mean():,.1f} +/- {used_mixed.std(ddof=0):,.1f}")
 
 
