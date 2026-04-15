@@ -24,6 +24,7 @@ import pyarrow.parquet as pq
 from tqdm.auto import tqdm
 
 from language import LANG_ISO2_TO_ISO3
+from source_config import TATOEBA
 from paths import PATHS
 
 
@@ -40,6 +41,7 @@ DEFAULT_LANGUAGE_REMAPS = {
 
 PARQUET_SCHEMA = pa.schema([("sentence", pa.string())])
 ISO3_TO_ISO2 = {v: k for k, v in LANG_ISO2_TO_ISO3.items()}
+TATOEBA_CACHE_VERSION = 2
 
 
 def parse_remap(specs: list[str]) -> dict[str, str]:
@@ -63,6 +65,11 @@ def normalize_lang(code: str, remaps: dict[str, str]) -> str | None:
     return ISO3_TO_ISO2.get(code)
 
 
+def max_tatoeba_sentences_for_lang(lang: str) -> int:
+    multiplier = float(TATOEBA["cap_multipliers"].get(lang, 1.0))
+    return int(round(float(TATOEBA["max_sentences"]) * multiplier))
+
+
 def open_writer(path: Path) -> pq.ParquetWriter:
     if path.exists():
         raise FileExistsError(f"Refusing to overwrite existing file: {path}")
@@ -81,10 +88,11 @@ def convert_tatoeba_sentences(
     input_path: Path | None = None,
     output_dir: Path | None = None,
     *,
-    remaps: dict[str, str] = {},
+    remaps: dict[str, str] | None = None,
     flush_rows: int = 25_000,
     force_rebuild: bool = False,
 ) -> dict[str, Any]:
+    remaps = remaps or {}
     combined_remaps = {**DEFAULT_LANGUAGE_REMAPS, **remaps}
     input_path = input_path or Path(PATHS["tatoeba"]["source_file"])
     output_dir = output_dir or Path(PATHS["tatoeba"]["cache_dir"])
@@ -95,7 +103,14 @@ def convert_tatoeba_sentences(
             with cache_meta.open(encoding="utf-8") as f:
                 cached_meta = json.load(f)
             parquet_files = sorted(output_dir.glob("*.parquet"))
-            if parquet_files:
+            if (
+                parquet_files
+                and cached_meta.get("cache_version") == TATOEBA_CACHE_VERSION
+                and cached_meta.get("max_sentences") == int(TATOEBA["max_sentences"])
+                and cached_meta.get("cap_multipliers") == TATOEBA["cap_multipliers"]
+                and cached_meta.get("default_remaps") == DEFAULT_LANGUAGE_REMAPS
+                and cached_meta.get("extra_remaps") == remaps
+            ):
                 return cached_meta
         except json.JSONDecodeError:
             pass
@@ -130,6 +145,11 @@ def convert_tatoeba_sentences(
                     skipped_rows += 1
                     continue
 
+                lang_cap = max_tatoeba_sentences_for_lang(lang)
+                if counts[lang] >= lang_cap:
+                    skipped_rows += 1
+                    continue
+
                 buffers[lang].append(sentence)
                 counts[lang] += 1
 
@@ -160,6 +180,9 @@ def convert_tatoeba_sentences(
     meta = {
         "input_path": str(input_path),
         "output_dir": str(output_dir),
+        "cache_version": TATOEBA_CACHE_VERSION,
+        "max_sentences": int(TATOEBA["max_sentences"]),
+        "cap_multipliers": TATOEBA["cap_multipliers"],
         "total_rows": total_rows,
         "written_rows": sum(counts.values()),
         "skipped_rows": skipped_rows,

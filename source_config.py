@@ -302,6 +302,23 @@ WIKI = {
     "length_priority_sentence_cap": 25_000,
 }
 
+TATOEBA = {
+    "max_sentences": 75_000,
+    "cap_multipliers": {
+        "en": 1.50,
+        "de": 1.25,
+        "fr": 1.25,
+        "es": 1.25,
+        "ru": 1.25,
+        "zh": 1.25,
+        "ja": 1.25,
+        "pt": 1.25,
+        "it": 1.25,
+        "ko": 1.25,
+        "ar": 1.25,
+    },
+}
+
 DOC_MIX = {
     "pure": {
         "fraction": 0.55,
