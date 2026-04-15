@@ -26,7 +26,7 @@ project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.insert(0, project_root)
 from language import ALL_LANGS, LANG_ISO2_TO_ISO3
 
-MODEL_CHECKPOINT = "DerivedFunction/polyglot-tagger-100L-4M"
+MODEL_CHECKPOINT = "DerivedFunction/lang-ner-xlmr"
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
