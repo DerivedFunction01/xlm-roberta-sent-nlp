@@ -258,13 +258,15 @@ def _add_formatting_noise(
             ("\"", "\""),
             ("“", "”"),
             ("«", "»"),
+            ("‘", "’"),
+            ("\'", "\'")
         ])
         return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, prefix=prefix, suffix=suffix)
     if pattern == "bullet":
         prefix = random.choice(["-", "•", "*", "1.", "i.", "##", "###"])
         return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, prefix=prefix)
     if pattern == "trail":
-        suffix = random.choice([":", ";", "...", "?!", " |", " | |"])
+        suffix = random.choice([":", ";", "...", "?!", " |", " | |", ","])
         return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, suffix=suffix)
     prefix, suffix = random.choice([
         ("<p>", "</p>"),
