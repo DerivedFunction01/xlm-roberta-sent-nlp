@@ -312,7 +312,6 @@ WIKI = {
         "AdriaticLatin",
         "BalticLatin",
         "CelticLatin",
-        "Scots",
         "KurdishLatin",
         "PeripheralLatin",
         "WesternLatin",
