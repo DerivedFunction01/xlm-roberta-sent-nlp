@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from language import LANG_TO_GROUP, LANGUAGE_GROUP_SCRIPTS
+from script_types import Script
 import synthetic_build
 
 
@@ -26,10 +27,10 @@ class AccentStrippingTests(unittest.TestCase):
         self.assertEqual(LANG_TO_GROUP["hi"], "Hindi")
 
     def test_language_groups_expose_script_metadata(self) -> None:
-        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Hindi"], "devanagari")
-        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["ArabicOther"], "arabic")
-        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Bengali"], "bengali")
-        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Russian"], "cyrillic")
+        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Hindi"], Script.DEVANAGARI)
+        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["ArabicOther"], Script.ARABIC)
+        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Bengali"], Script.BENGALI)
+        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Russian"], Script.CYRILLIC)
 
     def test_strip_latin_accents_removes_diacritics(self) -> None:
         self.assertEqual(

@@ -6,17 +6,14 @@ from pathlib import Path
 
 import pycountry
 
+from script_types import Script
 from source_config import LANGUAGE_BUCKETS
 
 LANGUAGE_GROUPS = {group: cfg["langs"] for group, cfg in LANGUAGE_BUCKETS.items()}
 LANGUAGE_GROUP_WEIGHTS = {group: float(cfg["weight"]) for group, cfg in LANGUAGE_BUCKETS.items()}
 LANGUAGE_GROUP_MIN_CHARS = {group: int(cfg["min_chars"]) for group, cfg in LANGUAGE_BUCKETS.items()}
-LATIN_GROUPS = {group for group, cfg in LANGUAGE_BUCKETS.items() if cfg.get("latin")}
-LANGUAGE_GROUP_SCRIPTS = {
-    group: str(cfg["script"])
-    for group, cfg in LANGUAGE_BUCKETS.items()
-    if cfg.get("script")
-}
+LATIN_GROUPS = {group for group, cfg in LANGUAGE_BUCKETS.items() if cfg.get("script") == Script.LATIN}
+LANGUAGE_GROUP_SCRIPTS = {group: cfg["script"] for group, cfg in LANGUAGE_BUCKETS.items()}
 
 LANGUAGE_ALIASES_JSON = Path(__file__).with_name("language_aliases.json")
 

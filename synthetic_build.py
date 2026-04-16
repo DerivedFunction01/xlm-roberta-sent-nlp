@@ -19,6 +19,7 @@ from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic
 from paths import PATHS
+from script_types import Script
 from source_config import DOC_MIX, FT, POOL, RUN, SMOL
 from language import (
     ALL_LANGS,
@@ -68,13 +69,13 @@ SAFE_ACCENT_STRIP_LANGS = {
     "pt",
 }
 SCRIPT_LETTER_POOLS = {
-    "latin": (string.ascii_lowercase, True),
-    "cyrillic": ("абвгдежзийклмнопрстуфхцчшщэюя", True),
-    "arabic": ("ابتثجحخدذرزسشصضطظعغفقكلمنهوي", False),
-    "devanagari": ("अआइईउऊऋएऐओऔकखगघङचछजझञटठडढणतथदधनपफबभमयरलवशषसह", False),
-    "bengali": ("অআইঈউঊঋএঐওঔকখগঘঙচছজঝঞটঠডঢণতথদধনপফবভমযরলশষসহ", False),
+    Script.LATIN: (string.ascii_lowercase, True),
+    Script.CYRILLIC: ("абвгдежзийклмнопрстуфхцчшщэюя", True),
+    Script.ARABIC: ("ابتثجحخدذرزسشصضطظعغفقكلمنهوي", False),
+    Script.DEVANAGARI: ("अआइईउऊऋएऐओऔकखगघङचछजझञटठडढणतथदधनपफबभमयरलवशषसह", False),
+    Script.BENGALI: ("অআইঈউঊঋএঐওঔকখগঘঙচছজঝঞটঠডঢণতথদধনপফবভমযরলশষসহ", False),
 }
-SCRIPT_DIGIT_POOLS = {"latin", "cyrillic", "arabic"}
+SCRIPT_DIGIT_POOLS = {Script.LATIN, Script.CYRILLIC, Script.ARABIC}
 from source_pools import (
     build_disk_sentence_pool_shards,
     chunk_list,
@@ -535,14 +536,14 @@ def _apply_random_accent_stripping(sentence: str, *, lang: str, prob: float) -> 
     return stripped if stripped != sentence else sentence
 
 
-def _group_script(group: str | None) -> str | None:
+def _group_script(group: str | None) -> Script | None:
     if not group:
         return None
     script = LANGUAGE_GROUP_SCRIPTS.get(group)
     if script:
         return script
     if group in LATIN_GROUPS:
-        return "latin"
+        return Script.LATIN
     return None
 
 
