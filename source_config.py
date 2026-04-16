@@ -331,6 +331,8 @@ DOC_MIX = {
         "accent_strip_prob": 0.05,
         # Insert a stray Latin letter inside an existing span to reduce single-letter bias.
         "random_letter_prob": 0.02,
+        # Insert a stray digit inside an existing span to model typed or OCR noise.
+        "random_digit_prob": 0.01,
         "foreign_sentence_prob": 0.0,
         "sentence_uppercase_prob": 0.02,
         "sentence_lowercase_prob": 0.03,
@@ -351,6 +353,7 @@ DOC_MIX = {
         "strip_punct_prob": 0.15,
         "accent_strip_prob": 0.02,
         "random_letter_prob": 0.01,
+        "random_digit_prob": 0.005,
         "foreign_sentence_prob": 0.85,
         "sentence_uppercase_prob": 0.01,
         "sentence_lowercase_prob": 0.02,
@@ -371,6 +374,7 @@ DOC_MIX = {
         "strip_punct_prob": 0.20,
         "accent_strip_prob": 0.02,
         "random_letter_prob": 0.02,
+        "random_digit_prob": 0.01,
         "foreign_sentence_prob": 1.0,
         "splice_strip_next_punct_prob": 1.0,
         "splice_lowercase_next_prob": 1.0,

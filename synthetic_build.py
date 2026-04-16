@@ -521,6 +521,24 @@ def _inject_random_letter_into_sentence(sentence: str, *, lang: str, prob: float
     return " ".join(parts)
 
 
+def _inject_random_digit_into_sentence(sentence: str, *, lang: str, prob: float) -> str:
+    """Insert one random digit between words in a script-aware sentence."""
+    if prob <= 0 or random.random() >= prob:
+        return sentence
+    group = LANG_TO_GROUP.get(lang)
+    if group not in LATIN_GROUPS and group not in CYRILLIC_GROUPS and group not in ARABIC_GROUPS:
+        return sentence
+
+    parts = sentence.split()
+    if len(parts) < 2:
+        return sentence
+
+    digit = random.choice(string.digits)
+    insert_at = random.randint(1, len(parts) - 1)
+    parts = parts[:insert_at] + [digit] + parts[insert_at:]
+    return " ".join(parts)
+
+
 def swap_random_tokens(tokens: list[str], labels: list[int], swap_rate: float = 0.02) -> tuple[list[str], list[int]]:
     """Randomly swap tokens between positions to simulate within-sentence code-switching."""
     n = len(tokens)
@@ -607,6 +625,7 @@ def generate_synthetic_examples_chunk(
                     splice_strip_next_punct_prob=PURE_DOC_MIX.get("splice_strip_next_punct_prob", 0.0),
                     splice_lowercase_next_prob=PURE_DOC_MIX.get("splice_lowercase_next_prob", 0.0),
                     random_letter_prob=PURE_DOC_MIX.get("random_letter_prob", 0.0),
+                    random_digit_prob=PURE_DOC_MIX.get("random_digit_prob", 0.0),
                     format_noise_prob=PURE_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=PURE_DOC_MIX.get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=PURE_DOC_MIX.get("uppercase_word_prob", 0.0),
@@ -652,6 +671,7 @@ def generate_synthetic_examples_chunk(
                     splice_strip_next_punct_prob=HOMOGENEOUS_DOC_MIX.get("splice_strip_next_punct_prob", 0.0),
                     splice_lowercase_next_prob=HOMOGENEOUS_DOC_MIX.get("splice_lowercase_next_prob", 0.0),
                     random_letter_prob=HOMOGENEOUS_DOC_MIX.get("random_letter_prob", 0.0),
+                    random_digit_prob=HOMOGENEOUS_DOC_MIX.get("random_digit_prob", 0.0),
                     format_noise_prob=HOMOGENEOUS_DOC_MIX.get("format_noise_prob", 0.0),
                     paragraph_break_prob=HOMOGENEOUS_DOC_MIX.get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=HOMOGENEOUS_DOC_MIX.get("uppercase_word_prob", 0.0),
@@ -698,6 +718,7 @@ def generate_synthetic_examples_chunk(
                     splice_strip_next_punct_prob=DOC_MIX["spliced"].get("splice_strip_next_punct_prob", 0.0),
                     splice_lowercase_next_prob=DOC_MIX["spliced"].get("splice_lowercase_next_prob", 0.0),
                     random_letter_prob=DOC_MIX["spliced"].get("random_letter_prob", 0.0),
+                    random_digit_prob=DOC_MIX["spliced"].get("random_digit_prob", 0.0),
                     format_noise_prob=DOC_MIX["spliced"].get("format_noise_prob", 0.0),
                     paragraph_break_prob=DOC_MIX["spliced"].get("paragraph_break_prob", 0.0),
                     uppercase_word_prob=DOC_MIX["spliced"].get("uppercase_word_prob", 0.0),
@@ -964,6 +985,7 @@ def create_pure_synthetic_doc(
     splice_strip_next_punct_prob: float = 0.0,
     splice_lowercase_next_prob: float = 0.0,
     random_letter_prob: float = 0.0,
+    random_digit_prob: float = 0.0,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
     uppercase_word_prob: float = 0.0,
@@ -1037,6 +1059,7 @@ def create_pure_synthetic_doc(
         )
         sent = _apply_random_accent_stripping(sent, lang=sent_lang, prob=accent_strip_prob)
         sent = _inject_random_letter_into_sentence(sent, lang=sent_lang, prob=random_letter_prob)
+        sent = _inject_random_digit_into_sentence(sent, lang=sent_lang, prob=random_digit_prob)
         original_text_parts.append(sent)
         tokens = tokenizer.tokenize(sent)
         if not tokens:
@@ -1086,6 +1109,7 @@ def build_synthetic_doc_with_retry(
     splice_strip_next_punct_prob: float = 0.0,
     splice_lowercase_next_prob: float = 0.0,
     random_letter_prob: float = 0.0,
+    random_digit_prob: float = 0.0,
     format_noise_prob: float = 0.0,
     paragraph_break_prob: float = 0.0,
     uppercase_word_prob: float = 0.0,
@@ -1128,6 +1152,7 @@ def build_synthetic_doc_with_retry(
                 splice_strip_next_punct_prob=splice_strip_next_punct_prob,
                 splice_lowercase_next_prob=splice_lowercase_next_prob,
                 random_letter_prob=random_letter_prob,
+                random_digit_prob=random_digit_prob,
                 format_noise_prob=format_noise_prob,
                 paragraph_break_prob=paragraph_break_prob,
                 uppercase_word_prob=uppercase_word_prob,
