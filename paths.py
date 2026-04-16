@@ -17,6 +17,10 @@ PATHS["wiki"] = {
         PATHS["sentences_dir"], "_wiki_tmp", "segmentation_debug"
     ),
 }
+PATHS["wiki_lexicon"] = {
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "wiki_latin_lexicon"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "wiki_latin_lexicon", "wiki_latin_lexicon.meta.json"),
+}
 PATHS["smol"] = {
     "cache_dir": os.path.join(PATHS["sentences_dir"], "smol_sentences"),
     "cache_meta": os.path.join(PATHS["sentences_dir"], "smol_sentences", "smol_sentences.meta.json"),
@@ -64,6 +68,7 @@ for path in [
     PATHS["sentences_dir"],
     PATHS["wiki"]["temp_dir"],
     PATHS["wiki"]["seg_debug_dir"],
+    PATHS["wiki_lexicon"]["cache_dir"],
     PATHS["smol"]["cache_dir"],
     PATHS["finetrans"]["temp_dir"],
     PATHS["finetrans"]["cache_dir"],

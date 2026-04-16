@@ -10,7 +10,7 @@ from pathlib import Path
 from language import ENGLISH_STOP_WORDS, LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS, canonical_lang
 import nltk as nltk_module
 from nltk.corpus import words as nltk_words
-from nltk.corpus import stopwords as nltk_stopwords
+from wiki_lexicon_sources import load_wiki_major_latin_lexicon
 
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 # Split on standard ASCII sentence punctuation plus CJK sentence punctuation.
@@ -78,11 +78,11 @@ LATIN_MAJOR_LEAK_CHECK_GROUPS = {
     "SoutheastAsianLatin",
 }
 LATIN_MAJOR_LEAK_LANGS = {
-    "de": "german",
-    "es": "spanish",
-    "fr": "french",
-    "it": "italian",
-    "pt": "portuguese",
+    "de": "de",
+    "es": "es",
+    "fr": "fr",
+    "it": "it",
+    "pt": "pt",
 }
 NLTK_ENGLISH_SECONDARY_LIMIT: int | None = None
 POOL_TERMINAL_PUNCT_CHOICES = (".", ":", ";", "!", "?")
@@ -159,13 +159,6 @@ def _ensure_nltk_words_corpus() -> None:
         nltk_module.download("words", quiet=True, raise_on_error=True)
 
 
-def _ensure_nltk_stopwords_corpus() -> None:
-    try:
-        nltk_module.data.find("corpora/stopwords")
-    except LookupError:
-        nltk_module.download("stopwords", quiet=True, raise_on_error=True)
-
-
 ENGLISH_STOP_WORD_SET = {word.lower() for word in ENGLISH_STOP_WORDS}
 
 
@@ -233,26 +226,6 @@ def _is_broad_english_word(token: str) -> bool:
     return False
 
 
-@lru_cache(maxsize=262_144)
-def _nltk_stopword_set(lang: str) -> set[str]:
-    try:
-        return {
-            word.lower().strip()
-            for word in nltk_stopwords.words(lang)
-            if isinstance(word, str) and word.strip()
-        }
-    except LookupError:
-        _ensure_nltk_stopwords_corpus()
-        try:
-            return {
-                word.lower().strip()
-                for word in nltk_stopwords.words(lang)
-                if isinstance(word, str) and word.strip()
-            }
-        except LookupError:
-            return set()
-
-
 def _is_latin_letter(ch: str) -> bool:
     return unicodedata.category(ch).startswith("L") and "LATIN" in unicodedata.name(ch, "")
 
@@ -268,10 +241,10 @@ def _major_latin_language_hits(sentence: str, leak_lang: str) -> int:
     words = [word.lower() for word in WIKI_WORDS.findall(sentence)]
     if not words:
         return 0
-    stopword_set = _nltk_stopword_set(leak_lang)
-    if not stopword_set:
+    lexicon_set = load_wiki_major_latin_lexicon(leak_lang)
+    if not lexicon_set:
         return 0
-    return sum(word in stopword_set for word in words)
+    return sum(word in lexicon_set for word in words)
 
 
 def _non_punct_char_count(s: str) -> int:

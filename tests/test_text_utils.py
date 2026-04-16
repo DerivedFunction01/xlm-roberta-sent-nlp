@@ -28,31 +28,23 @@ class DummyWordsCorpus:
         return self._words
 
 
-class DummyStopwordsCorpus:
-    def __init__(self, words_by_lang: dict[str, list[str]]) -> None:
-        self._words_by_lang = words_by_lang
-
-    def words(self, lang: str) -> list[str]:
-        return self._words_by_lang.get(lang, [])
-
-
 class EnglishLeakFilterTests(unittest.TestCase):
     def setUp(self) -> None:
         self._orig_nltk_words = text_utils.nltk_words
-        self._orig_nltk_stopwords = text_utils.nltk_stopwords
+        self._orig_lexicon_loader = text_utils.load_wiki_major_latin_lexicon
         self._lang_to_group = {
             lang: group
             for group, langs in LANGUAGE_GROUPS.items()
             for lang in langs
         }
         text_utils._nltk_english_secondary_word_set.cache_clear()
-        text_utils._nltk_stopword_set.cache_clear()
+        text_utils.load_wiki_major_latin_lexicon.cache_clear()
 
     def tearDown(self) -> None:
         text_utils.nltk_words = self._orig_nltk_words
-        text_utils.nltk_stopwords = self._orig_nltk_stopwords
+        text_utils.load_wiki_major_latin_lexicon = self._orig_lexicon_loader
         text_utils._nltk_english_secondary_word_set.cache_clear()
-        text_utils._nltk_stopword_set.cache_clear()
+        text_utils.load_wiki_major_latin_lexicon.cache_clear()
 
     def test_secondary_word_set_keeps_late_corpus_entries(self) -> None:
         corpus_words = [_alpha_token(i) for i in range(50_001)]
@@ -119,18 +111,21 @@ class EnglishLeakFilterTests(unittest.TestCase):
         self.assertEqual(text_utils.clean_sentence(sentence, "xh", self._lang_to_group), "")
 
     def test_clean_sentence_drops_major_latin_leakage_for_low_resource_latin_lang(self) -> None:
-        text_utils.nltk_stopwords = DummyStopwordsCorpus(
-            {
-                "spanish": ["de", "la", "el", "y", "en"],
-                "french": ["de", "la", "le", "et", "un"],
-                "italian": ["di", "la", "il", "e", "un"],
-                "portuguese": ["de", "a", "o", "e", "um"],
-                "german": ["der", "die", "und", "das", "ein"],
-            }
-        )
-        sentence = "de la el y en casa bonita"
+        original_loader = text_utils.load_wiki_major_latin_lexicon
+        lexicons = {
+            "es": frozenset({"de", "la", "el", "y", "en", "casa", "bonita"}),
+            "fr": frozenset({"de", "la", "le", "et", "un"}),
+            "it": frozenset({"di", "la", "il", "e", "un"}),
+            "pt": frozenset({"de", "a", "o", "e", "um"}),
+            "de": frozenset({"der", "die", "und", "das", "ein"}),
+        }
 
-        self.assertEqual(text_utils.clean_sentence(sentence, "xh", self._lang_to_group), "")
+        text_utils.load_wiki_major_latin_lexicon = lambda lang, cache_dir=None: lexicons.get(lang, frozenset())  # type: ignore[assignment]
+        sentence = "de la el y en casa bonita"
+        try:
+            self.assertEqual(text_utils.clean_sentence(sentence, "xh", self._lang_to_group), "")
+        finally:
+            text_utils.load_wiki_major_latin_lexicon = original_loader
 
     def test_yiddish_uses_hebrew_pysbd_fallback(self) -> None:
         self.assertEqual(text_utils.PYSBD_FALLBACKS["yi"], "he")
