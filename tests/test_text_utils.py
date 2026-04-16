@@ -4,7 +4,7 @@ import string
 import unittest
 
 import text_utils
-from language import LANGUAGE_GROUPS
+from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS
 
 
 def _alpha_token(index: int) -> str:
@@ -103,6 +103,10 @@ class EnglishLeakFilterTests(unittest.TestCase):
 
     def test_yiddish_uses_hebrew_pysbd_fallback(self) -> None:
         self.assertEqual(text_utils.PYSBD_FALLBACKS["yi"], "he")
+
+    def test_every_language_alias_has_a_group(self) -> None:
+        missing = [lang for lang in ALL_LANGS if lang not in LANG_TO_GROUP]
+        self.assertEqual(missing, [], msg=f"Missing language groups for: {missing}")
 
 
 class TokenCountTests(unittest.TestCase):
