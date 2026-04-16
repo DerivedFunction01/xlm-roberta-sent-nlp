@@ -72,6 +72,7 @@ SCRIPT_LETTER_POOLS = {
     Script.LATIN: (string.ascii_lowercase, True),
     Script.CYRILLIC: ("абвгдежзийклмнопрстуфхцчшщэюя", True),
     Script.ARABIC: ("ابتثجحخدذرزسشصضطظعغفقكلمنهوي", False),
+    Script.HEBREW: ("אבגדהוזחטיכלמנסעפצקרשת", False),
     Script.DEVANAGARI: ("अआइईउऊऋएऐओऔकखगघङचछजझञटठडढणतथदधनपफबभमयरलवशषसह", False),
     Script.BENGALI: ("অআইঈউঊঋএঐওঔকখগঘঙচছজঝঞটঠডঢণতথদধনপফবভমযরলশষসহ", False),
 }

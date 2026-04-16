@@ -7,6 +7,7 @@ class Script(StrEnum):
     LATIN = "latin"
     CYRILLIC = "cyrillic"
     ARABIC = "arabic"
+    HEBREW = "hebrew"
     DEVANAGARI = "devanagari"
     BENGALI = "bengali"
     JAPANESE = "japanese"

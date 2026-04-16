@@ -241,10 +241,22 @@ LANGUAGE_BUCKETS = {
     # Split the remaining non-Latin scripts into two buckets to keep
     # Greco-Semitic/Caucasus-style scripts separate from Brahmic/Tibetan ones.
     "OtherScriptsWest": {
-        "langs": ["el", "he", "hy", "ka", "am", "ti", "dv", "hbo", "grc"],
+        "langs": ["el", "hy", "ka", "am", "ti", "dv", "grc"],
         "weight": 1.0,
         "min_chars": 2_000,
         "script": Script.MIXED_WEST,
+    },
+    "Hebrew": {
+        "langs": ["he"],
+        "weight": 0.95,
+        "min_chars": 2_000,
+        "script": Script.HEBREW,
+    },
+    "Yiddish": {
+        "langs": ["yi"],
+        "weight": 0.85,
+        "min_chars": 2_000,
+        "script": Script.HEBREW,
     },
     "OtherScriptsEast": {
         "langs": ["km", "lo", "my", "th", "si", "bo"],

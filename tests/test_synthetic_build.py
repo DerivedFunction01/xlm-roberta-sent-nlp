@@ -30,7 +30,12 @@ class AccentStrippingTests(unittest.TestCase):
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Hindi"], Script.DEVANAGARI)
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["ArabicOther"], Script.ARABIC)
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Bengali"], Script.BENGALI)
+        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Hebrew"], Script.HEBREW)
+        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Yiddish"], Script.HEBREW)
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Russian"], Script.CYRILLIC)
+
+    def test_yiddish_is_its_own_bucket(self) -> None:
+        self.assertEqual(LANG_TO_GROUP["yi"], "Yiddish")
 
     def test_strip_latin_accents_removes_diacritics(self) -> None:
         self.assertEqual(
@@ -296,6 +301,49 @@ class AccentStrippingTests(unittest.TestCase):
 
         self.assertEqual(example["original_text"], "مرحبا د بالعالم")
         self.assertEqual(example["tokens"], ["مرحبا", "د", "بالعالم"])
+        self.assertEqual(example["ner_tags"], [1, 2, 2])
+
+    def test_pure_doc_can_inject_hebrew_letter_inside_span(self) -> None:
+        tokenizer = DummyTokenizer()
+        primary_pool = {"he": deque(["שלום עולם"])}
+        label2id = {"B-HE": 1, "I-HE": 2}
+
+        def _choice(seq):
+            if isinstance(seq, str):
+                return "ב"
+            return seq[0]
+
+        with patch("synthetic_build.random.random", return_value=0.0), patch(
+            "synthetic_build.random.choice",
+            side_effect=_choice,
+        ), patch("synthetic_build.random.randint", side_effect=[1, 1]):
+            example = synthetic_build.create_pure_synthetic_doc(
+                tokenizer=tokenizer,
+                primary_pool=primary_pool,
+                lang="he",
+                label2id=label2id,
+                min_sentences=1,
+                max_sentences=1,
+                strip_punct_prob=0.0,
+                accent_strip_prob=0.0,
+                foreign_sentence_prob=0.0,
+                sentence_uppercase_prob=0.0,
+                sentence_lowercase_prob=0.0,
+                splice_strip_next_punct_prob=0.0,
+                splice_lowercase_next_prob=0.0,
+                random_letter_prob=1.0,
+                format_noise_prob=0.0,
+                paragraph_break_prob=0.0,
+                uppercase_word_prob=0.0,
+                lowercase_word_prob=0.0,
+                titlecase_word_prob=0.0,
+                merge_word_prob=0.0,
+                split_word_prob=0.0,
+                typo_char_prob=0.0,
+            )
+
+        self.assertEqual(example["original_text"], "שלום ב עולם")
+        self.assertEqual(example["tokens"], ["שלום", "ב", "עולם"])
         self.assertEqual(example["ner_tags"], [1, 2, 2])
 
     def test_pure_doc_can_inject_devanagari_letter_inside_span(self) -> None:
