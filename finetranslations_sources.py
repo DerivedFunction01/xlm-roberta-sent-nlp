@@ -51,6 +51,7 @@ FINETRANS_WORKER_COLUMNS = [
 FINETRANS_FINAL_COLUMNS = ["lang", "sentence"]
 LATIN_TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 WIKIPEDIA_URL_RE = re.compile(r"wikipedia(?:\.org)?", flags=re.IGNORECASE)
+FT_CAP_MULTIPLIERS = dict(FT.get("cap_multipliers", {}))
 
 disable_progress_bar()
 
@@ -520,6 +521,7 @@ def _finetrans_cache_meta(
         "seed": seed,
         "max_sentences_per_lang": max_sentences_per_lang,
         "overflow_sentences_per_lang": overflow_sentences_per_lang,
+        "cap_multipliers": FT_CAP_MULTIPLIERS,
         "max_row_index": max_row_index,
         "max_miss_streak": max_miss_streak,
         "english_accept_every": english_accept_every,
@@ -644,6 +646,11 @@ def _load_config_checkpoint_meta(config_meta_path: str, expected_meta: dict[str,
         return None
     if meta and meta.get("status") == "checkpoint" and meta.get("dataset") == expected_meta["dataset"]:
         if meta.get("config") == expected_meta.get("config") and meta.get("lang") == expected_meta.get("lang"):
+            for key, value in expected_meta.items():
+                if key in {"dataset", "config", "lang"}:
+                    continue
+                if meta.get(key) != value:
+                    return None
             return meta
     return None
 
@@ -658,6 +665,11 @@ def _load_config_complete_meta(config_meta_path: str, expected_meta: dict[str, A
         return None
     if meta and meta.get("status") == "complete" and meta.get("dataset") == expected_meta["dataset"]:
         if meta.get("config") == expected_meta.get("config") and meta.get("lang") == expected_meta.get("lang"):
+            for key, value in expected_meta.items():
+                if key in {"dataset", "config", "lang"}:
+                    continue
+                if meta.get(key) != value:
+                    return None
             return meta
     return None
 
@@ -1046,6 +1058,15 @@ def load_finetranslations_sentences(
     futures = {}
     with ProcessPoolExecutor(max_workers=max_workers) as pool:
         for config_idx, (config, lang) in enumerate(configs_to_process):
+            lang_max_sentences_per_lang = max(1, int(round(max_sentences_per_lang * FT_CAP_MULTIPLIERS.get(lang, 1.0))))
+            lang_overflow_sentences_per_lang = max(1, int(round(overflow_sentences_per_lang * FT_CAP_MULTIPLIERS.get(lang, 1.0))))
+            config_expected_meta = {
+                **expected_meta,
+                "config": config,
+                "lang": lang,
+                "max_sentences_per_lang": lang_max_sentences_per_lang,
+                "overflow_sentences_per_lang": lang_overflow_sentences_per_lang,
+            }
             futures[pool.submit(
                 _process_finetrans_config,
                 config_idx=config_idx,
@@ -1056,10 +1077,10 @@ def load_finetranslations_sentences(
                 seed=seed,
                 max_row_index=max_row_index,
                 max_miss_streak=max_miss_streak,
-                overflow_sentences_per_lang=overflow_sentences_per_lang,
+                overflow_sentences_per_lang=lang_overflow_sentences_per_lang,
                 english_accept_every=english_accept_every,
                 include_translated_english=include_translated_english,
-                expected_meta=expected_meta,
+                expected_meta=config_expected_meta,
                 force_rebuild=force_rebuild,
             )] = (config_idx, config, lang)
 
@@ -1145,7 +1166,8 @@ def load_finetranslations_sentences(
     total_removed = 0
     rng = random.Random(seed)
     for lang, records in sorted(records_by_lang.items()):
-        kept_records = _select_bucketed_records(records, max_sentences_per_lang)
+        lang_cap = max(1, int(round(max_sentences_per_lang * FT_CAP_MULTIPLIERS.get(lang, 1.0))))
+        kept_records = _select_bucketed_records(records, lang_cap)
         rng.shuffle(kept_records)
         selected_records[lang] = kept_records
         raw_sentences = [record["sentence"] for record in kept_records]
