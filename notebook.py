@@ -7,6 +7,7 @@
 # --- Environment Setup ---
 # pip install evaluate pysbd faker seqeval
 # %%
+import json
 import random
 import multiprocessing as mp
 import torch
@@ -16,9 +17,17 @@ from transformers import (
 )
 
 from pathlib import Path
+from datasets import load_from_disk
 
 SEED = 42
 MODEL_CHECKPOINT = "xlm-roberta-base"
+BASE_DIR = Path(__file__).resolve().parent
+LANGUAGE_ALIASES_PATH = BASE_DIR / "language_aliases.json"
+TOKENIZED_CACHE_DIR = BASE_DIR / "sentences_cache" / "tokenized_dataset"
+TOKENIZED_CACHE_META = TOKENIZED_CACHE_DIR / "tokenized_dataset.meta.json"
+MULTILABEL_CACHE_DIR = BASE_DIR / "sentences_cache" / "multilabel_dataset"
+MULTILABEL_CACHE_META = MULTILABEL_CACHE_DIR / "multilabel_dataset.meta.json"
+
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
@@ -26,10 +35,59 @@ torch.manual_seed(SEED)
 def get_workers(split: int = 1):
     return mp.cpu_count() // split
 
+
+def load_all_langs() -> list[str]:
+    with LANGUAGE_ALIASES_PATH.open(encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Expected a JSON object in {LANGUAGE_ALIASES_PATH}")
+    return list(data.keys())
+
+
+def load_dataset_cache(cache_dir: Path):
+    if not cache_dir.exists():
+        return None
+    return load_from_disk(str(cache_dir))
+
+
+def load_tokenized_dataset_cache(
+    *,
+    seed: int,
+    model_checkpoint: str,
+    max_length: int = 512,
+):
+    if not TOKENIZED_CACHE_DIR.exists() or not TOKENIZED_CACHE_META.exists():
+        return None
+    with TOKENIZED_CACHE_META.open(encoding="utf-8") as f:
+        meta = json.load(f)
+    if not isinstance(meta, dict):
+        return None
+    expected_meta = {
+        "model_checkpoint": model_checkpoint,
+        "max_length": max_length,
+        "seed": seed,
+    }
+    for key, expected_value in expected_meta.items():
+        if meta.get(key) != expected_value:
+            return None
+    return load_dataset_cache(TOKENIZED_CACHE_DIR)
+
+
+def load_multilabel_dataset_cache():
+    if not MULTILABEL_CACHE_DIR.exists() or not MULTILABEL_CACHE_META.exists():
+        return None
+    with MULTILABEL_CACHE_META.open(encoding="utf-8") as f:
+        meta = json.load(f)
+    if not isinstance(meta, dict):
+        return None
+    if meta.get("all_langs") != load_all_langs():
+        return None
+    return load_dataset_cache(MULTILABEL_CACHE_DIR)
+
 from huggingface_hub import login
 
-if Path("hf_token").exists():
-    with open("hf_token") as f:
+if (BASE_DIR / "hf_token").exists():
+    with (BASE_DIR / "hf_token").open() as f:
         token = f.read().strip()
     login(token=token)
     print("Logged in to Hugging Face Hub")
@@ -37,13 +95,8 @@ if Path("hf_token").exists():
 # --- Tokenizer ---
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 # %%
-# --- Project Imports ---
-from language import ALL_LANGS
-from paths import PATHS
-from multilabel_converter import load_tokenized_cache
-from tokenization_cache import load_tokenized_dataset_cache
-
-_ALL_LANGS = ALL_LANGS
+# --- Language List ---
+_ALL_LANGS = load_all_langs()
 # %%
 # Build BIO label map  (O=0, B-XX=odd, I-XX=even starting at 2)
 label2id = {"O": 0}
@@ -91,7 +144,7 @@ print(f"Labels: {labels}")
 # --- Tokenized Dataset Load (MultiLabel)
 multilabel_train_dataset = None
 multilabel_eval_dataset = None
-cache_multilabel = load_tokenized_cache(Path(PATHS["multilabel_dataset"]["cache_dir"]))
+cache_multilabel = load_multilabel_dataset_cache()
 if cache_multilabel is not None:
     multilabel_train_dataset = cache_multilabel["train"]
     multilabel_eval_dataset = cache_multilabel["eval"]
