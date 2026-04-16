@@ -5,7 +5,7 @@
 
 # %%
 # --- Environment Setup ---
-# pip install evaluate pysbd faker seqeval
+# pip install evaluate seqeval --quiet
 # %%
 import json
 import random
