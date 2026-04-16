@@ -165,6 +165,22 @@ class EnglishLeakFilterTests(unittest.TestCase):
             ["This sentence has emojis, symbols, and more than enough words to pass."],
         )
 
+    def test_clean_sentence_keeps_ascii_and_currency_symbols(self) -> None:
+        sentence = "Profit was $5 + tax = €7 and ₪20, with more than enough words to pass."
+
+        self.assertEqual(
+            text_utils.clean_sentence(sentence, "en", self._lang_to_group),
+            "Profit was $5 + tax = €7 and ₪20, with more than enough words to pass.",
+        )
+
+    def test_post_clean_sentences_keeps_ascii_and_currency_symbols(self) -> None:
+        sentence = "Profit was $5 + tax and €7 and ₪20, with more than enough words to pass."
+
+        self.assertEqual(
+            text_utils.post_clean_sentences([sentence], "en", self._lang_to_group),
+            ["Profit was $5 + tax and €7 and ₪20, with more than enough words to pass."],
+        )
+
     def test_clean_sentence_can_drop_major_latin_leakage_when_enabled(self) -> None:
         original_loader = text_utils.load_wiki_major_latin_lexicon
         lexicons = {

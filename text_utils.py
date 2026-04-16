@@ -208,6 +208,35 @@ NON_TEXT_SYMBOLS = {
     "\ufe0e",  # variation selector-15
     "\ufe0f",  # variation selector-16
 }
+KEEP_CURRENCY_SYMBOLS = {
+    "$",
+    "¢",
+    "£",
+    "¤",
+    "¥",
+    "֏",
+    "৳",
+    "฿",
+    "₡",
+    "₦",
+    "₩",
+    "₪",
+    "₫",
+    "₭",
+    "₮",
+    "₱",
+    "₲",
+    "₴",
+    "₵",
+    "₸",
+    "₺",
+    "₽",
+    "₹",
+    "₿",
+    "€",
+    "₼",
+    "₾",
+}
 
 PYSBD_SUPPORTED = {
     "en", "hi", "mr", "bg", "es", "ru", "ar", "am", "hy", "fa",
@@ -590,7 +619,15 @@ def _strip_leading_list_starters(sentence: str) -> str:
 def _strip_non_text_symbols(sentence: str) -> str:
     stripped: list[str] = []
     for ch in sentence:
-        if unicodedata.category(ch).startswith("S") or ch in NON_TEXT_SYMBOLS:
+        if ch in NON_TEXT_SYMBOLS:
+            continue
+        if ch in KEEP_CURRENCY_SYMBOLS:
+            stripped.append(ch)
+            continue
+        if ord(ch) < 128 and unicodedata.category(ch).startswith("S"):
+            stripped.append(ch)
+            continue
+        if unicodedata.category(ch).startswith("S"):
             continue
         stripped.append(ch)
     return "".join(stripped)
