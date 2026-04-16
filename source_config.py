@@ -88,13 +88,19 @@ LANGUAGE_BUCKETS = {
     },
     # ind ~1.1%, vie ~1.05% of CC
     "SoutheastAsianLatin": {
-        "langs": ["vi", "id", "ms", "sq", "la"],
+        "langs": ["vi", "id", "ms", "tl"],
         "weight": 1.55,
         "min_chars": 2_000,
         "script": Script.LATIN,
     },
     "WesternLatin": {
-        "langs": ["ca", "gl", "oc"],
+        "langs": [
+            "ca",
+            "gl",
+            "oc",
+            "eu",
+            "la",
+        ],
         "weight": 1.2,
         "min_chars": 1_500,
         "script": Script.LATIN,
@@ -106,7 +112,13 @@ LANGUAGE_BUCKETS = {
         "script": Script.LATIN,
     },
     "AdriaticLatin": {
-        "langs": ["bs", "hr", "sl", "sk"],
+        "langs": [
+            "bs",
+            "hr",
+            "sl",
+            "sk",
+            "sq",
+        ],
         "weight": 1.4,
         "min_chars": 1_500,
         "script": Script.LATIN,
@@ -227,7 +239,7 @@ LANGUAGE_BUCKETS = {
         "script": Script.ARABIC,
     },
     "AfricanLatin": {
-        "langs": ["sw", "tl", "eu", "yo", "zu", "ny", "xh"],
+        "langs": ["sw", "yo", "zu", "ny", "xh"],
         "weight": 1.0,
         "min_chars": 1_500,
         "script": Script.LATIN,

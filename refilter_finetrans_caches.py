@@ -39,15 +39,16 @@ def main() -> None:
                     path=os.path.join(PATHS["finetrans"]["cache_dir"], f"{lang}.parquet"),
                     lang_to_group=LANG_TO_GROUP,
                     use_nltk_secondary=LANG_TO_GROUP.get(lang) not in LATIN_GROUPS,
+                    use_major_latin_leak=True,
                 ),
             )
-        updated_counts = refilter_cached_finetranslations_sentences([args.lang])
+        updated_counts = refilter_cached_finetranslations_sentences([args.lang], use_major_latin_leak=True)
         total_langs = len(updated_counts)
         total_sentences = sum(updated_counts.values())
         print(f"Refiltered {total_langs} FineTranslations cache ({total_sentences:,} sentences kept).")
         return
 
-    updated_counts = refilter_cached_finetranslations_sentences()
+    updated_counts = refilter_cached_finetranslations_sentences(use_major_latin_leak=True)
     total_langs = len(updated_counts)
     total_sentences = sum(updated_counts.values())
     print(f"Refiltered {total_langs} FineTranslations caches ({total_sentences:,} sentences kept).")

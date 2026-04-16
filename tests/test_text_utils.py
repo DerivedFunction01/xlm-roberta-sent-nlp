@@ -110,7 +110,7 @@ class EnglishLeakFilterTests(unittest.TestCase):
 
         self.assertEqual(text_utils.clean_sentence(sentence, "xh", self._lang_to_group), "")
 
-    def test_clean_sentence_drops_major_latin_leakage_for_low_resource_latin_lang(self) -> None:
+    def test_clean_sentence_can_drop_major_latin_leakage_when_enabled(self) -> None:
         original_loader = text_utils.load_wiki_major_latin_lexicon
         lexicons = {
             "es": frozenset({"de", "la", "el", "y", "en", "casa", "bonita"}),
@@ -123,7 +123,10 @@ class EnglishLeakFilterTests(unittest.TestCase):
         text_utils.load_wiki_major_latin_lexicon = lambda lang, cache_dir=None: lexicons.get(lang, frozenset())  # type: ignore[assignment]
         sentence = "de la el y en casa bonita"
         try:
-            self.assertEqual(text_utils.clean_sentence(sentence, "xh", self._lang_to_group), "")
+            self.assertEqual(
+                text_utils.clean_sentence(sentence, "xh", self._lang_to_group, use_major_latin_leak=True),
+                "",
+            )
         finally:
             text_utils.load_wiki_major_latin_lexicon = original_loader
 

@@ -26,6 +26,7 @@ from text_utils import (
     SENT_SPLIT,
     _get_segmenter,
     _looks_like_english_text,
+    _looks_like_major_latin_leak,
     post_clean_sentences,
     sanitize_paragraph_for_pysbd,
 )
@@ -253,6 +254,7 @@ def _sentence_records_from_row(
     lang: str,
     lang_to_group: dict[str, str],
     translated: bool = False,
+    use_major_latin_leak: bool = True,
 ) -> list[dict[str, Any]]:
     if translated:
         chunks = _row_chunks(row, "translated_chunks", "translated_text")
@@ -266,7 +268,12 @@ def _sentence_records_from_row(
         raw_sentences = []
         for chunk in chunks:
             raw_sentences.extend(_segment_text(chunk, lang))
-        cleaned_sentences = post_clean_sentences(raw_sentences, lang, lang_to_group)
+        cleaned_sentences = post_clean_sentences(
+            raw_sentences,
+            lang,
+            lang_to_group,
+            use_major_latin_leak=use_major_latin_leak,
+        )
     elif lang_to_group.get(lang) in LATIN_GROUPS:
         cleaned_sentences = post_clean_sentences(
             _latin_source_lines(
@@ -276,12 +283,18 @@ def _sentence_records_from_row(
             ),
             lang,
             lang_to_group,
+            use_major_latin_leak=use_major_latin_leak,
         )
     else:
         raw_sentences = []
         for chunk in chunks:
             raw_sentences.extend(_segment_text(chunk, lang))
-        cleaned_sentences = post_clean_sentences(raw_sentences, lang, lang_to_group)
+        cleaned_sentences = post_clean_sentences(
+            raw_sentences,
+            lang,
+            lang_to_group,
+            use_major_latin_leak=use_major_latin_leak,
+        )
 
     record_sentences: list[dict[str, Any]] = []
     for sentence in cleaned_sentences:
@@ -470,6 +483,7 @@ def refilter_cached_finetranslations_sentences(
     *,
     lang_to_group: dict[str, str] = LANG_TO_GROUP,
     sentences_dir: str = PATHS["finetrans"]["cache_dir"],
+    use_major_latin_leak: bool = True,
 ) -> dict[str, int]:
     def _should_skip(lang: str, lang_to_group: dict[str, str]) -> bool:
         return lang == "en" or lang not in lang_to_group
@@ -483,6 +497,11 @@ def refilter_cached_finetranslations_sentences(
                 lang,
                 lang_to_group,
                 use_nltk_secondary=lang_to_group.get(lang) not in LATIN_GROUPS,
+            )
+            and not (
+                use_major_latin_leak
+                and lang_to_group.get(lang) in LATIN_GROUPS
+                and _looks_like_major_latin_leak(sentence, lang, lang_to_group)
             )
         ]
 

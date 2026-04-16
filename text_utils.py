@@ -453,6 +453,7 @@ def _sentence_cleanup_reason(
     lang_to_group: dict[str, str],
     *,
     use_nltk_secondary: bool = True,
+    use_major_latin_leak: bool = False,
 ) -> str | None:
     lang = canonical_lang(lang)
     if lang == "en":
@@ -461,7 +462,7 @@ def _sentence_cleanup_reason(
         return "mixed_script"
     if _looks_like_english_text(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary):
         return "english_leak"
-    if _looks_like_major_latin_leak(sentence, lang, lang_to_group):
+    if use_major_latin_leak and _looks_like_major_latin_leak(sentence, lang, lang_to_group):
         return "major_latin_leak"
     return None
 
@@ -482,6 +483,7 @@ def clean_sentence(
     lang_to_group: dict[str, str],
     *,
     use_nltk_secondary: bool = True,
+    use_major_latin_leak: bool = False,
 ) -> str:
     lang = canonical_lang(lang)
     if "\\" in sentence:
@@ -489,7 +491,13 @@ def clean_sentence(
     sentence = HTML_TAG_RE.sub(" ", sentence)
     sentence = _strip_bracket_notes(sentence)
     sentence = _collapse_repeated_punct(sentence)
-    if _sentence_cleanup_reason(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary):
+    if _sentence_cleanup_reason(
+        sentence,
+        lang,
+        lang_to_group,
+        use_nltk_secondary=use_nltk_secondary,
+        use_major_latin_leak=use_major_latin_leak,
+    ):
         return ""
     if _strip_ascii_for_lang(lang, lang_to_group):
         sentence = WIKI_ASCII_WORDS.sub("", sentence)
@@ -590,6 +598,7 @@ def post_clean_sentences(
     default_bounds: tuple[int, int] = DEFAULT_BOUNDS,
     *,
     use_nltk_secondary: bool = True,
+    use_major_latin_leak: bool = False,
 ) -> list[str]:
     lang = canonical_lang(lang)
     cleaned: list[str] = []
@@ -599,7 +608,13 @@ def post_clean_sentences(
             continue
         if _has_blocked_artifact(sentence):
             continue
-        sentence = clean_sentence(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary)
+        sentence = clean_sentence(
+            sentence,
+            lang,
+            lang_to_group,
+            use_nltk_secondary=use_nltk_secondary,
+            use_major_latin_leak=use_major_latin_leak,
+        )
         sentence = _strip_leading_punct(sentence)
         sentence = _strip_leading_orphan_letter(sentence)
         sentence = _collapse_repeated_punct(sentence)

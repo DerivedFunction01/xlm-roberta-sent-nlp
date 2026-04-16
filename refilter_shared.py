@@ -73,6 +73,7 @@ def collect_rejected_english_sentences_from_parquet(
     path: str,
     lang_to_group: dict[str, str],
     use_nltk_secondary: bool,
+    use_major_latin_leak: bool = False,
 ) -> list[dict[str, Any]]:
     lang = canonical_lang(lang)
     if lang == "en" or not os.path.exists(path):
@@ -87,6 +88,7 @@ def collect_rejected_english_sentences_from_parquet(
             lang,
             lang_to_group,
             use_nltk_secondary=use_nltk_secondary,
+            use_major_latin_leak=use_major_latin_leak,
         )
         if reason:
             rejected.append(
