@@ -59,19 +59,6 @@ def tokenize_and_align(
     mutated_tokens = example["tokens"]
     reconstructed_text = tokenizer.convert_tokens_to_string(mutated_tokens)
     
-    # Tokenize the reconstructed text (no is_split_into_words)
-    # This gives us the same token IDs as the mutated_tokens
-    encoding_no_special = tokenizer(
-        reconstructed_text,
-        truncation=True,
-        max_length=max_length,
-        padding=False,
-        add_special_tokens=False,
-    )
-    
-    # The token IDs should match the mutated tokens exactly
-    # (can verify: tokenizer.convert_tokens_to_ids(mutated_tokens) == encoding_no_special["input_ids"])
-    
     # Now tokenize WITH special tokens for the model input
     encoding = tokenizer(
         reconstructed_text,
