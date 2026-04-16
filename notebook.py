@@ -30,8 +30,10 @@ def get_workers(split: int = 1):
 _ALL_LANGS = []
 with open("all_langs.json", encoding="utf-8") as f:
     data = json.load(f)
-    # read the keys only
-    _ALL_LANGS = list(data.keys())
+    if isinstance(data, dict):
+        _ALL_LANGS = list(data.keys())
+    else:
+        _ALL_LANGS = list(data)
 # %%
 from huggingface_hub import login
 

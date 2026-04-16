@@ -3,8 +3,8 @@
 Test the model on the mikaberidze/lid200 language-identification dataset.
 
 By default this evaluates only the languages supported by the local model
-and mapped through `language.LANG_ISO2_TO_ISO3`. You can further narrow the
-benchmark with `--langs en es fr` (ISO-2 codes).
+and normalized through `language.canonical_lang`. You can further narrow the
+benchmark with `--langs en es fr` (canonical model codes).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from transformers import AutoModelForTokenClassification, AutoTokenizer, pipelin
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.insert(0, project_root)
-from language import ALL_LANGS, LANG_ISO2_TO_ISO3
+from language import ALL_LANGS, canonical_lang
 
 MODEL_CHECKPOINT = "DerivedFunction/lang-ner-xlmr"
 
@@ -37,8 +37,8 @@ def _parse_args() -> argparse.Namespace:
         nargs="*",
         default=None,
         help=(
-            "Optional ISO-2 languages to keep, e.g. --langs en es fr. "
-            "Defaults to all model languages that have a mapping in all_langs.json."
+            "Optional canonical languages to keep, e.g. --langs en es fr. "
+            "Defaults to all model languages in all_langs.json."
         ),
     )
     parser.add_argument(
@@ -84,6 +84,10 @@ def _dataset_label_to_iso3(label: str) -> str:
     return label.split("_", 1)[0]
 
 
+def _dataset_label_to_canonical(label: str) -> str:
+    return canonical_lang(_dataset_label_to_iso3(label))
+
+
 def main() -> None:
     args = _parse_args()
 
@@ -112,24 +116,18 @@ def main() -> None:
     text_column = _resolve_text_column(test_data)
 
     # ===== DETERMINE FILTER =====
-    model_langs_iso2 = [lang for lang in ALL_LANGS if lang in LANG_ISO2_TO_ISO3]
     if args.langs:
-        keep_langs_iso2 = [lang.lower() for lang in args.langs]
+        keep_langs = [lang.lower() for lang in args.langs]
     else:
-        keep_langs_iso2 = model_langs_iso2
-
-    iso2_to_iso3 = LANG_ISO2_TO_ISO3
-    iso3_to_iso2 = {iso3: iso2 for iso2, iso3 in iso2_to_iso3.items()}
-    keep_langs_iso3 = {iso2_to_iso3[lang] for lang in keep_langs_iso2 if lang in iso2_to_iso3}
+        keep_langs = ALL_LANGS[:]
 
     print("\n3. Filtering languages...")
-    print(f"   ✓ Keeping {len(keep_langs_iso2)} ISO-2 languages")
-    print(f"   ✓ Corresponding ISO-3 labels: {len(keep_langs_iso3)}")
+    print(f"   ✓ Keeping {len(keep_langs)} canonical languages")
     # Print one example row in test_data
     print(f"   ✓ Example dataset row: {test_data[0]}")
     filtered_test = test_data.filter(
-        lambda ex: _dataset_label_to_iso3(_label_name_from_example(ex, test_data, lang_column))
-        in keep_langs_iso3
+        lambda ex: _dataset_label_to_canonical(_label_name_from_example(ex, test_data, lang_column))
+        in keep_langs
     )
     print(f"   ✓ Filtered dataset size: {len(filtered_test)}")
 
@@ -178,8 +176,8 @@ def main() -> None:
     )):
         text = example[text_column]
         true_lang_name = _label_name_from_example(example, filtered_test, lang_column)
-        true_lang_iso2 = iso3_to_iso2.get(_dataset_label_to_iso3(true_lang_name))
-        if true_lang_iso2 is None:
+        true_lang = _dataset_label_to_canonical(true_lang_name)
+        if true_lang not in ALL_LANGS:
             continue
 
         if not predictions:
@@ -192,22 +190,22 @@ def main() -> None:
         else:
             pred_lang = pred_entity.lower()
 
-        is_correct = pred_lang == true_lang_iso2
+        is_correct = pred_lang == true_lang
         if is_correct:
             correct_count += 1
 
         total_count += 1
-        per_lang_stats[true_lang_iso2]["total"] += 1
+        per_lang_stats[true_lang]["total"] += 1
         if is_correct:
-            per_lang_stats[true_lang_iso2]["correct"] += 1
+            per_lang_stats[true_lang]["correct"] += 1
 
-        results_by_lang[true_lang_iso2].append(
+        results_by_lang[true_lang].append(
             {
                 "text": text[:100],
                 "predicted": pred_lang,
                 "correct": is_correct,
                 "score": pred.get("score", 0.0),
-                "true_lang": true_lang_iso2,
+                "true_lang": true_lang,
                 "dataset_label": true_lang_name,
             }
         )
@@ -279,8 +277,7 @@ def main() -> None:
                 "overall_accuracy": overall_accuracy,
                 "correct": correct_count,
                 "total": total_count,
-                "filtered_langs_iso2": keep_langs_iso2,
-                "filtered_langs_iso3": sorted(keep_langs_iso3),
+                "filtered_langs": keep_langs,
                 "per_language": {
                     lang: {
                         "correct": stats["correct"],

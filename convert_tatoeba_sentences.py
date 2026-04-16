@@ -23,7 +23,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from tqdm.auto import tqdm
 
-from language import LANG_ISO2_TO_ISO3
+from language import canonical_lang
 from source_config import TATOEBA
 from paths import PATHS
 
@@ -41,7 +41,6 @@ DEFAULT_LANGUAGE_REMAPS = {
 }
 
 PARQUET_SCHEMA = pa.schema([("sentence", pa.string())])
-ISO3_TO_ISO2 = {v: k for k, v in LANG_ISO2_TO_ISO3.items()}
 TATOEBA_CACHE_VERSION = 2
 
 
@@ -61,9 +60,10 @@ def normalize_lang(code: str, remaps: dict[str, str]) -> str | None:
     code = (code or "").strip()
     if not code:
         return None
+    code = code.split("_", 1)[0]
     if code in remaps:
-        return remaps[code]
-    return ISO3_TO_ISO2.get(code)
+        code = remaps[code]
+    return canonical_lang(code)
 
 
 def max_tatoeba_sentences_for_lang(lang: str) -> int:
@@ -141,7 +141,7 @@ def convert_tatoeba_sentences(
                     skipped_rows += 1
                     continue
 
-                lang = combined_remaps.get(lang_code) or ISO3_TO_ISO2.get(lang_code)
+                lang = normalize_lang(lang_code, combined_remaps)
                 if not lang:
                     skipped_rows += 1
                     continue
