@@ -60,6 +60,8 @@ SAFE_ACCENT_STRIP_LANGS = {
     "nl",
     "pt",
 }
+CYRILLIC_GROUPS = {group for group in LANGUAGE_GROUPS if "Cyrillic" in group} | {"Russian"}
+CYRILLIC_LETTERS = "абвгдежзийклмнопрстуфхцчшщэюя"
 from source_pools import (
     build_disk_sentence_pool_shards,
     chunk_list,
@@ -488,17 +490,19 @@ def _apply_random_accent_stripping(sentence: str, *, lang: str, prob: float) -> 
 
 
 def _inject_random_letter_into_sentence(sentence: str, *, lang: str, prob: float) -> str:
-    """Insert one random letter between words in a Latin sentence."""
+    """Insert one random letter between words in a script-aware sentence."""
     if prob <= 0 or random.random() >= prob:
         return sentence
-    if LANG_TO_GROUP.get(lang) not in LATIN_GROUPS:
+    group = LANG_TO_GROUP.get(lang)
+    if group not in LATIN_GROUPS and group not in CYRILLIC_GROUPS:
         return sentence
 
     parts = sentence.split()
     if len(parts) < 2:
         return sentence
 
-    letter = random.choice(string.ascii_lowercase)
+    pool = string.ascii_lowercase if group in LATIN_GROUPS else CYRILLIC_LETTERS
+    letter = random.choice(pool)
     if random.random() < 0.5:
         letter = letter.upper()
 

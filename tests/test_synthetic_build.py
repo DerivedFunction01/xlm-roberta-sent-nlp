@@ -179,6 +179,49 @@ class AccentStrippingTests(unittest.TestCase):
         self.assertEqual(example["tokens"], ["hello", "d", "world"])
         self.assertEqual(example["ner_tags"], [1, 2, 2])
 
+    def test_pure_doc_can_inject_cyrillic_letter_inside_span(self) -> None:
+        tokenizer = DummyTokenizer()
+        primary_pool = {"ru": deque(["привет мир"])}
+        label2id = {"B-RU": 1, "I-RU": 2}
+
+        def _choice(seq):
+            if isinstance(seq, str):
+                return "д"
+            return seq[0]
+
+        with patch("synthetic_build.random.random", side_effect=[0.0, 0.6]), patch(
+            "synthetic_build.random.choice",
+            side_effect=_choice,
+        ), patch("synthetic_build.random.randint", side_effect=[1, 1]):
+            example = synthetic_build.create_pure_synthetic_doc(
+                tokenizer=tokenizer,
+                primary_pool=primary_pool,
+                lang="ru",
+                label2id=label2id,
+                min_sentences=1,
+                max_sentences=1,
+                strip_punct_prob=0.0,
+                accent_strip_prob=0.0,
+                foreign_sentence_prob=0.0,
+                sentence_uppercase_prob=0.0,
+                sentence_lowercase_prob=0.0,
+                splice_strip_next_punct_prob=0.0,
+                splice_lowercase_next_prob=0.0,
+                random_letter_prob=1.0,
+                format_noise_prob=0.0,
+                paragraph_break_prob=0.0,
+                uppercase_word_prob=0.0,
+                lowercase_word_prob=0.0,
+                titlecase_word_prob=0.0,
+                merge_word_prob=0.0,
+                split_word_prob=0.0,
+                typo_char_prob=0.0,
+            )
+
+        self.assertEqual(example["original_text"], "привет д мир")
+        self.assertEqual(example["tokens"], ["привет", "д", "мир"])
+        self.assertEqual(example["ner_tags"], [1, 2, 2])
+
     def test_homogeneous_doc_stays_single_language(self) -> None:
         tokenizer = DummyTokenizer()
         primary_pool = {"en": deque(["hello", "world", "again"])}
