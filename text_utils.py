@@ -7,6 +7,7 @@ import traceback
 from functools import lru_cache
 from pathlib import Path
 
+import pycountry
 from language import (
     ENGLISH_STOP_WORDS,
     LATIN_GROUPS,
@@ -77,6 +78,7 @@ ENGLISH_MINOR_LATIN_GROUPS = {
     "PeripheralLatin",
     "WesternLatin",
 }
+TITLECASE_ENTITY_CHECK_GROUPS = ENGLISH_MINOR_LATIN_GROUPS
 LATIN_MIXED_SCRIPT_ALLOWLIST = {
     "uz",
 }
@@ -123,6 +125,42 @@ LATIN_MAJOR_LEAK_LANGS = {
     "fr": "fr",
     "it": "it",
     "pt": "pt",
+}
+TITLECASE_ENTITY_CONNECTORS = {
+    "a",
+    "an",
+    "and",
+    "al",
+    "bin",
+    "bint",
+    "da",
+    "de",
+    "del",
+    "der",
+    "di",
+    "do",
+    "dos",
+    "das",
+    "e",
+    "el",
+    "la",
+    "le",
+    "los",
+    "las",
+    "of",
+    "the",
+    "y",
+    "van",
+    "von",
+    "in",
+    "den",
+    "des",
+    "du",
+    "l",
+    "d",
+    "st",
+    "saint",
+    "santa",
 }
 NLTK_ENGLISH_SECONDARY_LIMIT: int | None = None
 POOL_TERMINAL_PUNCT_CHOICES = (".", ":", ";", "!", "?")
@@ -369,6 +407,62 @@ def _major_latin_language_hits(sentence: str, leak_lang: str) -> int:
     return sum(word in lexicon_set for word in words)
 
 
+def _normalize_phrase_for_match(text: str) -> str:
+    text = unicodedata.normalize("NFKC", text)
+    text = text.replace("’", "'").replace("`", "'")
+    text = re.sub(r"[^\w\s]+", " ", text, flags=re.UNICODE)
+    return WIKI_SPACES.sub(" ", text).strip().lower()
+
+
+@lru_cache(maxsize=1)
+def _pycountry_location_name_set() -> frozenset[str]:
+    names: set[str] = set()
+    for country in pycountry.countries:
+        for attr in ("name", "official_name", "common_name"):
+            value = getattr(country, attr, None)
+            if value:
+                normalized = _normalize_phrase_for_match(str(value))
+                if normalized:
+                    names.add(normalized)
+    for subdivision in pycountry.subdivisions:
+        value = getattr(subdivision, "name", None)
+        if value:
+            normalized = _normalize_phrase_for_match(str(value))
+            if normalized:
+                names.add(normalized)
+    return frozenset(names)
+
+
+def _is_titlecase_token(token: str) -> bool:
+    return bool(token) and token[0].isupper() and token[1:].islower()
+
+
+def _looks_like_titlecase_entity(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
+    lang = canonical_lang(lang)
+    if lang_to_group.get(lang) not in TITLECASE_ENTITY_CHECK_GROUPS:
+        return False
+
+    words = [word for word in WIKI_WORDS.findall(sentence) if word.isalpha()]
+    if len(words) < 3 or len(words) > 6:
+        return False
+
+    titlecase_words = sum(_is_titlecase_token(word) or word.isupper() for word in words)
+    lowercase_words = [word for word in words if word[0].islower()]
+    if titlecase_words / len(words) < 0.8:
+        return False
+    if any(word.lower() not in TITLECASE_ENTITY_CONNECTORS for word in lowercase_words):
+        return False
+
+    location_names = _pycountry_location_name_set()
+    for start in range(len(words)):
+        for end in range(start + 2, min(len(words), start + 6) + 1):
+            candidate = _normalize_phrase_for_match(" ".join(words[start:end]))
+            if candidate in location_names:
+                return True
+
+    return len(words) <= 5 and titlecase_words >= len(words) - 1
+
+
 def _non_punct_char_count(s: str) -> int:
     return len(WIKI_NON_CONTENT.sub("", s))
 
@@ -583,6 +677,8 @@ def _sentence_cleanup_reason(
     scrubbed = _strip_non_target_script_letters(sentence, lang, lang_to_group)
     if scrubbed != sentence and not _contains_target_script_letters(scrubbed, lang, lang_to_group):
         return "mixed_script"
+    if _looks_like_titlecase_entity(sentence, lang, lang_to_group):
+        return "titlecase_entity"
     if _looks_like_english_text(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary):
         return "english_leak"
     if use_major_latin_leak and _looks_like_major_latin_leak(sentence, lang, lang_to_group):

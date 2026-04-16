@@ -128,6 +128,11 @@ class EnglishLeakFilterTests(unittest.TestCase):
             ["यह एक मिश्रित उदाहरण वाक्य है जिसमें पर्याप्त शब्द बचे रहते हैं"],
         )
 
+    def test_clean_sentence_drops_titlecase_location_like_phrase_for_low_resource_latin(self) -> None:
+        sentence = "Puerto Rico Ocean View Villas"
+
+        self.assertEqual(text_utils.clean_sentence(sentence, "xh", self._lang_to_group), "")
+
     def test_clean_sentence_can_drop_major_latin_leakage_when_enabled(self) -> None:
         original_loader = text_utils.load_wiki_major_latin_lexicon
         lexicons = {
