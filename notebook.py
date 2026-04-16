@@ -24,9 +24,7 @@ MODEL_CHECKPOINT = "xlm-roberta-base"
 BASE_DIR = Path(".")
 LANGUAGE_ALIASES_PATH = BASE_DIR / "language_aliases.json"
 TOKENIZED_CACHE_DIR = BASE_DIR / "sentences_cache" / "tokenized_dataset"
-TOKENIZED_CACHE_META = TOKENIZED_CACHE_DIR / "tokenized_dataset.meta.json"
 MULTILABEL_CACHE_DIR = BASE_DIR / "sentences_cache" / "multilabel_dataset"
-MULTILABEL_CACHE_META = MULTILABEL_CACHE_DIR / "multilabel_dataset.meta.json"
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -50,37 +48,14 @@ def load_dataset_cache(cache_dir: Path):
     return load_from_disk(str(cache_dir))
 
 
-def load_tokenized_dataset_cache(
-    *,
-    seed: int,
-    model_checkpoint: str,
-    max_length: int = 512,
-):
-    if not TOKENIZED_CACHE_DIR.exists() or not TOKENIZED_CACHE_META.exists():
+def load_tokenized_dataset_cache():
+    if not TOKENIZED_CACHE_DIR.exists():
         return None
-    with TOKENIZED_CACHE_META.open(encoding="utf-8") as f:
-        meta = json.load(f)
-    if not isinstance(meta, dict):
-        return None
-    expected_meta = {
-        "model_checkpoint": model_checkpoint,
-        "max_length": max_length,
-        "seed": seed,
-    }
-    for key, expected_value in expected_meta.items():
-        if meta.get(key) != expected_value:
-            return None
     return load_dataset_cache(TOKENIZED_CACHE_DIR)
 
 
 def load_multilabel_dataset_cache():
-    if not MULTILABEL_CACHE_DIR.exists() or not MULTILABEL_CACHE_META.exists():
-        return None
-    with MULTILABEL_CACHE_META.open(encoding="utf-8") as f:
-        meta = json.load(f)
-    if not isinstance(meta, dict):
-        return None
-    if meta.get("all_langs") != load_all_langs():
+    if not MULTILABEL_CACHE_DIR.exists():
         return None
     return load_dataset_cache(MULTILABEL_CACHE_DIR)
 
@@ -116,11 +91,7 @@ print("Sample:", dict(list(id2label.items())[:7]))
 
 # %%
 # --- Data Loading ---
-cached_tokenized = load_tokenized_dataset_cache(
-    seed=SEED,
-    model_checkpoint=MODEL_CHECKPOINT,
-    max_length=512,
-)
+cached_tokenized = load_tokenized_dataset_cache()
 if cached_tokenized is not None:
     train_dataset = cached_tokenized["train"]
     eval_dataset = cached_tokenized["eval"]
