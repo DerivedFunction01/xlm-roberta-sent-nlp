@@ -23,7 +23,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from tqdm.auto import tqdm
 
-from language import canonical_lang
+from language import ALL_LANGS, canonical_lang
 from source_config import TATOEBA
 from paths import PATHS
 
@@ -63,7 +63,8 @@ def normalize_lang(code: str, remaps: dict[str, str]) -> str | None:
     code = code.split("_", 1)[0]
     if code in remaps:
         code = remaps[code]
-    return canonical_lang(code)
+    lang = canonical_lang(code)
+    return lang if lang in ALL_LANGS else None
 
 
 def max_tatoeba_sentences_for_lang(lang: str) -> int:
