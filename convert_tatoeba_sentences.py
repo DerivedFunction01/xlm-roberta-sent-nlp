@@ -37,6 +37,7 @@ DEFAULT_LANGUAGE_REMAPS = {
     # Norwegian variants can safely be folded into the existing no bucket.
     "nob": "no",
     "nno": "no",
+    "ara": "ar",
 }
 
 PARQUET_SCHEMA = pa.schema([("sentence", pa.string())])
