@@ -21,7 +21,7 @@ from datasets import load_from_disk
 
 SEED = 42
 MODEL_CHECKPOINT = "xlm-roberta-base"
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(".")
 LANGUAGE_ALIASES_PATH = BASE_DIR / "language_aliases.json"
 TOKENIZED_CACHE_DIR = BASE_DIR / "sentences_cache" / "tokenized_dataset"
 TOKENIZED_CACHE_META = TOKENIZED_CACHE_DIR / "tokenized_dataset.meta.json"
