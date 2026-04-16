@@ -333,6 +333,30 @@ def _contains_non_target_script_letters(text: str, lang: str, lang_to_group: dic
     return False
 
 
+def _contains_target_script_letters(text: str, lang: str, lang_to_group: dict[str, str]) -> bool:
+    expected_markers = _expected_script_markers(lang, lang_to_group)
+    if not expected_markers:
+        return False
+    for ch in text:
+        marker = _script_marker_for_char(ch)
+        if marker in expected_markers:
+            return True
+    return False
+
+
+def _strip_non_target_script_letters(text: str, lang: str, lang_to_group: dict[str, str]) -> str:
+    expected_markers = _expected_script_markers(lang, lang_to_group)
+    if not expected_markers:
+        return text
+    stripped: list[str] = []
+    for ch in text:
+        marker = _script_marker_for_char(ch)
+        if marker is not None and marker not in expected_markers:
+            continue
+        stripped.append(ch)
+    return "".join(stripped)
+
+
 def _major_latin_language_hits(sentence: str, leak_lang: str) -> int:
     words = [word.lower() for word in WIKI_WORDS.findall(sentence)]
     if not words:
@@ -554,7 +578,8 @@ def _sentence_cleanup_reason(
     lang = canonical_lang(lang)
     if lang == "en":
         return None
-    if _has_script_contamination(sentence, lang, lang_to_group):
+    scrubbed = _strip_non_target_script_letters(sentence, lang, lang_to_group)
+    if scrubbed != sentence and not _contains_target_script_letters(scrubbed, lang, lang_to_group):
         return "mixed_script"
     if _looks_like_english_text(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary):
         return "english_leak"
@@ -587,6 +612,11 @@ def clean_sentence(
     sentence = HTML_TAG_RE.sub(" ", sentence)
     sentence = _strip_bracket_notes(sentence)
     sentence = _collapse_repeated_punct(sentence)
+    sentence = _strip_non_target_script_letters(sentence, lang, lang_to_group)
+    sentence = _collapse_spaces(sentence)
+    sentence = sentence.strip()
+    if not sentence or not _contains_target_script_letters(sentence, lang, lang_to_group):
+        return ""
     if _sentence_cleanup_reason(
         sentence,
         lang,
