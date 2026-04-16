@@ -81,6 +81,7 @@ LIST_STARTER_PUNCTUATION = (".", ":", ")", "]")
 LIST_STARTER_SYMBOLS = ("-", "•", "*", "‣", "⁃", "–", "—")
 LIST_STARTER_HASH_COUNTS = (2, 3, 4)
 LIST_STARTER_ROMANS = ("i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x")
+SYNTHETIC_UNK_TOKEN_PROB = 0.002
 from source_pools import (
     build_disk_sentence_pool_shards,
     chunk_list,
@@ -175,6 +176,13 @@ def _special_token_ids(tokenizer) -> tuple[int, int]:
     return int(start_id), int(end_id)
 
 
+def _tokenizer_unk_token(tokenizer) -> str:
+    unk_token = getattr(tokenizer, "unk_token", None)
+    if isinstance(unk_token, str) and unk_token.strip():
+        return unk_token
+    return "<unk>"
+
+
 def _finalize_synthetic_example(example: dict[str, Any], tokenizer) -> dict[str, Any]:
     """Attach model-ready fields to a synthetic example."""
     tokens = example["tokens"]
@@ -240,6 +248,33 @@ def _inject_formatting_artifact(
         # Keep infix insertion available for future expansions.
         pass
     return tokens, labels, artifact_text
+
+
+def _inject_unknown_token(
+    sentence: str,
+    tokens: list[str],
+    labels: list[int],
+    *,
+    tokenizer,
+    prob: float,
+) -> tuple[str, list[str], list[int], bool]:
+    """Insert a language-neutral unknown token noise marker."""
+    if prob <= 0 or not tokens or random.random() >= prob:
+        return sentence, tokens, labels, False
+
+    unk_token = _tokenizer_unk_token(tokenizer)
+    insert_at = random.randint(0, len(tokens))
+    tokens = tokens[:insert_at] + [unk_token] + tokens[insert_at:]
+    labels = labels[:insert_at] + [0] + labels[insert_at:]
+
+    display_tokens = sentence.split()
+    if display_tokens:
+        display_at = min(insert_at, len(display_tokens))
+        display_tokens = display_tokens[:display_at] + [unk_token] + display_tokens[display_at:]
+        sentence = " ".join(display_tokens)
+    else:
+        sentence = unk_token
+    return sentence, tokens, labels, True
 
 
 def _sample_list_starter() -> str:
@@ -700,6 +735,7 @@ def generate_synthetic_examples_chunk(
                     merge_word_prob=PURE_DOC_MIX.get("merge_word_prob", 0.0),
                     split_word_prob=PURE_DOC_MIX.get("split_word_prob", 0.0),
                     typo_char_prob=PURE_DOC_MIX.get("typo_char_prob", 0.0),
+                    unk_token_prob=SYNTHETIC_UNK_TOKEN_PROB,
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -746,6 +782,7 @@ def generate_synthetic_examples_chunk(
                     merge_word_prob=HOMOGENEOUS_DOC_MIX.get("merge_word_prob", 0.0),
                     split_word_prob=HOMOGENEOUS_DOC_MIX.get("split_word_prob", 0.0),
                     typo_char_prob=HOMOGENEOUS_DOC_MIX.get("typo_char_prob", 0.0),
+                    unk_token_prob=SYNTHETIC_UNK_TOKEN_PROB,
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -793,6 +830,7 @@ def generate_synthetic_examples_chunk(
                     merge_word_prob=DOC_MIX["spliced"].get("merge_word_prob", 0.0),
                     split_word_prob=DOC_MIX["spliced"].get("split_word_prob", 0.0),
                     typo_char_prob=DOC_MIX["spliced"].get("typo_char_prob", 0.0),
+                    unk_token_prob=SYNTHETIC_UNK_TOKEN_PROB,
                     worker_idx=worker_idx,
                     tokenizer=tokenizer,
                     all_langs=all_langs,
@@ -933,6 +971,7 @@ def create_synthetic_doc(
     label2id: dict[str, int],
     sample_o_span: Callable[[], str],
     sample_code_span: Callable[[], str],
+    unk_token_prob: float = 0.0,
 ) -> dict:
     """Build one synthetic mixed-language training example."""
     chosen_langs: list[str] = []
@@ -995,6 +1034,16 @@ def create_synthetic_doc(
 
         if swap_prob > 0 and random.random() < swap_prob:
             tokens, labels = swap_random_tokens(tokens[:], labels[:])
+
+        sent, tokens, labels, unk_inserted = _inject_unknown_token(
+            sent,
+            tokens,
+            labels,
+            tokenizer=tokenizer,
+            prob=unk_token_prob,
+        )
+        if unk_inserted:
+            original_text_parts[-1] = sent
 
         remaining = max_length - 2 - total_tokens
         tokens = tokens[:remaining]
@@ -1060,6 +1109,7 @@ def create_pure_synthetic_doc(
     merge_word_prob: float = 0.0,
     split_word_prob: float = 0.0,
     typo_char_prob: float = 0.0,
+    unk_token_prob: float = 0.0,
 ) -> dict:
     """Build one mostly homogeneous single-language synthetic example."""
     sent_count = random.randint(min_sentences, max_sentences)
@@ -1133,6 +1183,15 @@ def create_pure_synthetic_doc(
         if strip_punct_prob > 0 and random.random() < strip_punct_prob:
             tokens = augment_boundary(tokens, strip_punct=True)
         labels = bio_label_tokens(tokens, sent_lang, is_first=(len(all_tokens) == 0), label2id=label2id)
+        sent, tokens, labels, unk_inserted = _inject_unknown_token(
+            sent,
+            tokens,
+            labels,
+            tokenizer=tokenizer,
+            prob=unk_token_prob,
+        )
+        if unk_inserted:
+            original_text_parts[-1] = sent
         tokens, labels, artifact_parts = _add_formatting_noise(
             tokens,
             labels,
@@ -1196,6 +1255,7 @@ def build_synthetic_doc_with_retry(
     label2id: dict[str, int],
     sample_o_span: Callable[[], str],
     sample_code_span: Callable[[], str],
+    unk_token_prob: float = 0.0,
 ) -> dict:
     """Build a synthetic doc and retry if it is malformed or too long for the model."""
     for _ in range(1, max_retries + 1):
@@ -1227,6 +1287,7 @@ def build_synthetic_doc_with_retry(
                 merge_word_prob=merge_word_prob,
                 split_word_prob=split_word_prob,
                 typo_char_prob=typo_char_prob,
+                unk_token_prob=unk_token_prob,
             )
         else:
             example = create_synthetic_doc(
@@ -1247,6 +1308,7 @@ def build_synthetic_doc_with_retry(
                 label2id=label2id,
                 sample_o_span=sample_o_span,
                 sample_code_span=sample_code_span,
+                unk_token_prob=unk_token_prob,
             )
         if len(example.get("tokens", ())) != len(example.get("ner_tags", ())):
             continue
