@@ -24,6 +24,7 @@ from text_utils import (
     clean_sentence,
     log_segmentation_failure,
     _looks_like_english_text,
+    _split_long_list_like_segment,
     post_clean_sentences,
     sanitize_paragraph_for_pysbd,
     SENT_SPLIT,
@@ -183,14 +184,15 @@ def _extract_article_sentences(
             )
             sents = SENT_SPLIT.split(safe_paragraph)
         for s in sents:
-            s = clean_sentence(
-                s,
-                lang,
-                lang_to_group,
-                use_nltk_secondary=use_nltk_secondary,
-            )
-            if _is_valid_sentence(s, lang, lang_to_group):
-                article_batch.append(s)
+            for piece in _split_long_list_like_segment(s):
+                piece = clean_sentence(
+                    piece,
+                    lang,
+                    lang_to_group,
+                    use_nltk_secondary=use_nltk_secondary,
+                )
+                if _is_valid_sentence(piece, lang, lang_to_group):
+                    article_batch.append(piece)
 
     return article_batch
 

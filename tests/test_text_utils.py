@@ -133,6 +133,22 @@ class EnglishLeakFilterTests(unittest.TestCase):
 
         self.assertEqual(text_utils.clean_sentence(sentence, "xh", self._lang_to_group), "")
 
+    def test_post_clean_sentences_drops_leading_list_starters(self) -> None:
+        sentence = "1) 2) This is the actual sentence after the list markers"
+
+        self.assertEqual(
+            text_utils.post_clean_sentences([sentence], "hi", self._lang_to_group),
+            ["This is the actual sentence after the list markers"],
+        )
+
+    def test_post_clean_sentences_drops_bullet_starter(self) -> None:
+        sentence = "• This is another sentence with a bullet starter"
+
+        self.assertEqual(
+            text_utils.post_clean_sentences([sentence], "hi", self._lang_to_group),
+            ["This is another sentence with a bullet starter"],
+        )
+
     def test_clean_sentence_can_drop_major_latin_leakage_when_enabled(self) -> None:
         original_loader = text_utils.load_wiki_major_latin_lexicon
         lexicons = {
@@ -202,6 +218,28 @@ class TokenCountTests(unittest.TestCase):
     def test_sentence_split_handles_ascii_and_cjk_punctuation(self) -> None:
         pieces = [piece for piece in text_utils.SENT_SPLIT.split("Hello world. 你好世界。Next.") if piece]
         self.assertEqual(pieces, ["Hello world.", "你好世界。", "Next."])
+
+    def test_split_long_list_like_segment_breaks_enumerated_items(self) -> None:
+        text = (
+            "1: first item has enough words to look like a real sentence, "
+            "2: second item also has enough words to be useful, "
+            "3: third item keeps going long enough to cross the threshold"
+        )
+
+        self.assertEqual(
+            text_utils._split_long_list_like_segment(text),
+            [
+                "1: first item has enough words to look like a real sentence,",
+                "2: second item also has enough words to be useful,",
+                "3: third item keeps going long enough to cross the threshold",
+            ],
+        )
+
+    def test_split_long_list_like_segment_ignores_short_text(self) -> None:
+        self.assertEqual(
+            text_utils._split_long_list_like_segment("1: short item 2: short item"),
+            ["1: short item 2: short item"],
+        )
 
 
 if __name__ == "__main__":

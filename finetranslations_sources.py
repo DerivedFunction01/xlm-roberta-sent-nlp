@@ -27,6 +27,7 @@ from text_utils import (
     _get_segmenter,
     _looks_like_english_text,
     _looks_like_major_latin_leak,
+    _split_long_list_like_segment,
     post_clean_sentences,
     sanitize_paragraph_for_pysbd,
 )
@@ -322,7 +323,12 @@ def _segment_text(text: str, lang: str) -> list[str]:
         segments = segmenter.segment(safe_text) if segmenter else SENT_SPLIT.split(safe_text) # type: ignore
     except re.error:
         segments = SENT_SPLIT.split(safe_text)
-    return [segment for segment in segments if isinstance(segment, str) and segment.strip()]
+    flattened: list[str] = []
+    for segment in segments:
+        if not isinstance(segment, str) or not segment.strip():
+            continue
+        flattened.extend(_split_long_list_like_segment(segment))
+    return [segment for segment in flattened if segment.strip()]
 
 
 def _row_is_translated_en_acceptable(row: dict[str, Any]) -> bool:

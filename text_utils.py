@@ -187,6 +187,22 @@ POOL_LEADING_MARKER_RE = re.compile(
     flags=re.IGNORECASE,
 )
 POOL_TRAILING_PUNCT_RE = re.compile(r"^(?P<body>.*?)(?P<punct>[.!?;:…]+)$", flags=re.UNICODE)
+LIST_ITEM_START_RE = re.compile(
+    r"(?<!\S)(?:"
+    r"(?:\d{1,4}|[ivxlcdm]{1,8}|[a-zA-Z])[.:)\]]\s+|"
+    r"[\-\*\u2022\u00b7\u2023\u2043\u2219\u2013\u2014]\s+"
+    r")",
+    flags=re.IGNORECASE,
+)
+LIST_STARTER_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:\d{1,4}|[ivxlcdm]{1,8}|[a-zA-Z])[.:)\]]\s*|"
+    r"[\-\*\u2022\u00b7\u2023\u2043\u2219\u2013\u2014]\s*"
+    r")",
+    flags=re.IGNORECASE,
+)
+LIST_ITEM_MIN_CHARS = 120
+LIST_ITEM_MIN_MARKERS = 2
 
 PYSBD_SUPPORTED = {
     "en", "hi", "mr", "bg", "es", "ru", "ar", "am", "hy", "fa",
@@ -557,6 +573,15 @@ def _strip_leading_orphan_letter(sentence: str) -> str:
     return WIKI_LEADING_ORPHAN_LETTER.sub("", sentence).lstrip()
 
 
+def _strip_leading_list_starters(sentence: str) -> str:
+    stripped = sentence.lstrip()
+    while True:
+        next_stripped = LIST_STARTER_RE.sub("", stripped, count=1)
+        if next_stripped == stripped:
+            return stripped
+        stripped = next_stripped.lstrip()
+
+
 def _has_blocked_artifact(sentence: str) -> bool:
     lower = sentence.lower()
     return any(marker in lower for marker in WIKI_BLOCKED_MARKERS) or any(ch in sentence for ch in WIKI_BLOCKED_CHARS)
@@ -840,6 +865,7 @@ def post_clean_sentences(
             use_major_latin_leak=use_major_latin_leak,
         )
         sentence = _strip_leading_punct(sentence)
+        sentence = _strip_leading_list_starters(sentence)
         sentence = _strip_leading_orphan_letter(sentence)
         sentence = _collapse_repeated_punct(sentence)
         sentence = _strip_trailing_orphan_letter(sentence, lang_to_group, lang)
@@ -873,6 +899,26 @@ def sanitize_paragraph_for_pysbd(paragraph: str) -> str:
     if "\\" not in paragraph:
         return paragraph
     return paragraph.replace("\\", " ")
+
+
+def _split_long_list_like_segment(text: str) -> list[str]:
+    stripped = text.strip()
+    if len(stripped) < LIST_ITEM_MIN_CHARS:
+        return [text]
+
+    markers = list(LIST_ITEM_START_RE.finditer(stripped))
+    if len(markers) < LIST_ITEM_MIN_MARKERS or markers[0].start() != 0:
+        return [text]
+
+    pieces: list[str] = []
+    for idx, marker in enumerate(markers):
+        start = marker.start()
+        end = markers[idx + 1].start() if idx + 1 < len(markers) else len(stripped)
+        piece = stripped[start:end].strip()
+        if piece:
+            pieces.append(piece)
+
+    return pieces if len(pieces) >= LIST_ITEM_MIN_MARKERS else [text]
 
 
 def _article_min_chars(lang: str, lang_to_group: dict[str, str]) -> int:

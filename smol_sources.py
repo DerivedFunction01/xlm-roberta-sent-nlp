@@ -13,7 +13,7 @@ from io_utils import write_json_atomic, write_sentence_parquet
 from language import LANG_TO_GROUP
 from paths import PATHS
 from source_config import SMOL
-from text_utils import _collapse_spaces, _get_segmenter, _is_valid_sentence, _strip_bracket_notes
+from text_utils import _collapse_spaces, _get_segmenter, _is_valid_sentence, _split_long_list_like_segment, _strip_bracket_notes
 
 
 SMOL_CODE_MAP: dict[str, str] = {
@@ -47,10 +47,11 @@ def _smol_add_sentences(bucket: list[str], raw_sentences: object, lang: str, lan
     for sent in raw_sentences:
         if not isinstance(sent, str):
             continue
-        sent = _strip_bracket_notes(sent)
-        sent = _collapse_spaces(sent)
-        if _is_valid_sentence(sent, lang, lang_to_group):
-            bucket.append(sent)
+        for piece in _split_long_list_like_segment(sent):
+            piece = _strip_bracket_notes(piece)
+            piece = _collapse_spaces(piece)
+            if _is_valid_sentence(piece, lang, lang_to_group):
+                bucket.append(piece)
 
 
 def _load_smoldoc(accumulator: dict[str, list[str]], lang_to_group: dict[str, str]) -> tuple[set[str], set[str]]:
