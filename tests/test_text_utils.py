@@ -134,19 +134,19 @@ class EnglishLeakFilterTests(unittest.TestCase):
         self.assertEqual(text_utils.clean_sentence(sentence, "xh", self._lang_to_group), "")
 
     def test_post_clean_sentences_drops_leading_list_starters(self) -> None:
-        sentence = "1) 2) This is the actual sentence after the list markers"
+        sentence = "1) 2) This is the actual sentence after the list markers and it is long enough."
 
         self.assertEqual(
-            text_utils.post_clean_sentences([sentence], "hi", self._lang_to_group),
-            ["This is the actual sentence after the list markers"],
+            text_utils.post_clean_sentences([sentence], "en", self._lang_to_group),
+            ["This is the actual sentence after the list markers and it is long enough."],
         )
 
     def test_post_clean_sentences_drops_bullet_starter(self) -> None:
-        sentence = "• This is another sentence with a bullet starter"
+        sentence = "• This is another sentence with a bullet starter and enough length to pass validation."
 
         self.assertEqual(
-            text_utils.post_clean_sentences([sentence], "hi", self._lang_to_group),
-            ["This is another sentence with a bullet starter"],
+            text_utils.post_clean_sentences([sentence], "en", self._lang_to_group),
+            ["This is another sentence with a bullet starter and enough length to pass validation."],
         )
 
     def test_clean_sentence_can_drop_major_latin_leakage_when_enabled(self) -> None:
