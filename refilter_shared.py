@@ -9,7 +9,7 @@ import pandas as pd
 
 from io_utils import write_records_parquet, write_sentence_parquet
 from language import canonical_lang
-from text_utils import _looks_like_english_text
+from text_utils import _sentence_cleanup_reason
 
 
 def build_refilter_arg_parser(
@@ -61,9 +61,9 @@ def emit_rejected_english_leaks(
     write_records_parquet(
         leak_path,
         leaks,
-        columns=["lang", "source_index", "sentence", "use_nltk_secondary"],
+        columns=["lang", "source_index", "sentence", "reason", "use_nltk_secondary"],
     )
-    print(f"Wrote {len(leaks):,} rejected English-looking sentences -> {leak_path}")
+    print(f"Wrote {len(leaks):,} rejected sentences -> {leak_path}")
     return len(leaks)
 
 
@@ -82,17 +82,19 @@ def collect_rejected_english_sentences_from_parquet(
         return []
     rejected: list[dict[str, Any]] = []
     for idx, sentence in enumerate(frame["sentence"].astype(str).tolist()):
-        if _looks_like_english_text(
+        reason = _sentence_cleanup_reason(
             sentence,
             lang,
             lang_to_group,
             use_nltk_secondary=use_nltk_secondary,
-        ):
+        )
+        if reason:
             rejected.append(
                 {
                     "lang": lang,
                     "source_index": idx,
                     "sentence": sentence,
+                    "reason": reason,
                     "use_nltk_secondary": use_nltk_secondary,
                 }
             )

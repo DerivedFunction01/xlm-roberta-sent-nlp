@@ -10,6 +10,7 @@ from pathlib import Path
 from language import ENGLISH_STOP_WORDS, LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS, canonical_lang
 import nltk as nltk_module
 from nltk.corpus import words as nltk_words
+from nltk.corpus import stopwords as nltk_stopwords
 
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
 # Split on standard ASCII sentence punctuation plus CJK sentence punctuation.
@@ -67,6 +68,21 @@ ENGLISH_MINOR_LATIN_GROUPS = {
     "KurdishLatin",
     "PeripheralLatin",
     "WesternLatin",
+}
+LATIN_MIXED_SCRIPT_ALLOWLIST = {
+    "uz",
+}
+LATIN_MAJOR_LEAK_CHECK_GROUPS = {
+    "AfricanLatin",
+    "PeripheralLatin",
+    "SoutheastAsianLatin",
+}
+LATIN_MAJOR_LEAK_LANGS = {
+    "de": "german",
+    "es": "spanish",
+    "fr": "french",
+    "it": "italian",
+    "pt": "portuguese",
 }
 NLTK_ENGLISH_SECONDARY_LIMIT: int | None = None
 POOL_TERMINAL_PUNCT_CHOICES = (".", ":", ";", "!", "?")
@@ -143,6 +159,13 @@ def _ensure_nltk_words_corpus() -> None:
         nltk_module.download("words", quiet=True, raise_on_error=True)
 
 
+def _ensure_nltk_stopwords_corpus() -> None:
+    try:
+        nltk_module.data.find("corpora/stopwords")
+    except LookupError:
+        nltk_module.download("stopwords", quiet=True, raise_on_error=True)
+
+
 ENGLISH_STOP_WORD_SET = {word.lower() for word in ENGLISH_STOP_WORDS}
 
 
@@ -208,6 +231,47 @@ def _is_broad_english_word(token: str) -> bool:
     if word.endswith("s") and word[:-1] in secondary:
         return True
     return False
+
+
+@lru_cache(maxsize=262_144)
+def _nltk_stopword_set(lang: str) -> set[str]:
+    try:
+        return {
+            word.lower().strip()
+            for word in nltk_stopwords.words(lang)
+            if isinstance(word, str) and word.strip()
+        }
+    except LookupError:
+        _ensure_nltk_stopwords_corpus()
+        try:
+            return {
+                word.lower().strip()
+                for word in nltk_stopwords.words(lang)
+                if isinstance(word, str) and word.strip()
+            }
+        except LookupError:
+            return set()
+
+
+def _is_latin_letter(ch: str) -> bool:
+    return unicodedata.category(ch).startswith("L") and "LATIN" in unicodedata.name(ch, "")
+
+
+def _contains_non_latin_letters(text: str) -> bool:
+    return any(
+        unicodedata.category(ch).startswith("L") and not _is_latin_letter(ch)
+        for ch in text
+    )
+
+
+def _major_latin_language_hits(sentence: str, leak_lang: str) -> int:
+    words = [word.lower() for word in WIKI_WORDS.findall(sentence)]
+    if not words:
+        return 0
+    stopword_set = _nltk_stopword_set(leak_lang)
+    if not stopword_set:
+        return 0
+    return sum(word in stopword_set for word in words)
 
 
 def _non_punct_char_count(s: str) -> int:
@@ -379,6 +443,56 @@ def _looks_like_english_text(
     )
 
 
+def _looks_like_major_latin_leak(
+    sentence: str,
+    lang: str,
+    lang_to_group: dict[str, str],
+) -> bool:
+    lang = canonical_lang(lang)
+    group = lang_to_group.get(lang)
+    if group not in LATIN_MAJOR_LEAK_CHECK_GROUPS:
+        return False
+
+    words = [word for word in WIKI_WORDS.findall(sentence) if word.isalpha()]
+    if len(words) < 4:
+        return False
+
+    alpha_words = len(words)
+    for leak_lang, leak_corpus in LATIN_MAJOR_LEAK_LANGS.items():
+        if leak_lang == lang:
+            continue
+        hits = _major_latin_language_hits(sentence, leak_corpus)
+        if hits >= 3 and hits / alpha_words >= 0.35:
+            return True
+    return False
+
+
+def _has_latin_script_contamination(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
+    lang = canonical_lang(lang)
+    if lang not in LATIN_MIXED_SCRIPT_ALLOWLIST and lang_to_group.get(lang) in LATIN_GROUPS:
+        return _contains_non_latin_letters(sentence)
+    return False
+
+
+def _sentence_cleanup_reason(
+    sentence: str,
+    lang: str,
+    lang_to_group: dict[str, str],
+    *,
+    use_nltk_secondary: bool = True,
+) -> str | None:
+    lang = canonical_lang(lang)
+    if lang == "en":
+        return None
+    if _has_latin_script_contamination(sentence, lang, lang_to_group):
+        return "mixed_script"
+    if _looks_like_english_text(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary):
+        return "english_leak"
+    if _looks_like_major_latin_leak(sentence, lang, lang_to_group):
+        return "major_latin_leak"
+    return None
+
+
 def _looks_like_english_sentence(
     sentence: str,
     lang: str,
@@ -402,7 +516,7 @@ def clean_sentence(
     sentence = HTML_TAG_RE.sub(" ", sentence)
     sentence = _strip_bracket_notes(sentence)
     sentence = _collapse_repeated_punct(sentence)
-    if _looks_like_english_text(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary):
+    if _sentence_cleanup_reason(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary):
         return ""
     if _strip_ascii_for_lang(lang, lang_to_group):
         sentence = WIKI_ASCII_WORDS.sub("", sentence)
