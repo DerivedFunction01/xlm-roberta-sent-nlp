@@ -514,7 +514,7 @@ class AccentStrippingTests(unittest.TestCase):
 
         self.assertEqual(example["original_text"], "hello <unk> world")
         self.assertEqual(example["tokens"], ["hello", "<unk>", "world"])
-        self.assertEqual(example["ner_tags"], [1, 0, 2])
+        self.assertEqual(example["ner_tags"], [1, 2, 2])
 
     def test_pure_doc_can_inject_digit_inside_span(self) -> None:
         tokenizer = DummyTokenizer()

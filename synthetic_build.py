@@ -259,13 +259,14 @@ def _inject_unknown_token(
     prob: float,
 ) -> tuple[str, list[str], list[int], bool]:
     """Insert a language-neutral unknown token noise marker."""
-    if prob <= 0 or not tokens or random.random() >= prob:
+    if prob <= 0 or len(tokens) < 2 or random.random() >= prob:
         return sentence, tokens, labels, False
 
     unk_token = _tokenizer_unk_token(tokenizer)
-    insert_at = random.randint(0, len(tokens))
+    insert_at = random.randint(1, len(tokens) - 1)
+    unk_label = labels[insert_at]
     tokens = tokens[:insert_at] + [unk_token] + tokens[insert_at:]
-    labels = labels[:insert_at] + [0] + labels[insert_at:]
+    labels = labels[:insert_at] + [unk_label] + labels[insert_at:]
 
     display_tokens = sentence.split()
     if display_tokens:
