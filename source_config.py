@@ -290,6 +290,7 @@ WIKI = {
         "ko": 1.25,
         "ar": 1.25,
         "no": 0.5,
+        "sco": 0.75,
     },
     "source_langs": {
         "no": ("no", "nn"),
@@ -333,6 +334,7 @@ TATOEBA = {
         "it": 1.25,
         "ko": 1.25,
         "ar": 1.25,
+        "sco": 0.75,
     },
 }
 
@@ -432,6 +434,7 @@ FT = {
     "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da"},
     "cap_multipliers": {
         "no": 1.5,
+        "sco": 0.5,
     },
 }
 FT["every"] = len(FT["langs"])
