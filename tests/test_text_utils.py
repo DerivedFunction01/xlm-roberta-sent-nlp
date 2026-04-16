@@ -101,6 +101,9 @@ class EnglishLeakFilterTests(unittest.TestCase):
             text_utils.clean_sentence(sentence, "su", self._lang_to_group) == ""
         )
 
+    def test_yiddish_uses_hebrew_pysbd_fallback(self) -> None:
+        self.assertEqual(text_utils.PYSBD_FALLBACKS["yi"], "he")
+
 
 class TokenCountTests(unittest.TestCase):
     def test_valid_non_digit_non_symbol_token_count_ignores_math_tokens(self) -> None:
