@@ -62,6 +62,8 @@ SAFE_ACCENT_STRIP_LANGS = {
 }
 CYRILLIC_GROUPS = {group for group in LANGUAGE_GROUPS if "Cyrillic" in group} | {"Russian"}
 CYRILLIC_LETTERS = "абвгдежзийклмнопрстуфхцчшщэюя"
+ARABIC_GROUPS = {group for group in LANGUAGE_GROUPS if "Arabic" in group}
+ARABIC_LETTERS = "ابتثجحخدذرزسشصضطظعغفقكلمنهوي"
 from source_pools import (
     build_disk_sentence_pool_shards,
     chunk_list,
@@ -494,16 +496,24 @@ def _inject_random_letter_into_sentence(sentence: str, *, lang: str, prob: float
     if prob <= 0 or random.random() >= prob:
         return sentence
     group = LANG_TO_GROUP.get(lang)
-    if group not in LATIN_GROUPS and group not in CYRILLIC_GROUPS:
+    if group not in LATIN_GROUPS and group not in CYRILLIC_GROUPS and group not in ARABIC_GROUPS:
         return sentence
 
     parts = sentence.split()
     if len(parts) < 2:
         return sentence
 
-    pool = string.ascii_lowercase if group in LATIN_GROUPS else CYRILLIC_LETTERS
+    if group in LATIN_GROUPS:
+        pool = string.ascii_lowercase
+        make_upper = True
+    elif group in CYRILLIC_GROUPS:
+        pool = CYRILLIC_LETTERS
+        make_upper = True
+    else:
+        pool = ARABIC_LETTERS
+        make_upper = False
     letter = random.choice(pool)
-    if random.random() < 0.5:
+    if make_upper and random.random() < 0.5:
         letter = letter.upper()
 
     insert_at = random.randint(1, len(parts) - 1)
