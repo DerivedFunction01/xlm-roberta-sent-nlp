@@ -8,7 +8,6 @@
 # pip install evaluate pysbd faker seqeval
 # %%
 import random
-import json
 import multiprocessing as mp
 import torch
 import numpy as np
@@ -27,14 +26,6 @@ torch.manual_seed(SEED)
 def get_workers(split: int = 1):
     return mp.cpu_count() // split
 
-_ALL_LANGS = []
-with open("all_langs.json", encoding="utf-8") as f:
-    data = json.load(f)
-    if isinstance(data, dict):
-        _ALL_LANGS = list(data.keys())
-    else:
-        _ALL_LANGS = list(data)
-# %%
 from huggingface_hub import login
 
 if Path("hf_token").exists():

@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 
+import pycountry
+
 from source_config import LANGUAGE_BUCKETS
 
 LANGUAGE_GROUPS = {group: cfg["langs"] for group, cfg in LANGUAGE_BUCKETS.items()}
@@ -11,240 +13,13 @@ LANGUAGE_GROUP_WEIGHTS = {group: float(cfg["weight"]) for group, cfg in LANGUAGE
 LANGUAGE_GROUP_MIN_CHARS = {group: int(cfg["min_chars"]) for group, cfg in LANGUAGE_BUCKETS.items()}
 LATIN_GROUPS = {group for group, cfg in LANGUAGE_BUCKETS.items() if cfg.get("latin")}
 
-LANGS_JSON = Path(__file__).with_name("all_langs.json")
 LANGUAGE_ALIASES_JSON = Path(__file__).with_name("language_aliases.json")
 
-_DEFAULT_ALL_LANGS = [
-    "en",
-    "es",
-    "fr",
-    "de",
-    "it",
-    "pt",
-    "nl",
-    "vi",
-    "tr",
-    "la",
-    "id",
-    "ms",
-    "af",
-    "sq",
-    "is",
-    "no",
-    "sv",
-    "da",
-    "fi",
-    "hu",
-    "pl",
-    "cs",
-    "ro",
-    "ru",
-    "bg",
-    "uk",
-    "sr",
-    "be",
-    "kk",
-    "mk",
-    "mn",
-    "zh",
-    "ja",
-    "ko",
-    "hi",
-    "ur",
-    "bn",
-    "ta",
-    "te",
-    "mr",
-    "gu",
-    "kn",
-    "ml",
-    "pa",
-    "as",
-    "or",
-    "ar",
-    "fa",
-    "ps",
-    "sd",
-    "ug",
-    "el",
-    "he",
-    "hy",
-    "ka",
-    "am",
-    "km",
-    "lo",
-    "my",
-    "th",
-    "si",
-    "bo",
-    "dv",
-    "ti",
-    "sw",
-    "eu",
-    "tl",
-    "ca",
-    "gl",
-    "oc",
-    "br",
-    "ga",
-    "gd",
-    "cy",
-    "bs",
-    "hr",
-    "sl",
-    "sk",
-    "et",
-    "lv",
-    "lt",
-    "eo",
-    "jv",
-    "mg",
-    "om",
-    "so",
-    "su",
-    "uz",
-    "ku",
-    "ckb",
-    "ne",
-    "mt",
-    "lb",
-    "rm",
-    "tt",
-    "ky",
-    "tg",
-    "ba",
-    "yo",
-    "zu",
-    "ny",
-    "ce",
-]
-
-_DEFAULT_LANGUAGE_ALIASES = {
-    "en": ["eng"],
-    "es": ["spa"],
-    "fr": ["fra", "fre"],
-    "de": ["deu", "ger"],
-    "it": ["ita"],
-    "pt": ["por"],
-    "nl": ["nld", "dut"],
-    "vi": ["vie"],
-    "tr": ["tur"],
-    "la": ["lat"],
-    "id": ["ind"],
-    "ms": ["msa", "may", "zlm", "zsm"],
-    "af": ["afr"],
-    "sq": ["alb", "sqi"],
-    "is": ["ice", "isl"],
-    "no": ["nb", "nn", "nor", "nob", "nno"],
-    "sv": ["swe"],
-    "da": ["dan"],
-    "fi": ["fin"],
-    "hu": ["hun"],
-    "pl": ["pol"],
-    "cs": ["ces", "cze"],
-    "ro": ["ron", "rum"],
-    "ru": ["rus"],
-    "bg": ["bul"],
-    "uk": ["ukr"],
-    "sr": ["srp"],
-    "be": ["bel"],
-    "kk": ["kaz"],
-    "mk": ["mac", "mkd"],
-    "mn": ["mon", "khk"],
-    "zh": ["chi", "zho", "cmn", "yue", "wuu", "nan"],
-    "ja": ["jpn"],
-    "ko": ["kor"],
-    "hi": ["hin"],
-    "ur": ["urd"],
-    "bn": ["ben"],
-    "ta": ["tam"],
-    "te": ["tel"],
-    "mr": ["mar"],
-    "gu": ["guj"],
-    "kn": ["kan"],
-    "ml": ["mal"],
-    "pa": ["pan"],
-    "as": ["asm"],
-    "or": ["ori", "ory"],
-    "ar": ["arb", "ara"],
-    "fa": ["fas", "per", "pes", "prs"],
-    "ps": ["pus", "pbt"],
-    "sd": ["snd"],
-    "ug": ["uig"],
-    "el": ["ell", "gre", "grc"],
-    "he": ["heb", "iw", "hbo"],
-    "hy": ["hye", "hyw"],
-    "ka": ["kat"],
-    "am": ["amh"],
-    "km": ["khm"],
-    "lo": ["lao"],
-    "my": ["mya"],
-    "th": ["tha"],
-    "si": ["sin"],
-    "bo": ["bod"],
-    "dv": ["div"],
-    "ti": ["tir"],
-    "sw": ["swa", "swh"],
-    "eu": ["eus"],
-    "tl": ["fil", "tgl"],
-    "ca": ["cat"],
-    "gl": ["glg"],
-    "oc": ["oci"],
-    "br": ["bre"],
-    "ga": ["gle"],
-    "gd": ["gla"],
-    "cy": ["cym"],
-    "bs": ["bos"],
-    "hr": ["hrv"],
-    "sl": ["slv"],
-    "sk": ["slk"],
-    "et": ["est"],
-    "lv": ["lav", "lvs"],
-    "lt": ["lit"],
-    "eo": ["epo"],
-    "jv": ["jav"],
-    "mg": ["mlg", "plt"],
-    "om": ["orm"],
-    "so": ["som"],
-    "su": ["sun"],
-    "uz": ["uzn", "uzb"],
-    "ku": ["kur", "kmr"],
-    "ckb": [],
-    "ne": ["npi"],
-    "mt": ["mlt"],
-    "lb": ["ltz"],
-    "rm": ["roh"],
-    "tt": ["tat"],
-    "ky": ["kir"],
-    "tg": ["tgk"],
-    "ba": ["bak"],
-    "yo": ["yor"],
-    "zu": ["zul"],
-    "ny": ["nya"],
-    "ce": ["che"],
-}
-
-
-def _load_json(path: Path, default: object) -> object:
-    if not path.exists():
-        return default
-    with path.open(encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _load_all_langs() -> list[str]:
-    raw = _load_json(LANGS_JSON, _DEFAULT_ALL_LANGS)
-    if isinstance(raw, list) and all(isinstance(lang, str) for lang in raw):
-        return list(raw)
-    if isinstance(raw, dict):
-        return [str(lang) for lang in raw.keys()]
-    return _DEFAULT_ALL_LANGS[:]
-
-
 def _load_language_aliases() -> dict[str, list[str]]:
-    raw = _load_json(LANGUAGE_ALIASES_JSON, _DEFAULT_LANGUAGE_ALIASES)
+    with LANGUAGE_ALIASES_JSON.open(encoding="utf-8") as f:
+        raw = json.load(f)
     if not isinstance(raw, dict):
-        return {key: value[:] for key, value in _DEFAULT_LANGUAGE_ALIASES.items()}
+        raise ValueError(f"Expected JSON object in {LANGUAGE_ALIASES_JSON}")
 
     aliases: dict[str, list[str]] = {}
     for canonical, source_aliases in raw.items():
@@ -254,12 +29,18 @@ def _load_language_aliases() -> dict[str, list[str]]:
     return aliases
 
 
-ALL_LANGS = _load_all_langs()
 LANGUAGE_ALIASES = _load_language_aliases()
+ALL_LANGS = list(LANGUAGE_ALIASES.keys())
+LANG_ISO2_TO_ISO3 = {
+    lang: (
+        getattr(pycountry.languages.get(alpha_2=lang) or pycountry.languages.get(alpha_3=lang), "alpha_3", None)
+        or lang
+    )
+    for lang in ALL_LANGS
+}
 LANG_SOURCE_CODES = {
     lang: tuple(aliases)
     for lang, aliases in LANGUAGE_ALIASES.items()
-    if lang in ALL_LANGS
 }
 LANG_SOURCE_TO_CANONICAL = {
     alias: canonical
@@ -285,28 +66,6 @@ def preferred_source_lang(lang: str) -> str:
     aliases = source_langs(lang)
     return aliases[0] if aliases else canonical_lang(lang)
 
-
-def write_all_langs_json(path: str | os.PathLike[str] = LANGS_JSON) -> None:
-    """Write the canonical ALL_LANGS list to JSON if it is missing."""
-    path = Path(path)
-    if path.exists():
-        return
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(ALL_LANGS, f, ensure_ascii=False, indent=2)
-
-
-def load_all_langs(path: str | os.PathLike[str] = LANGS_JSON) -> list[str]:
-    """Load ALL_LANGS from JSON, falling back to the in-repo constant."""
-    path = Path(path)
-    if path.exists():
-        with path.open(encoding="utf-8") as f:
-            langs = json.load(f)
-        if isinstance(langs, list) and all(isinstance(lang, str) for lang in langs):
-            return langs
-        if isinstance(langs, dict):
-            return [str(lang) for lang in langs.keys()]
-    write_all_langs_json(path)
-    return ALL_LANGS[:]
 
 ENGLISH_STOP_WORDS = [
     "able",

@@ -38,7 +38,7 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional canonical languages to keep, e.g. --langs en es fr. "
-            "Defaults to all model languages in all_langs.json."
+            "Defaults to all supported model languages."
         ),
     )
     parser.add_argument(
@@ -134,7 +134,7 @@ def main() -> None:
     if len(filtered_test) == 0:
         raise RuntimeError(
             "No examples matched the selected languages. "
-            "Check the --langs values against all_langs.json."
+            "Check the --langs values against the supported language list."
         )
 
     # ===== SETUP PIPELINE =====
