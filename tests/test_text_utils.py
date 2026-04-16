@@ -110,6 +110,11 @@ class EnglishLeakFilterTests(unittest.TestCase):
 
         self.assertEqual(text_utils.clean_sentence(sentence, "xh", self._lang_to_group), "")
 
+    def test_clean_sentence_drops_non_target_script_contamination_for_non_latin_lang(self) -> None:
+        sentence = "Это кириллица"
+
+        self.assertEqual(text_utils.clean_sentence(sentence, "hi", self._lang_to_group), "")
+
     def test_clean_sentence_can_drop_major_latin_leakage_when_enabled(self) -> None:
         original_loader = text_utils.load_wiki_major_latin_lexicon
         lexicons = {

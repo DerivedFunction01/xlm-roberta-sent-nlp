@@ -7,9 +7,17 @@ import traceback
 from functools import lru_cache
 from pathlib import Path
 
-from language import ENGLISH_STOP_WORDS, LATIN_GROUPS, LANGUAGE_GROUPS, LANGUAGE_GROUP_MIN_CHARS, canonical_lang
+from language import (
+    ENGLISH_STOP_WORDS,
+    LATIN_GROUPS,
+    LANGUAGE_GROUPS,
+    LANGUAGE_GROUP_MIN_CHARS,
+    LANGUAGE_GROUP_SCRIPTS,
+    canonical_lang,
+)
 import nltk as nltk_module
 from nltk.corpus import words as nltk_words
+from script_types import Script
 from wiki_lexicon_sources import load_wiki_major_latin_lexicon
 
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
@@ -71,6 +79,38 @@ ENGLISH_MINOR_LATIN_GROUPS = {
 }
 LATIN_MIXED_SCRIPT_ALLOWLIST = {
     "uz",
+}
+SCRIPT_NAME_MARKERS: dict[Script, tuple[str, ...]] = {
+    Script.LATIN: ("LATIN",),
+    Script.CYRILLIC: ("CYRILLIC",),
+    Script.ARABIC: ("ARABIC",),
+    Script.HEBREW: ("HEBREW",),
+    Script.DEVANAGARI: ("DEVANAGARI",),
+    Script.BENGALI: ("BENGALI",),
+    Script.JAPANESE: ("HIRAGANA", "KATAKANA", "CJK UNIFIED IDEOGRAPH", "CJK COMPATIBILITY IDEOGRAPH"),
+    Script.HAN: ("CJK UNIFIED IDEOGRAPH", "CJK COMPATIBILITY IDEOGRAPH"),
+    Script.HANGUL: ("HANGUL",),
+}
+LANGUAGE_SCRIPT_MARKER_OVERRIDES: dict[str, frozenset[str]] = {
+    "el": frozenset({"GREEK"}),
+    "hy": frozenset({"ARMENIAN"}),
+    "ka": frozenset({"GEORGIAN"}),
+    "am": frozenset({"ETHIOPIC"}),
+    "ti": frozenset({"ETHIOPIC"}),
+    "dv": frozenset({"THAANA"}),
+    "km": frozenset({"KHMER"}),
+    "lo": frozenset({"LAO"}),
+    "my": frozenset({"MYANMAR"}),
+    "th": frozenset({"THAI"}),
+    "si": frozenset({"SINHALA"}),
+    "bo": frozenset({"TIBETAN"}),
+    "ta": frozenset({"TAMIL"}),
+    "te": frozenset({"TELUGU"}),
+    "gu": frozenset({"GUJARATI"}),
+    "kn": frozenset({"KANNADA"}),
+    "ml": frozenset({"MALAYALAM"}),
+    "pa": frozenset({"GURMUKHI"}),
+    "or": frozenset({"ORIYA", "ODIA"}),
 }
 LATIN_MAJOR_LEAK_CHECK_GROUPS = {
     "AfricanLatin",
@@ -226,15 +266,71 @@ def _is_broad_english_word(token: str) -> bool:
     return False
 
 
-def _is_latin_letter(ch: str) -> bool:
-    return unicodedata.category(ch).startswith("L") and "LATIN" in unicodedata.name(ch, "")
+def _script_marker_for_char(ch: str) -> str | None:
+    if not unicodedata.category(ch).startswith("L"):
+        return None
+    name = unicodedata.name(ch, "")
+    for marker in (
+        "LATIN",
+        "CYRILLIC",
+        "ARABIC",
+        "HEBREW",
+        "DEVANAGARI",
+        "BENGALI",
+        "HIRAGANA",
+        "KATAKANA",
+        "CJK UNIFIED IDEOGRAPH",
+        "CJK COMPATIBILITY IDEOGRAPH",
+        "HANGUL",
+        "GREEK",
+        "ARMENIAN",
+        "GEORGIAN",
+        "ETHIOPIC",
+        "THAANA",
+        "KHMER",
+        "LAO",
+        "MYANMAR",
+        "THAI",
+        "SINHALA",
+        "TIBETAN",
+        "TAMIL",
+        "TELUGU",
+        "GUJARATI",
+        "KANNADA",
+        "MALAYALAM",
+        "GURMUKHI",
+        "ORIYA",
+        "ODIA",
+    ):
+        if marker in name:
+            return marker
+    return None
 
 
-def _contains_non_latin_letters(text: str) -> bool:
-    return any(
-        unicodedata.category(ch).startswith("L") and not _is_latin_letter(ch)
-        for ch in text
-    )
+def _expected_script_markers(lang: str, lang_to_group: dict[str, str]) -> frozenset[str]:
+    lang = canonical_lang(lang)
+    if lang in LANGUAGE_SCRIPT_MARKER_OVERRIDES:
+        return LANGUAGE_SCRIPT_MARKER_OVERRIDES[lang]
+    group = lang_to_group.get(lang)
+    if group in LATIN_GROUPS:
+        return frozenset(SCRIPT_NAME_MARKERS[Script.LATIN])
+    script = LANGUAGE_GROUP_SCRIPTS.get(group)
+    if script in SCRIPT_NAME_MARKERS:
+        return frozenset(SCRIPT_NAME_MARKERS[script])
+    return frozenset()
+
+
+def _contains_non_target_script_letters(text: str, lang: str, lang_to_group: dict[str, str]) -> bool:
+    expected_markers = _expected_script_markers(lang, lang_to_group)
+    if not expected_markers:
+        return False
+    for ch in text:
+        marker = _script_marker_for_char(ch)
+        if marker is None:
+            continue
+        if marker not in expected_markers:
+            return True
+    return False
 
 
 def _major_latin_language_hits(sentence: str, leak_lang: str) -> int:
@@ -440,11 +536,11 @@ def _looks_like_major_latin_leak(
     return False
 
 
-def _has_latin_script_contamination(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
+def _has_script_contamination(sentence: str, lang: str, lang_to_group: dict[str, str]) -> bool:
     lang = canonical_lang(lang)
-    if lang not in LATIN_MIXED_SCRIPT_ALLOWLIST and lang_to_group.get(lang) in LATIN_GROUPS:
-        return _contains_non_latin_letters(sentence)
-    return False
+    if lang in LATIN_MIXED_SCRIPT_ALLOWLIST and lang_to_group.get(lang) in LATIN_GROUPS:
+        return False
+    return _contains_non_target_script_letters(sentence, lang, lang_to_group)
 
 
 def _sentence_cleanup_reason(
@@ -458,7 +554,7 @@ def _sentence_cleanup_reason(
     lang = canonical_lang(lang)
     if lang == "en":
         return None
-    if _has_latin_script_contamination(sentence, lang, lang_to_group):
+    if _has_script_contamination(sentence, lang, lang_to_group):
         return "mixed_script"
     if _looks_like_english_text(sentence, lang, lang_to_group, use_nltk_secondary=use_nltk_secondary):
         return "english_leak"
