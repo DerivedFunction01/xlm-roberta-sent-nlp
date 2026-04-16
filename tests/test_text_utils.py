@@ -108,6 +108,11 @@ class EnglishLeakFilterTests(unittest.TestCase):
         missing = [lang for lang in ALL_LANGS if lang not in LANG_TO_GROUP]
         self.assertEqual(missing, [], msg=f"Missing language groups for: {missing}")
 
+    def test_every_bucket_language_has_an_alias(self) -> None:
+        bucket_langs = [lang for langs in LANGUAGE_GROUPS.values() for lang in langs]
+        missing = [lang for lang in bucket_langs if lang not in ALL_LANGS]
+        self.assertEqual(missing, [], msg=f"Missing language aliases for: {missing}")
+
 
 class TokenCountTests(unittest.TestCase):
     def test_valid_non_digit_non_symbol_token_count_ignores_math_tokens(self) -> None:
