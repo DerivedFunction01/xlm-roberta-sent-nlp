@@ -100,7 +100,7 @@ LANGUAGE_BUCKETS = {
         "script": Script.LATIN,
     },
     "CelticLatin": {
-        "langs": ["br", "ga", "gd", "cy"],
+        "langs": ["br", "ga", "gd", "cy", "sco"],
         "weight": 1.3,
         "min_chars": 1_500,
         "script": Script.LATIN,
@@ -241,7 +241,7 @@ LANGUAGE_BUCKETS = {
     # Split the remaining non-Latin scripts into two buckets to keep
     # Greco-Semitic/Caucasus-style scripts separate from Brahmic/Tibetan ones.
     "OtherScriptsWest": {
-        "langs": ["el", "hy", "ka", "am", "ti", "dv", "grc"],
+        "langs": ["el", "hy", "ka", "am", "ti", "dv"],
         "weight": 1.0,
         "min_chars": 2_000,
         "script": Script.MIXED_WEST,
@@ -299,6 +299,7 @@ WIKI = {
         "AdriaticLatin",
         "BalticLatin",
         "CelticLatin",
+        "Scots",
         "KurdishLatin",
         "PeripheralLatin",
         "WesternLatin",
