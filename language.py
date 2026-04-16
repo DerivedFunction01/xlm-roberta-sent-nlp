@@ -12,6 +12,11 @@ LANGUAGE_GROUPS = {group: cfg["langs"] for group, cfg in LANGUAGE_BUCKETS.items(
 LANGUAGE_GROUP_WEIGHTS = {group: float(cfg["weight"]) for group, cfg in LANGUAGE_BUCKETS.items()}
 LANGUAGE_GROUP_MIN_CHARS = {group: int(cfg["min_chars"]) for group, cfg in LANGUAGE_BUCKETS.items()}
 LATIN_GROUPS = {group for group, cfg in LANGUAGE_BUCKETS.items() if cfg.get("latin")}
+LANGUAGE_GROUP_SCRIPTS = {
+    group: str(cfg["script"])
+    for group, cfg in LANGUAGE_BUCKETS.items()
+    if cfg.get("script")
+}
 
 LANGUAGE_ALIASES_JSON = Path(__file__).with_name("language_aliases.json")
 

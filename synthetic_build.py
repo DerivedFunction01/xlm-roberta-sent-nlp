@@ -20,7 +20,14 @@ from tqdm.auto import tqdm
 from io_utils import write_json_atomic
 from paths import PATHS
 from source_config import DOC_MIX, FT, POOL, RUN, SMOL
-from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, LANGUAGE_GROUP_WEIGHTS, LATIN_GROUPS
+from language import (
+    ALL_LANGS,
+    LANG_TO_GROUP,
+    LANGUAGE_GROUPS,
+    LANGUAGE_GROUP_SCRIPTS,
+    LANGUAGE_GROUP_WEIGHTS,
+    LATIN_GROUPS,
+)
 
 MAX_LENGTH = RUN["len"]
 EXAMPLES_TARGET = RUN["target"]
@@ -60,10 +67,14 @@ SAFE_ACCENT_STRIP_LANGS = {
     "nl",
     "pt",
 }
-CYRILLIC_GROUPS = {group for group in LANGUAGE_GROUPS if "Cyrillic" in group} | {"Russian"}
-CYRILLIC_LETTERS = "абвгдежзийклмнопрстуфхцчшщэюя"
-ARABIC_GROUPS = {group for group in LANGUAGE_GROUPS if "Arabic" in group}
-ARABIC_LETTERS = "ابتثجحخدذرزسشصضطظعغفقكلمنهوي"
+SCRIPT_LETTER_POOLS = {
+    "latin": (string.ascii_lowercase, True),
+    "cyrillic": ("абвгдежзийклмнопрстуфхцчшщэюя", True),
+    "arabic": ("ابتثجحخدذرزسشصضطظعغفقكلمنهوي", False),
+    "devanagari": ("अआइईउऊऋएऐओऔकखगघङचछजझञटठडढणतथदधनपफबभमयरलवशषसह", False),
+    "bengali": ("অআইঈউঊঋএঐওঔকখগঘঙচছজঝঞটঠডঢণতথদধনপফবভমযরলশষসহ", False),
+}
+SCRIPT_DIGIT_POOLS = {"latin", "cyrillic", "arabic"}
 from source_pools import (
     build_disk_sentence_pool_shards,
     chunk_list,
@@ -524,27 +535,31 @@ def _apply_random_accent_stripping(sentence: str, *, lang: str, prob: float) -> 
     return stripped if stripped != sentence else sentence
 
 
+def _group_script(group: str | None) -> str | None:
+    if not group:
+        return None
+    script = LANGUAGE_GROUP_SCRIPTS.get(group)
+    if script:
+        return script
+    if group in LATIN_GROUPS:
+        return "latin"
+    return None
+
+
 def _inject_random_letter_into_sentence(sentence: str, *, lang: str, prob: float) -> str:
     """Insert one random letter between words in a script-aware sentence."""
     if prob <= 0 or random.random() >= prob:
         return sentence
     group = LANG_TO_GROUP.get(lang)
-    if group not in LATIN_GROUPS and group not in CYRILLIC_GROUPS and group not in ARABIC_GROUPS:
+    script = _group_script(group)
+    if script not in SCRIPT_LETTER_POOLS:
         return sentence
 
     parts = sentence.split()
     if len(parts) < 2:
         return sentence
 
-    if group in LATIN_GROUPS:
-        pool = string.ascii_lowercase
-        make_upper = True
-    elif group in CYRILLIC_GROUPS:
-        pool = CYRILLIC_LETTERS
-        make_upper = True
-    else:
-        pool = ARABIC_LETTERS
-        make_upper = False
+    pool, make_upper = SCRIPT_LETTER_POOLS[script]
     letter = random.choice(pool)
     if make_upper and random.random() < 0.5:
         letter = letter.upper()
@@ -559,7 +574,8 @@ def _inject_random_digit_into_sentence(sentence: str, *, lang: str, prob: float)
     if prob <= 0 or random.random() >= prob:
         return sentence
     group = LANG_TO_GROUP.get(lang)
-    if group not in LATIN_GROUPS and group not in CYRILLIC_GROUPS and group not in ARABIC_GROUPS:
+    script = _group_script(group)
+    if script not in SCRIPT_DIGIT_POOLS:
         return sentence
 
     parts = sentence.split()

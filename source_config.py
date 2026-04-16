@@ -6,6 +6,7 @@ LANGUAGE_BUCKETS = {
         "weight": 2.9,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # ~6.3% of CC — was badly underweighted relative to German/French
     "Russian": {
@@ -13,6 +14,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.95,
         "min_chars": 2_000,
         "latin": False,
+        "script": "cyrillic",
     },
     # ~5.9% of CC
     "German": {
@@ -20,6 +22,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.9,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # ~5.7% of CC — bumped up from 1.7 to match its actual footprint
     "Japanese": {
@@ -27,6 +30,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.9,
         "min_chars": 1_200,
         "latin": False,
+        "script": "japanese",
     },
     # ~5.0% of CC — CC likely undercounts due to Great Firewall
     "Chinese": {
@@ -34,6 +38,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.9,
         "min_chars": 1_200,
         "latin": False,
+        "script": "han",
     },
     # ~4.6% of CC
     "French": {
@@ -41,6 +46,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.9,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # ~4.6% of CC
     "Spanish": {
@@ -48,6 +54,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.9,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # ~2.5% of CC
     "Portuguese": {
@@ -55,6 +62,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.7,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # ~2.4% of CC
     "Italian": {
@@ -62,6 +70,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.6,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # ~2.0% of CC — split out from CentralEuropeanLatin; rivals Italian/Portuguese
     "Polish": {
@@ -69,6 +78,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.55,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # ~1.8% of CC — was significantly underweighted at 1.15
     "Dutch": {
@@ -76,6 +86,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.55,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # ~1.2% of CC — split out from CentralEuropeanLatin; large internet population
     "Turkish": {
@@ -83,6 +94,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.45,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # ind ~1.1%, vie ~1.05% of CC
     "SoutheastAsianLatin": {
@@ -90,30 +102,35 @@ LANGUAGE_BUCKETS = {
         "weight": 1.55,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     "WesternLatin": {
         "langs": ["ca", "gl", "oc"],
         "weight": 1.2,
         "min_chars": 1_500,
         "latin": True,
+        "script": "latin",
     },
     "CelticLatin": {
         "langs": ["br", "ga", "gd", "cy"],
         "weight": 1.3,
         "min_chars": 1_500,
         "latin": True,
+        "script": "latin",
     },
     "AdriaticLatin": {
         "langs": ["bs", "hr", "sl", "sk"],
         "weight": 1.4,
         "min_chars": 1_500,
         "latin": True,
+        "script": "latin",
     },
     "BalticLatin": {
         "langs": ["et", "lv", "lt"],
         "weight": 1.2,
         "min_chars": 1_500,
         "latin": True,
+        "script": "latin",
     },
     # ces ~1.14%, ron ~0.53%, hun ~0.52% of CC — smaller tier after splitting out pl/tr
     "CentralEuropeanLatin": {
@@ -121,6 +138,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.3,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # ~0.81% of CC — was overweighted at 1.7
     "Korean": {
@@ -128,6 +146,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.35,
         "min_chars": 1_200,
         "latin": False,
+        "script": "hangul",
     },
     # ukr ~0.70%, bel ~0.017% of CC
     "EastSlavicCyrillic": {
@@ -135,6 +154,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.7,
         "min_chars": 2_000,
         "latin": False,
+        "script": "cyrillic",
     },
     # ~0.65% of CC — upweighted relative to CC share given speaker population
     "Arabic": {
@@ -142,12 +162,14 @@ LANGUAGE_BUCKETS = {
         "weight": 1.4,
         "min_chars": 2_000,
         "latin": False,
+        "script": "arabic",
     },
     "Norwegian": {
         "langs": ["no"],
         "weight": 1.0,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # sv ~0.7%, dan ~0.51%, fin ~0.37%, isl ~0.04%, afr ~0.01%
     # combined ~2.0% of CC — was drastically overweighted at 6.0
@@ -157,6 +179,7 @@ LANGUAGE_BUCKETS = {
         "weight": 2.1,
         "min_chars": 2_000,
         "latin": True,
+        "script": "latin",
     },
     # bul ~0.27%, srp ~0.25%, mkd ~0.037% of CC
     "BalkanCyrillic": {
@@ -164,41 +187,49 @@ LANGUAGE_BUCKETS = {
         "weight": 1.05,
         "min_chars": 2_000,
         "latin": False,
+        "script": "cyrillic",
     },
     # fas ~0.20% of CC (ignore the one anomalous crawl spike)
     "ArabicOther": {
-        "langs": ["fa", "ps", "sd", "ug"],
+        "langs": ["fa", "ps", "sd", "ug", "ur"],
         "weight": 0.95,
         "min_chars": 2_000,
         "latin": False,
+        "script": "arabic",
     },
-    # ~0.22% of CC — genuine web underrepresentation relative to speaker count,
-    # but corpus is thin; 1.0 avoids oversampling a small pool
+    # Hindi is the main Devanagari-script pool here, so keep it separate.
     "Hindi": {
         "langs": ["hi"],
-        "weight": 1.0,
+        "weight": 1.25,
         "min_chars": 2_000,
         "latin": False,
+        "script": "devanagari",
     },
-    # combined ~0.27% of CC — upweighted for script diversity
+    # Remaining shared Devanagari-script languages keep their own pooled bucket
+    # so Devanagari character noise can be sampled consistently.
+    "Devanagari": {
+        "langs": ["mr", "ne"],
+        "weight": 0.75,
+        "min_chars": 2_000,
+        "latin": False,
+        "script": "devanagari",
+    },
+    # Shared Bengali-Assamese script.
+    "Bengali": {
+        "langs": ["bn", "as"],
+        "weight": 0.55,
+        "min_chars": 2_000,
+        "latin": False,
+        "script": "bengali",
+    },
+    # Remaining Indic scripts that do not have another same-script partner in
+    # this repo are kept together as a fallback pool.
     "IndicOther": {
-        "langs": [
-            "ur",
-            "bn",
-            "ta",
-            "te",
-            "mr",
-            "gu",
-            "kn",
-            "ml",
-            "pa",
-            "as",
-            "or",
-            "ne",
-        ],
+        "langs": ["ta", "te", "gu", "kn", "ml", "pa", "or"],
         "weight": 0.95,
         "min_chars": 2_000,
         "latin": False,
+        "script": "indic_other",
     },
     # kk ~0.038%, mn ~0.016% of CC — very thin corpus, weight is already a large relative boost
     "CentralAsianCaucusCyrillic": {
@@ -206,6 +237,7 @@ LANGUAGE_BUCKETS = {
         "weight": 1.1,
         "min_chars": 2_000,
         "latin": False,
+        "script": "cyrillic",
     },
     # Kurdish is split by script/source:
     # - ku: Wikipedia / Latin-script Kurdish
@@ -215,24 +247,28 @@ LANGUAGE_BUCKETS = {
         "weight": 0.45,
         "min_chars": 1_500,
         "latin": True,
+        "script": "latin",
     },
     "KurdishArabic": {
         "langs": ["ckb"],
         "weight": 0.45,
         "min_chars": 2_000,
         "latin": False,
+        "script": "arabic",
     },
     "AfricanLatin": {
         "langs": ["sw", "tl", "eu", "yo", "zu", "ny"],
         "weight": 1.0,
         "min_chars": 1_500,
         "latin": True,
+        "script": "latin",
     },
     "PeripheralLatin": {
         "langs": ["eo", "jv", "lb", "mg", "mt", "om", "rm", "so", "su", "uz"],
         "weight": 1.0,
         "min_chars": 1_500,
         "latin": True,
+        "script": "latin",
     },
     # Split the remaining non-Latin scripts into two buckets to keep
     # Greco-Semitic/Caucasus-style scripts separate from Brahmic/Tibetan ones.
@@ -241,12 +277,14 @@ LANGUAGE_BUCKETS = {
         "weight": 1.0,
         "min_chars": 2_000,
         "latin": False,
+        "script": "mixed_west",
     },
     "OtherScriptsEast": {
         "langs": ["km", "lo", "my", "th", "si", "bo"],
         "weight": 1.0,
         "min_chars": 2_000,
         "latin": False,
+        "script": "mixed_east",
     },
 }
 

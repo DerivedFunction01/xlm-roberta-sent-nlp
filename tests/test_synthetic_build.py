@@ -4,6 +4,7 @@ from collections import deque
 import unittest
 from unittest.mock import patch
 
+from language import LANG_TO_GROUP, LANGUAGE_GROUP_SCRIPTS
 import synthetic_build
 
 
@@ -21,6 +22,15 @@ class FinalizeTokenizer:
 
 
 class AccentStrippingTests(unittest.TestCase):
+    def test_hindi_is_its_own_bucket(self) -> None:
+        self.assertEqual(LANG_TO_GROUP["hi"], "Hindi")
+
+    def test_language_groups_expose_script_metadata(self) -> None:
+        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Hindi"], "devanagari")
+        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["ArabicOther"], "arabic")
+        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Bengali"], "bengali")
+        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Russian"], "cyrillic")
+
     def test_strip_latin_accents_removes_diacritics(self) -> None:
         self.assertEqual(
             synthetic_build._strip_latin_accents("mañana cómo está São Tomé"),
@@ -285,6 +295,92 @@ class AccentStrippingTests(unittest.TestCase):
 
         self.assertEqual(example["original_text"], "مرحبا د بالعالم")
         self.assertEqual(example["tokens"], ["مرحبا", "د", "بالعالم"])
+        self.assertEqual(example["ner_tags"], [1, 2, 2])
+
+    def test_pure_doc_can_inject_devanagari_letter_inside_span(self) -> None:
+        tokenizer = DummyTokenizer()
+        primary_pool = {"hi": deque(["नमस्ते दुनिया"])}
+        label2id = {"B-HI": 1, "I-HI": 2}
+
+        def _choice(seq):
+            if isinstance(seq, str):
+                return "द"
+            return seq[0]
+
+        with patch("synthetic_build.random.random", return_value=0.0), patch(
+            "synthetic_build.random.choice",
+            side_effect=_choice,
+        ), patch("synthetic_build.random.randint", side_effect=[1, 1]):
+            example = synthetic_build.create_pure_synthetic_doc(
+                tokenizer=tokenizer,
+                primary_pool=primary_pool,
+                lang="hi",
+                label2id=label2id,
+                min_sentences=1,
+                max_sentences=1,
+                strip_punct_prob=0.0,
+                accent_strip_prob=0.0,
+                foreign_sentence_prob=0.0,
+                sentence_uppercase_prob=0.0,
+                sentence_lowercase_prob=0.0,
+                splice_strip_next_punct_prob=0.0,
+                splice_lowercase_next_prob=0.0,
+                random_letter_prob=1.0,
+                format_noise_prob=0.0,
+                paragraph_break_prob=0.0,
+                uppercase_word_prob=0.0,
+                lowercase_word_prob=0.0,
+                titlecase_word_prob=0.0,
+                merge_word_prob=0.0,
+                split_word_prob=0.0,
+                typo_char_prob=0.0,
+            )
+
+        self.assertEqual(example["original_text"], "नमस्ते द दुनिया")
+        self.assertEqual(example["tokens"], ["नमस्ते", "द", "दुनिया"])
+        self.assertEqual(example["ner_tags"], [1, 2, 2])
+
+    def test_pure_doc_can_inject_bengali_letter_inside_span(self) -> None:
+        tokenizer = DummyTokenizer()
+        primary_pool = {"bn": deque(["আমি বাংলা"])}
+        label2id = {"B-BN": 1, "I-BN": 2}
+
+        def _choice(seq):
+            if isinstance(seq, str):
+                return "ক"
+            return seq[0]
+
+        with patch("synthetic_build.random.random", return_value=0.0), patch(
+            "synthetic_build.random.choice",
+            side_effect=_choice,
+        ), patch("synthetic_build.random.randint", side_effect=[1, 1]):
+            example = synthetic_build.create_pure_synthetic_doc(
+                tokenizer=tokenizer,
+                primary_pool=primary_pool,
+                lang="bn",
+                label2id=label2id,
+                min_sentences=1,
+                max_sentences=1,
+                strip_punct_prob=0.0,
+                accent_strip_prob=0.0,
+                foreign_sentence_prob=0.0,
+                sentence_uppercase_prob=0.0,
+                sentence_lowercase_prob=0.0,
+                splice_strip_next_punct_prob=0.0,
+                splice_lowercase_next_prob=0.0,
+                random_letter_prob=1.0,
+                format_noise_prob=0.0,
+                paragraph_break_prob=0.0,
+                uppercase_word_prob=0.0,
+                lowercase_word_prob=0.0,
+                titlecase_word_prob=0.0,
+                merge_word_prob=0.0,
+                split_word_prob=0.0,
+                typo_char_prob=0.0,
+            )
+
+        self.assertEqual(example["original_text"], "আমি ক বাংলা")
+        self.assertEqual(example["tokens"], ["আমি", "ক", "বাংলা"])
         self.assertEqual(example["ner_tags"], [1, 2, 2])
 
     def test_pure_doc_can_inject_digit_inside_span(self) -> None:
