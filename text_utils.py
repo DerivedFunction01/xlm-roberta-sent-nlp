@@ -203,6 +203,11 @@ LIST_STARTER_RE = re.compile(
 )
 LIST_ITEM_MIN_CHARS = 120
 LIST_ITEM_MIN_MARKERS = 2
+NON_TEXT_SYMBOLS = {
+    "\u20e3",  # keycap combining mark
+    "\ufe0e",  # variation selector-15
+    "\ufe0f",  # variation selector-16
+}
 
 PYSBD_SUPPORTED = {
     "en", "hi", "mr", "bg", "es", "ru", "ar", "am", "hy", "fa",
@@ -582,6 +587,15 @@ def _strip_leading_list_starters(sentence: str) -> str:
         stripped = next_stripped.lstrip()
 
 
+def _strip_non_text_symbols(sentence: str) -> str:
+    stripped: list[str] = []
+    for ch in sentence:
+        if unicodedata.category(ch).startswith("S") or ch in NON_TEXT_SYMBOLS:
+            continue
+        stripped.append(ch)
+    return "".join(stripped)
+
+
 def _has_blocked_artifact(sentence: str) -> bool:
     lower = sentence.lower()
     return any(marker in lower for marker in WIKI_BLOCKED_MARKERS) or any(ch in sentence for ch in WIKI_BLOCKED_CHARS)
@@ -736,6 +750,7 @@ def clean_sentence(
     sentence = _strip_bracket_notes(sentence)
     sentence = _collapse_repeated_punct(sentence)
     sentence = _strip_non_target_script_letters(sentence, lang, lang_to_group)
+    sentence = _strip_non_text_symbols(sentence)
     sentence = _collapse_spaces(sentence)
     sentence = sentence.strip()
     if not sentence or not _contains_target_script_letters(sentence, lang, lang_to_group):

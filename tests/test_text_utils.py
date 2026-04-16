@@ -149,6 +149,22 @@ class EnglishLeakFilterTests(unittest.TestCase):
             ["This is another sentence with a bullet starter and enough length to pass validation."],
         )
 
+    def test_clean_sentence_strips_emojis_and_symbols(self) -> None:
+        sentence = "This sentence has 😀 emojis, ☀️ symbols, and more than enough words to pass."
+
+        self.assertEqual(
+            text_utils.clean_sentence(sentence, "en", self._lang_to_group),
+            "This sentence has emojis, symbols, and more than enough words to pass.",
+        )
+
+    def test_post_clean_sentences_strips_emojis_and_symbols(self) -> None:
+        sentence = "This sentence has 😀 emojis, ☀️ symbols, and more than enough words to pass."
+
+        self.assertEqual(
+            text_utils.post_clean_sentences([sentence], "en", self._lang_to_group),
+            ["This sentence has emojis, symbols, and more than enough words to pass."],
+        )
+
     def test_clean_sentence_can_drop_major_latin_leakage_when_enabled(self) -> None:
         original_loader = text_utils.load_wiki_major_latin_lexicon
         lexicons = {
