@@ -28,18 +28,6 @@ from source_config import TATOEBA
 from paths import PATHS
 
 
-DEFAULT_LANGUAGE_REMAPS = {
-    # Chinese varieties collapse into the zh bucket for this model.
-    "cmn": "zh",
-    "yue": "zh",
-    "wuu": "zh",
-    "nan": "zh",
-    # Norwegian variants can safely be folded into the existing no bucket.
-    "nob": "no",
-    "nno": "no",
-    "ara": "ar",
-}
-
 PARQUET_SCHEMA = pa.schema([("sentence", pa.string())])
 TATOEBA_CACHE_VERSION = 2
 
@@ -95,7 +83,6 @@ def convert_tatoeba_sentences(
     force_rebuild: bool = False,
 ) -> dict[str, Any]:
     remaps = remaps or {}
-    combined_remaps = {**DEFAULT_LANGUAGE_REMAPS, **remaps}
     input_path = input_path or Path(PATHS["tatoeba"]["source_file"])
     output_dir = output_dir or Path(PATHS["tatoeba"]["cache_dir"])
     cache_meta = Path(PATHS["tatoeba"]["cache_meta"]) if output_dir == Path(PATHS["tatoeba"]["cache_dir"]) else output_dir / "tatoeba.meta.json"
@@ -110,7 +97,6 @@ def convert_tatoeba_sentences(
                 and cached_meta.get("cache_version") == TATOEBA_CACHE_VERSION
                 and cached_meta.get("max_sentences") == int(TATOEBA["max_sentences"])
                 and cached_meta.get("cap_multipliers") == TATOEBA["cap_multipliers"]
-                and cached_meta.get("default_remaps") == DEFAULT_LANGUAGE_REMAPS
                 and cached_meta.get("extra_remaps") == remaps
             ):
                 return cached_meta
@@ -142,7 +128,7 @@ def convert_tatoeba_sentences(
                     skipped_rows += 1
                     continue
 
-                lang = normalize_lang(lang_code, combined_remaps)
+                lang = normalize_lang(lang_code, remaps)
                 if not lang:
                     skipped_rows += 1
                     continue
@@ -189,7 +175,6 @@ def convert_tatoeba_sentences(
         "written_rows": sum(counts.values()),
         "skipped_rows": skipped_rows,
         "languages_written": dict(sorted(counts.items())),
-        "default_remaps": DEFAULT_LANGUAGE_REMAPS,
         "extra_remaps": remaps,
     }
     cache_meta.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")

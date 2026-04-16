@@ -98,11 +98,6 @@ def _config_name_to_lang(
     if config_name == "all":
         return None
     base = config_name.split("_", 1)[0]
-    lang_overrides = FT.get("lang_overrides", {})
-    if isinstance(lang_overrides, dict):
-        for lang, override_config in lang_overrides.items():
-            if override_config == base and isinstance(lang, str) and lang in lang_to_group:
-                return canonical_lang(lang)
     lang = canonical_lang(base)
     if lang in lang_to_group:
         if lang_to_group.get(lang) not in LATIN_GROUPS and config_name.endswith("_Latn"):
