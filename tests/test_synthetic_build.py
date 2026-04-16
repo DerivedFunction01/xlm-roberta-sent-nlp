@@ -16,8 +16,24 @@ class FinalizeTokenizer:
     def convert_tokens_to_ids(self, tokens: list[str]) -> list[int]:
         return [index + 10 for index, _ in enumerate(tokens)]
 
-    def build_inputs_with_special_tokens(self, token_ids: list[int]) -> list[int]:
-        return [101, *token_ids, 102]
+    def prepare_for_model(
+        self,
+        token_ids: list[int],
+        *,
+        add_special_tokens: bool,
+        return_attention_mask: bool,
+        return_token_type_ids: bool,
+        truncation: bool,
+    ) -> dict[str, list[int]]:
+        del return_token_type_ids, truncation
+        if not add_special_tokens:
+            input_ids = token_ids
+        else:
+            input_ids = [101, *token_ids, 102]
+        result = {"input_ids": input_ids}
+        if return_attention_mask:
+            result["attention_mask"] = [1] * len(input_ids)
+        return result
 
 
 class AccentStrippingTests(unittest.TestCase):

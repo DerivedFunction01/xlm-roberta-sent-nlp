@@ -145,9 +145,16 @@ def _finalize_synthetic_example(example: dict[str, Any], tokenizer) -> dict[str,
     """Attach model-ready fields to a synthetic example."""
     tokens = example["tokens"]
     ner_tags = example["ner_tags"]
-    input_ids = tokenizer.convert_tokens_to_ids(tokens)
-    input_ids = tokenizer.build_inputs_with_special_tokens(input_ids)
-    attention_mask = [1] * len(input_ids)
+    token_ids = tokenizer.convert_tokens_to_ids(tokens)
+    encoded = tokenizer.prepare_for_model(
+        token_ids,
+        add_special_tokens=True,
+        return_attention_mask=True,
+        return_token_type_ids=False,
+        truncation=False,
+    )
+    input_ids = encoded["input_ids"]
+    attention_mask = encoded["attention_mask"]
     labels = [-100] + ner_tags + [-100]
     finalized = dict(example)
     finalized["input_ids"] = input_ids
