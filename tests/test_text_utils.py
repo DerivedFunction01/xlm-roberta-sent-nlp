@@ -54,6 +54,11 @@ class EnglishLeakFilterTests(unittest.TestCase):
 
         self.assertIn(late_word, secondary)
 
+    def test_broad_english_word_handles_ies_to_y_inflection(self) -> None:
+        text_utils.nltk_words = DummyWordsCorpus(["party"])
+
+        self.assertTrue(text_utils._is_broad_english_word("parties"))
+
     def test_clean_sentence_drops_english_leakage_for_non_english_lang(self) -> None:
         text_utils.nltk_words = DummyWordsCorpus(
             [

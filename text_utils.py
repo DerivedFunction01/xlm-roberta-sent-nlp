@@ -263,6 +263,8 @@ def _is_broad_english_word(token: str) -> bool:
         return True
     if word.endswith("s") and word[:-1] in secondary:
         return True
+    if word.endswith("ies") and len(word) > 3 and f"{word[:-3]}y" in secondary:
+        return True
     return False
 
 
