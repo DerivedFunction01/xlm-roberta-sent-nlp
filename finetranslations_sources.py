@@ -16,7 +16,8 @@ from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic, write_records_parquet, write_sentence_parquet
 from paths import PATHS
-from language import LANG_TO_GROUP, canonical_lang
+from language import ALL_LANGS, LANG_TO_GROUP, canonical_lang
+from refilter_shared import collect_rejected_english_sentences_from_parquet
 from source_config import (
     FT,
 )
@@ -462,6 +463,41 @@ def _write_finetrans_cache_map(cache_dir: str, sentence_map: dict[str, list[str]
         write_sentence_parquet(path, sentences)
         lang_counts[lang] = len(sentences)
     return lang_counts
+
+
+def refilter_cached_finetranslations_sentences(
+    langs: list[str] = ALL_LANGS,
+    *,
+    lang_to_group: dict[str, str] = LANG_TO_GROUP,
+    sentences_dir: str = PATHS["finetrans"]["cache_dir"],
+) -> dict[str, int]:
+    updated_counts: dict[str, int] = {}
+    os.makedirs(sentences_dir, exist_ok=True)
+    for raw_lang in langs:
+        lang = canonical_lang(raw_lang)
+        if lang == "en":
+            continue
+        if lang not in lang_to_group:
+            continue
+        path = os.path.join(sentences_dir, f"{lang}.parquet")
+        if not os.path.exists(path):
+            continue
+        frame = pd.read_parquet(path)
+        if "sentence" not in frame.columns:
+            continue
+        sentences = [
+            sentence
+            for sentence in frame["sentence"].astype(str).tolist()
+            if not _looks_like_english_text(
+                sentence,
+                lang,
+                lang_to_group,
+                use_nltk_secondary=lang_to_group.get(lang) not in LATIN_GROUPS,
+            )
+        ]
+        write_sentence_parquet(path, sentences)
+        updated_counts[lang] = len(sentences)
+    return updated_counts
 
 
 def _dedupe_sentence_list(sentences: list[str]) -> tuple[list[str], int]:

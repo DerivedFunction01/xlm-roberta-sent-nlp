@@ -7,11 +7,12 @@ import unittest
 import text_utils
 from io_utils import write_sentence_parquet
 from language import LANG_TO_GROUP
+from refilter_shared import collect_rejected_english_sentences_from_parquet
 from wiki_sources import (
     MAX_WIKI_SENTENCES,
     _wiki_cap_multiplier,
     _wiki_use_nltk_secondary,
-    collect_rejected_english_sentences,
+    parquet_path,
     load_or_extract,
     max_wiki_sentences_for_lang,
 )
@@ -74,7 +75,12 @@ class WikiCapTests(unittest.TestCase):
                     "Ngeunaan basa Sunda.",
                 ],
             )
-            rejected = collect_rejected_english_sentences("su", sentences_dir=tmpdir)
+            rejected = collect_rejected_english_sentences_from_parquet(
+                lang="su",
+                path=parquet_path(tmpdir, "su"),
+                lang_to_group=LANG_TO_GROUP,
+                use_nltk_secondary=_wiki_use_nltk_secondary("su", LANG_TO_GROUP),
+            )
 
         self.assertEqual(len(rejected), 1)
         self.assertEqual(rejected[0]["sentence"], "This is the simple English clear speech leak.")

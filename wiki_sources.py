@@ -14,6 +14,7 @@ from tqdm.auto import tqdm
 from io_utils import write_json_atomic as _write_json_atomic, write_sentence_parquet as _write_sentence_parquet
 from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUP_MIN_CHARS, LATIN_GROUPS, canonical_lang
 from paths import PATHS
+from refilter_shared import collect_rejected_english_sentences_from_parquet
 from source_config import WIKI
 from text_utils import (
     _article_min_chars,
@@ -680,34 +681,3 @@ def refilter_cached_wiki_sentences(
             _write_sentence_parquet(path, cleaned)
         updated_counts[lang] = len(cleaned)
     return updated_counts
-
-
-def collect_rejected_english_sentences(
-    lang: str,
-    *,
-    lang_to_group: dict[str, str] = LANG_TO_GROUP,
-    sentences_dir: str = PATHS["wiki"]["cache_dir"],
-) -> list[dict[str, Any]]:
-    lang = canonical_lang(lang)
-    path = parquet_path(sentences_dir, lang)
-    if not os.path.exists(path):
-        return []
-    cached = pd.read_parquet(path)["sentence"].tolist()
-    use_nltk_secondary = _wiki_use_nltk_secondary(lang, lang_to_group)
-    rejected: list[dict[str, Any]] = []
-    for idx, sentence in enumerate(cached):
-        if _looks_like_english_text(
-            sentence,
-            lang,
-            lang_to_group,
-            use_nltk_secondary=use_nltk_secondary,
-        ):
-            rejected.append(
-                {
-                    "lang": lang,
-                    "source_index": idx,
-                    "sentence": sentence,
-                    "use_nltk_secondary": use_nltk_secondary,
-                }
-            )
-    return rejected

@@ -2,23 +2,24 @@ from __future__ import annotations
 
 import argparse
 import os
-from paths import PATHS
 from language import LANG_TO_GROUP, canonical_lang
+from paths import PATHS
 from refilter_shared import (
     build_refilter_arg_parser,
     collect_rejected_english_sentences_from_parquet,
     emit_rejected_english_leaks,
     validate_refilter_args,
 )
-from wiki_sources import _wiki_use_nltk_secondary, parquet_path, refilter_cached_wiki_sentences
+from finetranslations_sources import refilter_cached_finetranslations_sentences
+from text_utils import LATIN_GROUPS
 
 
 def _parse_args() -> argparse.Namespace:
     parser = build_refilter_arg_parser(
-        description="Re-run wiki post-filtering over cached sentence files.",
-        lang_help="Only process one language code (for example su or fr).",
-        all_langs_help="Refilter every cached wiki language instead of Latin-group languages only.",
-        leak_out_dir_default=os.path.join(PATHS["wiki"]["cache_dir"], "_english_leaks"),
+        description="Re-run English-leak post-filtering over cached FineTranslations sentence files.",
+        lang_help="Only process one language code (for example no or fr).",
+        all_langs_help="Refilter every cached FineTranslations language instead of just the selected one.",
+        leak_out_dir_default=os.path.join(PATHS["finetrans"]["cache_dir"], "_english_leaks"),
     )
     return parser.parse_args()
 
@@ -28,29 +29,28 @@ def main() -> None:
     validate_refilter_args(args)
 
     if args.lang:
-        lang = canonical_lang(args.lang)
         if args.emit_leaks:
+            lang = canonical_lang(args.lang)
             emit_rejected_english_leaks(
                 lang=lang,
                 leak_out_dir=args.leak_out_dir,
                 collector=lambda _lang: collect_rejected_english_sentences_from_parquet(
                     lang=lang,
-                    path=parquet_path(PATHS["wiki"]["cache_dir"], lang),
+                    path=os.path.join(PATHS["finetrans"]["cache_dir"], f"{lang}.parquet"),
                     lang_to_group=LANG_TO_GROUP,
-                    use_nltk_secondary=_wiki_use_nltk_secondary(lang, LANG_TO_GROUP),
+                    use_nltk_secondary=LANG_TO_GROUP.get(lang) not in LATIN_GROUPS,
                 ),
             )
-        updated_counts = refilter_cached_wiki_sentences([lang], latin_only=False)
+        updated_counts = refilter_cached_finetranslations_sentences([args.lang])
         total_langs = len(updated_counts)
         total_sentences = sum(updated_counts.values())
-        print(f"Refiltered {total_langs} wiki cache ({total_sentences:,} sentences kept).")
+        print(f"Refiltered {total_langs} FineTranslations cache ({total_sentences:,} sentences kept).")
         return
 
-    updated_counts = refilter_cached_wiki_sentences(latin_only=not args.all_langs)
+    updated_counts = refilter_cached_finetranslations_sentences()
     total_langs = len(updated_counts)
     total_sentences = sum(updated_counts.values())
-    scope = "Latin-group" if not args.all_langs else "all"
-    print(f"Refiltered {total_langs} {scope} wiki caches ({total_sentences:,} sentences kept).")
+    print(f"Refiltered {total_langs} FineTranslations caches ({total_sentences:,} sentences kept).")
 
 
 if __name__ == "__main__":

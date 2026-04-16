@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import argparse
+import os
+from collections.abc import Callable
+from typing import Any
+
+import pandas as pd
+
+from io_utils import write_records_parquet
+from language import canonical_lang
+from text_utils import _looks_like_english_text
+
+
+def build_refilter_arg_parser(
+    *,
+    description: str,
+    lang_help: str,
+    all_langs_help: str,
+    leak_out_dir_default: str,
+) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "--lang",
+        help=lang_help,
+    )
+    parser.add_argument(
+        "--all-langs",
+        action="store_true",
+        help=all_langs_help,
+    )
+    parser.add_argument(
+        "--emit-leaks",
+        action="store_true",
+        help="Write rejected English-looking sentences for the selected language to parquet.",
+    )
+    parser.add_argument(
+        "--leak-out-dir",
+        default=leak_out_dir_default,
+        help="Directory for leaked-sentence parquet files.",
+    )
+    return parser
+
+
+def validate_refilter_args(args: argparse.Namespace) -> None:
+    if args.lang and args.all_langs:
+        raise SystemExit("--lang and --all-langs cannot be used together.")
+    if args.emit_leaks and not args.lang:
+        raise SystemExit("--emit-leaks requires --lang.")
+
+
+def emit_rejected_english_leaks(
+    *,
+    lang: str,
+    leak_out_dir: str,
+    collector: Callable[[str], list[dict[str, Any]]],
+) -> int:
+    leaks = collector(lang)
+    os.makedirs(leak_out_dir, exist_ok=True)
+    leak_path = os.path.join(leak_out_dir, f"{lang}.parquet")
+    write_records_parquet(
+        leak_path,
+        leaks,
+        columns=["lang", "source_index", "sentence", "use_nltk_secondary"],
+    )
+    print(f"Wrote {len(leaks):,} rejected English-looking sentences -> {leak_path}")
+    return len(leaks)
+
+
+def collect_rejected_english_sentences_from_parquet(
+    *,
+    lang: str,
+    path: str,
+    lang_to_group: dict[str, str],
+    use_nltk_secondary: bool,
+) -> list[dict[str, Any]]:
+    lang = canonical_lang(lang)
+    if lang == "en" or not os.path.exists(path):
+        return []
+    frame = pd.read_parquet(path)
+    if "sentence" not in frame.columns:
+        return []
+    rejected: list[dict[str, Any]] = []
+    for idx, sentence in enumerate(frame["sentence"].astype(str).tolist()):
+        if _looks_like_english_text(
+            sentence,
+            lang,
+            lang_to_group,
+            use_nltk_secondary=use_nltk_secondary,
+        ):
+            rejected.append(
+                {
+                    "lang": lang,
+                    "source_index": idx,
+                    "sentence": sentence,
+                    "use_nltk_secondary": use_nltk_secondary,
+                }
+            )
+    return rejected
