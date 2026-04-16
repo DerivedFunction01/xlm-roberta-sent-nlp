@@ -433,6 +433,47 @@ class AccentStrippingTests(unittest.TestCase):
         self.assertEqual(example["tokens"], ["আমি", "ক", "বাংলা"])
         self.assertEqual(example["ner_tags"], [1, 2, 2])
 
+    def test_sample_list_starter_builds_dynamic_markers(self) -> None:
+        with patch(
+            "synthetic_build.random.choice",
+            side_effect=[
+                "digit",
+                ".",
+                "roman",
+                ")",
+                "iv",
+                "hash",
+                ":",
+                3,
+                "symbol",
+                ".",
+                "•",
+            ],
+        ), patch("synthetic_build.random.randint", return_value=12):
+            self.assertEqual(synthetic_build._sample_list_starter(), "12.")
+            self.assertEqual(synthetic_build._sample_list_starter(), "iv)")
+            self.assertEqual(synthetic_build._sample_list_starter(), "###")
+            self.assertEqual(synthetic_build._sample_list_starter(), "•")
+
+    def test_bullet_format_noise_uses_dynamic_starter(self) -> None:
+        tokenizer = DummyTokenizer()
+
+        with patch("synthetic_build.random.random", side_effect=[0.0, 0.1]), patch(
+            "synthetic_build.random.choice",
+            return_value="bullet",
+        ), patch("synthetic_build._sample_list_starter", return_value="12)"):
+            tokens, labels, artifacts = synthetic_build._add_formatting_noise(
+                ["hello"],
+                [1],
+                tokenizer=tokenizer,
+                lang="en",
+                artifact_prob=1.0,
+            )
+
+        self.assertEqual(tokens, ["12)", "hello"])
+        self.assertEqual(labels, [0, 1])
+        self.assertEqual(artifacts, ["12)"])
+
     def test_pure_doc_can_inject_digit_inside_span(self) -> None:
         tokenizer = DummyTokenizer()
         primary_pool = {"en": deque(["hello world"])}

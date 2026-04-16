@@ -77,6 +77,10 @@ SCRIPT_LETTER_POOLS = {
     Script.BENGALI: ("অআইঈউঊঋএঐওঔকখগঘঙচছজঝঞটঠডঢণতথদধনপফবভমযরলশষসহ", False),
 }
 SCRIPT_DIGIT_POOLS = {Script.LATIN, Script.CYRILLIC, Script.ARABIC}
+LIST_STARTER_PUNCTUATION = (".", ":", ")", "]")
+LIST_STARTER_SYMBOLS = ("-", "•", "*", "‣", "⁃", "–", "—")
+LIST_STARTER_HASH_COUNTS = (2, 3, 4)
+LIST_STARTER_ROMANS = ("i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x")
 from source_pools import (
     build_disk_sentence_pool_shards,
     chunk_list,
@@ -238,6 +242,24 @@ def _inject_formatting_artifact(
     return tokens, labels, artifact_text
 
 
+def _sample_list_starter() -> str:
+    """Build a list starter instead of relying on a tiny fixed set."""
+    pattern = random.choice(["digit", "roman", "alpha", "symbol", "hash"])
+    punct = random.choice(LIST_STARTER_PUNCTUATION)
+    if pattern == "digit":
+        return f"{random.randint(1, 24)}{punct}"
+    if pattern == "roman":
+        return f"{random.choice(LIST_STARTER_ROMANS)}{punct}"
+    if pattern == "alpha":
+        letter = random.choice(string.ascii_lowercase)
+        if random.random() < 0.5:
+            letter = letter.upper()
+        return f"{letter}{punct}"
+    if pattern == "hash":
+        return "#" * random.choice(LIST_STARTER_HASH_COUNTS)
+    return random.choice(LIST_STARTER_SYMBOLS)
+
+
 def _add_formatting_noise(
     tokens: list[str],
     labels: list[int],
@@ -263,7 +285,7 @@ def _add_formatting_noise(
         ])
         return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, prefix=prefix, suffix=suffix)
     if pattern == "bullet":
-        prefix = random.choice(["-", "•", "*", "1.", "i.", "##", "###"])
+        prefix = _sample_list_starter()
         return _inject_formatting_artifact(tokens, labels, tokenizer=tokenizer, prefix=prefix)
     if pattern == "trail":
         suffix = random.choice([":", ";", "...", "?!", " |", " | |", ",", "!!"])
