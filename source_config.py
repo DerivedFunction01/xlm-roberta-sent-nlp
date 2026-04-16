@@ -227,7 +227,7 @@ LANGUAGE_BUCKETS = {
         "script": Script.ARABIC,
     },
     "AfricanLatin": {
-        "langs": ["sw", "tl", "eu", "yo", "zu", "ny"],
+        "langs": ["sw", "tl", "eu", "yo", "zu", "ny", "xh"],
         "weight": 1.0,
         "min_chars": 1_500,
         "script": Script.LATIN,

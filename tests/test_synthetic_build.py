@@ -30,6 +30,7 @@ class AccentStrippingTests(unittest.TestCase):
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Hindi"], Script.DEVANAGARI)
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["ArabicOther"], Script.ARABIC)
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Bengali"], Script.BENGALI)
+        self.assertEqual(LANG_TO_GROUP["xho"], "AfricanLatin")
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Hebrew"], Script.HEBREW)
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Yiddish"], Script.HEBREW)
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Russian"], Script.CYRILLIC)

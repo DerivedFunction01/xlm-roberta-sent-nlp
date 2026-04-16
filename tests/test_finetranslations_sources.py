@@ -16,6 +16,10 @@ class FinetranslationsCacheTests(unittest.TestCase):
         self.assertEqual(_config_name_to_lang("hbo", LANG_TO_GROUP), "he")
         self.assertEqual(_config_name_to_lang("grc", LANG_TO_GROUP), "el")
 
+    def test_xh_configs_normalize_to_xh(self) -> None:
+        self.assertEqual(_config_name_to_lang("xh", LANG_TO_GROUP), "xh")
+        self.assertEqual(_config_name_to_lang("xh_Latn", LANG_TO_GROUP), "xh")
+
 
 if __name__ == "__main__":
     unittest.main()
