@@ -408,7 +408,7 @@ FT = {
     "max_row": 50_000,
     "miss": 1_000,
     "include_en": True, # Langs are those that will create an english parquet. Do not add any more to this list.
-    "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da", "id", "ms"},
+    "langs": {"en", "es", "fr", "pt", "it", "nl", "de", "sv", "da"},
     "lang_overrides": {
         "he": "hbo",
         "el": "grc",
