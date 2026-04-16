@@ -41,6 +41,7 @@ CUSTOM_PACKAGES = [
     "nltk",
     "faker",
     "randomname",
+    "pycountry",
 ]
 
 # Packages for the classification server
