@@ -303,7 +303,7 @@ WIKI = {
 }
 
 TATOEBA = {
-    "max_sentences": 75_000,
+    "max_sentences": 100_000,
     "cap_multipliers": {
         "en": 1.50,
         "de": 1.25,
@@ -440,13 +440,13 @@ POOL = {
     "tatoeba": {
         "reserve": PURE_DOC_FRACTION,
         "min": 1,
-        "max": 50_000,
+        "max": int(PURE_DOC_FRACTION * TATOEBA["max_sentences"]),
     },
 }
 
 RUN = {
     "len": 512,
-    "target": 4_500_000, 
+    "target": 5_000_000, 
     "syn_cache": True,
     "syn_rebuild": False,
     "tok_cache": True,
