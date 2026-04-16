@@ -78,7 +78,7 @@ from synthetic_cache import (
     _move_synthetic_shard,
     _synthetic_example_to_row,
     _synthetic_row_to_example,
-    _synthetic_rows_to_table,
+    _synthetic_table_schema,
     _synthetic_worker_temp_path,
 )
 
@@ -139,6 +139,21 @@ def bio_label_tokens(tokens: list[str], lang: str, is_first: bool, label2id: dic
         else:
             labels.append(label2id[f"I-{lang.upper()}"])
     return labels
+
+
+def _finalize_synthetic_example(example: dict[str, Any], tokenizer) -> dict[str, Any]:
+    """Attach model-ready fields to a synthetic example."""
+    tokens = example["tokens"]
+    ner_tags = example["ner_tags"]
+    input_ids = tokenizer.convert_tokens_to_ids(tokens)
+    input_ids = tokenizer.build_inputs_with_special_tokens(input_ids)
+    attention_mask = [1] * len(input_ids)
+    labels = [-100] + ner_tags + [-100]
+    finalized = dict(example)
+    finalized["input_ids"] = input_ids
+    finalized["attention_mask"] = attention_mask
+    finalized["labels"] = labels
+    return finalized
 
 
 @lru_cache(maxsize=16_384)
@@ -593,16 +608,7 @@ def generate_synthetic_examples_chunk(
 
     writer = pq.ParquetWriter(
         temp_path,
-        _synthetic_rows_to_table(
-            [
-                {
-                    "kind": "coverage",
-                    "original_text": "",
-                    "tokens": "",
-                    "ner_tags": "",
-                }
-            ]
-        ).schema,
+        _synthetic_table_schema(),
     )
     try:
         total_jobs = len(pure_langs) + len(homogeneous_langs) + mixed_count
@@ -1184,20 +1190,9 @@ def build_synthetic_doc_with_retry(
             )
         if len(example.get("tokens", ())) != len(example.get("ner_tags", ())):
             continue
-        try:
-            encoded = tokenizer(
-                example["tokens"],
-                is_split_into_words=True,
-                truncation=True,
-                max_length=max_length,
-                padding=False,
-                return_overflowing_tokens=True,
-            )
-        except Exception:
+        if len(example["tokens"]) > max_length - 2:
             continue
-        if encoded.get("overflowing_tokens"):
-            continue
-        return example
+        return _finalize_synthetic_example(example, tokenizer)
 
     raise RuntimeError(
         f"Worker {worker_idx}: failed to build a valid synthetic doc after {max_retries} attempts"

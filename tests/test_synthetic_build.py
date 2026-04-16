@@ -12,6 +12,14 @@ class DummyTokenizer:
         return text.split()
 
 
+class FinalizeTokenizer:
+    def convert_tokens_to_ids(self, tokens: list[str]) -> list[int]:
+        return [index + 10 for index, _ in enumerate(tokens)]
+
+    def build_inputs_with_special_tokens(self, token_ids: list[int]) -> list[int]:
+        return [101, *token_ids, 102]
+
+
 class AccentStrippingTests(unittest.TestCase):
     def test_strip_latin_accents_removes_diacritics(self) -> None:
         self.assertEqual(
@@ -73,6 +81,20 @@ class AccentStrippingTests(unittest.TestCase):
 
         self.assertEqual(example["original_text"], "manana como esta")
         self.assertEqual(example["tokens"], ["manana", "como", "esta"])
+
+    def test_finalize_synthetic_example_adds_model_inputs(self) -> None:
+        tokenizer = FinalizeTokenizer()
+        example = {
+            "original_text": "hello world",
+            "tokens": ["hello", "world"],
+            "ner_tags": [1, 2],
+        }
+
+        finalized = synthetic_build._finalize_synthetic_example(example, tokenizer=tokenizer)
+
+        self.assertEqual(finalized["input_ids"], [101, 10, 11, 102])
+        self.assertEqual(finalized["attention_mask"], [1, 1, 1, 1])
+        self.assertEqual(finalized["labels"], [-100, 1, 2, -100])
 
     def test_pure_doc_can_uppercase_full_sentence(self) -> None:
         tokenizer = DummyTokenizer()

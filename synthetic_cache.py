@@ -20,19 +20,26 @@ def _synthetic_shard_path(synthetic_cache_dir: str, worker_idx: int) -> str:
     return os.path.join(synthetic_cache_dir, f"part-{worker_idx:05d}.parquet")
 
 
+def _synthetic_table_schema() -> pa.Schema:
+    """Return the canonical schema for synthetic-example parquet shards."""
+    return pa.schema(
+        [
+            ("kind", pa.string()),
+            ("original_text", pa.string()),
+            ("tokens", pa.list_(pa.string())),
+            ("ner_tags", pa.list_(pa.int64())),
+            ("input_ids", pa.list_(pa.int64())),
+            ("attention_mask", pa.list_(pa.int64())),
+            ("labels", pa.list_(pa.int64())),
+        ]
+    )
+
+
 def _synthetic_rows_to_table(rows: list[dict[str, Any]]):
     """Convert a list of row dicts into an Arrow table."""
     if pa is None:
         raise RuntimeError("pyarrow is required for synthetic parquet shards")
-    schema = pa.schema(
-        [
-            ("kind", pa.string()),
-            ("original_text", pa.string()),
-            ("tokens", pa.string()),
-            ("ner_tags", pa.string()),
-        ]
-    )
-    return pa.Table.from_pylist(rows, schema=schema)
+    return pa.Table.from_pylist(rows, schema=_synthetic_table_schema())
 
 
 def _append_synthetic_rows(writer, rows: list[dict[str, Any]]) -> None:
@@ -47,8 +54,11 @@ def _synthetic_example_to_row(kind: str, example: dict[str, Any]) -> dict[str, A
     return {
         "kind": kind,
         "original_text": example.get("original_text", ""),
-        "tokens": json.dumps(example["tokens"]),
-        "ner_tags": json.dumps(example["ner_tags"]),
+        "tokens": example["tokens"],
+        "ner_tags": example["ner_tags"],
+        "input_ids": example.get("input_ids", []),
+        "attention_mask": example.get("attention_mask", []),
+        "labels": example.get("labels", []),
     }
 
 
@@ -58,14 +68,23 @@ def _synthetic_row_to_example(row) -> dict[str, Any]:
         original_text = row.get("original_text", "")
         tokens = row.get("tokens", "[]")
         ner_tags = row.get("ner_tags", "[]")
+        input_ids = row.get("input_ids", "[]")
+        attention_mask = row.get("attention_mask", "[]")
+        labels = row.get("labels", "[]")
     else:
         original_text = getattr(row, "original_text", "")
         tokens = getattr(row, "tokens", "[]")
         ner_tags = getattr(row, "ner_tags", "[]")
+        input_ids = getattr(row, "input_ids", "[]")
+        attention_mask = getattr(row, "attention_mask", "[]")
+        labels = getattr(row, "labels", "[]")
     example = {
         "original_text": original_text,
         "tokens": json.loads(tokens) if isinstance(tokens, str) else list(tokens),
         "ner_tags": json.loads(ner_tags) if isinstance(ner_tags, str) else list(ner_tags),
+        "input_ids": json.loads(input_ids) if isinstance(input_ids, str) else list(input_ids),
+        "attention_mask": json.loads(attention_mask) if isinstance(attention_mask, str) else list(attention_mask),
+        "labels": json.loads(labels) if isinstance(labels, str) else list(labels),
     }
     if not example["original_text"]:
         example["original_text"] = " ".join(example["tokens"])

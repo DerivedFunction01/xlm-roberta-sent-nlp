@@ -17,6 +17,7 @@ FORCE_REBUILD_TOKENIZED_CACHE = RUN["tok_rebuild"]
 SKIP_TOKENIZED_CACHE_VALIDATION = RUN["tok_skip_check"]
 TOKENIZED_CACHE_VERSION = PATHS["versions"]["tokenized"]
 SYNTHETIC_CACHE_META = PATHS["synthetic"]["cache_meta"]
+MODEL_READY_COLUMNS = {"input_ids", "attention_mask", "labels"}
 
 def _load_dataset_dict_from_cache_dir(cache_dir: str):
     """Load a DatasetDict from a saved cache directory or its Arrow shards."""
@@ -54,12 +55,8 @@ def tokenize_and_align(
     This avoids double-tokenization that occurs when passing subword tokens
     with is_split_into_words=True.
     """
-    # Reconstruct text from the MUTATED subword tokens
-    # This preserves all mutations (swaps, code injection, noise, etc.)
-    mutated_tokens = example["tokens"]
-    reconstructed_text = tokenizer.convert_tokens_to_string(mutated_tokens)
-    
     # Now tokenize WITH special tokens for the model input
+    reconstructed_text = tokenizer.convert_tokens_to_string(example["tokens"])
     encoding = tokenizer(
         reconstructed_text,
         truncation=True,
@@ -84,6 +81,41 @@ def tokenize_and_align(
     # Store reconstructed text for reference (this is what was actually used)
     encoding["original_text"] = reconstructed_text
     return encoding
+
+
+def _decode_list_field(value: Any) -> list[int] | list[str]:
+    """Decode a list-valued field stored as JSON or already materialized."""
+    if isinstance(value, str):
+        return json.loads(value)
+    return list(value)
+
+
+def _prepare_tokenized_split(
+    split,
+    *,
+    tokenizer,
+    label2id: dict[str, int],
+    id2label: dict[int, str],
+    max_length: int,
+):
+    """Return a split with model-ready columns, tokenizing only when required."""
+    if MODEL_READY_COLUMNS.issubset(split.column_names):
+        keep_columns = [col for col in split.column_names if col in {"input_ids", "attention_mask", "token_type_ids", "labels"}]
+        drop_columns = [col for col in split.column_names if col not in keep_columns]
+        return split.remove_columns(drop_columns) if drop_columns else split
+
+    return split.map(
+        lambda ex: tokenize_and_align(
+            ex,
+            tokenizer=tokenizer,
+            label2id=label2id,
+            id2label=id2label,
+            max_length=max_length,
+        ),
+        batched=False,
+        remove_columns=["tokens", "ner_tags"],
+        desc="Tokenizing split",
+    )
 
 
 def save_tokenized_dataset_cache(
@@ -192,30 +224,48 @@ def build_tokenized_dataset(
         )
 
     def _decode_synthetic_example(example: dict) -> dict:
-        return {
+        decoded = {
             "original_text": example.get("original_text", ""),
-            "tokens": json.loads(example["tokens"]),
-            "ner_tags": json.loads(example["ner_tags"]),
+            "tokens": _decode_list_field(example["tokens"]),
+            "ner_tags": _decode_list_field(example["ner_tags"]),
         }
+        if "input_ids" in example:
+            decoded["input_ids"] = _decode_list_field(example["input_ids"])
+        if "attention_mask" in example:
+            decoded["attention_mask"] = _decode_list_field(example["attention_mask"])
+        if "labels" in example:
+            decoded["labels"] = _decode_list_field(example["labels"])
+        return decoded
 
-    coverage_dataset = synthetic_dataset.filter(  # type: ignore
-        lambda ex: ex["kind"] in {"coverage", "pure", "homogeneous"},
-        desc="Filtering coverage split",
-    ).map(
-        _decode_synthetic_example,
-        batched=False,
-        remove_columns=["kind"],
-        desc="Decoding coverage split",
-    )
-    random_dataset = synthetic_dataset.filter(  # type: ignore
-        lambda ex: ex["kind"] in {"random", "mixed"},
-        desc="Filtering random split",
-    ).map(
-        _decode_synthetic_example,
-        batched=False,
-        remove_columns=["kind"],
-        desc="Decoding random split",
-    )
+    has_model_ready_fields = MODEL_READY_COLUMNS.issubset(synthetic_dataset.column_names)
+    if has_model_ready_fields:
+        coverage_dataset = synthetic_dataset.filter(  # type: ignore
+            lambda ex: ex["kind"] in {"coverage", "pure", "homogeneous"},
+            desc="Filtering coverage split",
+        )
+        random_dataset = synthetic_dataset.filter(  # type: ignore
+            lambda ex: ex["kind"] in {"random", "mixed"},
+            desc="Filtering random split",
+        )
+    else:
+        coverage_dataset = synthetic_dataset.filter(  # type: ignore
+            lambda ex: ex["kind"] in {"coverage", "pure", "homogeneous"},
+            desc="Filtering coverage split",
+        ).map(
+            _decode_synthetic_example,
+            batched=False,
+            remove_columns=["kind"],
+            desc="Decoding coverage split",
+        )
+        random_dataset = synthetic_dataset.filter(  # type: ignore
+            lambda ex: ex["kind"] in {"random", "mixed"},
+            desc="Filtering random split",
+        ).map(
+            _decode_synthetic_example,
+            batched=False,
+            remove_columns=["kind"],
+            desc="Decoding random split",
+        )
 
     # Limit dataset size for testing/quick iteration if specified
     if num_samples is not None:
@@ -224,17 +274,19 @@ def build_tokenized_dataset(
         coverage_dataset = coverage_dataset.select(range(min(coverage_size, len(coverage_dataset))))
         random_dataset = random_dataset.select(range(min(random_size, len(random_dataset))))
 
-    coverage_dataset = coverage_dataset.map(
-        lambda ex: tokenize_and_align(ex, tokenizer=tokenizer, label2id=label2id, id2label=id2label),
-        batched=False,
-        remove_columns=["tokens", "ner_tags"],
-        desc="Tokenizing coverage split",
+    coverage_dataset = _prepare_tokenized_split(
+        coverage_dataset,
+        tokenizer=tokenizer,
+        label2id=label2id,
+        id2label=id2label,
+        max_length=max_length,
     )
-    random_dataset = random_dataset.map(
-        lambda ex: tokenize_and_align(ex, tokenizer=tokenizer, label2id=label2id, id2label=id2label),
-        batched=False,
-        remove_columns=["tokens", "ner_tags"],
-        desc="Tokenizing random split",
+    random_dataset = _prepare_tokenized_split(
+        random_dataset,
+        tokenizer=tokenizer,
+        label2id=label2id,
+        id2label=id2label,
+        max_length=max_length,
     )
 
     split = random_dataset.train_test_split(test_size=0.05, seed=seed)
