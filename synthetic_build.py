@@ -141,21 +141,32 @@ def bio_label_tokens(tokens: list[str], lang: str, is_first: bool, label2id: dic
     return labels
 
 
+def _special_token_ids(tokenizer) -> tuple[int, int]:
+    """Return the start/end special token IDs for one-sequence model inputs."""
+    start_id = (
+        getattr(tokenizer, "bos_token_id", None)
+        or getattr(tokenizer, "cls_token_id", None)
+        or getattr(tokenizer, "eos_token_id", None)
+    )
+    end_id = (
+        getattr(tokenizer, "eos_token_id", None)
+        or getattr(tokenizer, "sep_token_id", None)
+        or getattr(tokenizer, "bos_token_id", None)
+    )
+    if start_id is None or end_id is None:
+        raise AttributeError("Tokenizer does not expose usable special token IDs")
+    return int(start_id), int(end_id)
+
+
 def _finalize_synthetic_example(example: dict[str, Any], tokenizer) -> dict[str, Any]:
     """Attach model-ready fields to a synthetic example."""
     tokens = example["tokens"]
     ner_tags = example["ner_tags"]
     token_ids = tokenizer.convert_tokens_to_ids(tokens)
-    encoded = tokenizer.prepare_for_model(
-        token_ids,
-        add_special_tokens=True,
-        return_attention_mask=True,
-        return_token_type_ids=False,
-        truncation=False,
-    )
-    input_ids = encoded["input_ids"]
-    attention_mask = encoded["attention_mask"]
-    labels = [-100] + ner_tags + [-100]
+    start_id, end_id = _special_token_ids(tokenizer)
+    input_ids = [start_id, *token_ids, end_id]
+    attention_mask = [1] * len(input_ids)
+    labels = [-100, *ner_tags, -100]
     finalized = dict(example)
     finalized["input_ids"] = input_ids
     finalized["attention_mask"] = attention_mask
