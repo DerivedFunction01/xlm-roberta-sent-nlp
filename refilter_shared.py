@@ -7,7 +7,7 @@ from typing import Any
 
 import pandas as pd
 
-from io_utils import write_records_parquet
+from io_utils import write_records_parquet, write_sentence_parquet
 from language import canonical_lang
 from text_utils import _looks_like_english_text
 
@@ -97,3 +97,30 @@ def collect_rejected_english_sentences_from_parquet(
                 }
             )
     return rejected
+
+
+def refilter_cached_sentence_parquets(
+    langs: list[str],
+    *,
+    path_for_lang: Callable[[str], str],
+    lang_to_group: dict[str, str],
+    should_skip_lang: Callable[[str, dict[str, str]], bool],
+    transform_sentences: Callable[[str, list[str], dict[str, str]], list[str]],
+) -> dict[str, int]:
+    updated_counts: dict[str, int] = {}
+    for raw_lang in langs:
+        lang = canonical_lang(raw_lang)
+        if should_skip_lang(lang, lang_to_group):
+            continue
+        path = path_for_lang(lang)
+        if not os.path.exists(path):
+            continue
+        frame = pd.read_parquet(path)
+        if "sentence" not in frame.columns:
+            continue
+        cached = frame["sentence"].astype(str).tolist()
+        cleaned = transform_sentences(lang, cached, lang_to_group)
+        if cleaned != cached:
+            write_sentence_parquet(path, cleaned)
+        updated_counts[lang] = len(cleaned)
+    return updated_counts

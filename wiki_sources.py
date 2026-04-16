@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 from io_utils import write_json_atomic as _write_json_atomic, write_sentence_parquet as _write_sentence_parquet
 from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUP_MIN_CHARS, LATIN_GROUPS, canonical_lang
 from paths import PATHS
-from refilter_shared import collect_rejected_english_sentences_from_parquet
+from refilter_shared import refilter_cached_sentence_parquets
 from source_config import WIKI
 from text_utils import (
     _article_min_chars,
@@ -662,22 +662,21 @@ def refilter_cached_wiki_sentences(
     sentences_dir: str = PATHS["wiki"]["cache_dir"],
     latin_only: bool = True,
 ) -> dict[str, int]:
-    updated_counts: dict[str, int] = {}
-    for raw_lang in langs:
-        lang = canonical_lang(raw_lang)
-        if latin_only and lang_to_group.get(lang) not in LATIN_GROUPS:
-            continue
-        path = parquet_path(sentences_dir, lang)
-        if not os.path.exists(path):
-            continue
-        cached = pd.read_parquet(path)["sentence"].tolist()
-        cleaned = post_clean_sentences(
+    def _should_skip(lang: str, lang_to_group: dict[str, str]) -> bool:
+        return latin_only and lang_to_group.get(lang) not in LATIN_GROUPS
+
+    def _transform(lang: str, cached: list[str], lang_to_group: dict[str, str]) -> list[str]:
+        return post_clean_sentences(
             cached,
             lang,
             lang_to_group,
             use_nltk_secondary=_wiki_use_nltk_secondary(lang, lang_to_group),
         )
-        if cleaned != cached:
-            _write_sentence_parquet(path, cleaned)
-        updated_counts[lang] = len(cleaned)
-    return updated_counts
+
+    return refilter_cached_sentence_parquets(
+        langs,
+        path_for_lang=lambda lang: parquet_path(sentences_dir, lang),
+        lang_to_group=lang_to_group,
+        should_skip_lang=_should_skip,
+        transform_sentences=_transform,
+    )

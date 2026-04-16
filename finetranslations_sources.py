@@ -17,7 +17,7 @@ from tqdm.auto import tqdm
 from io_utils import write_json_atomic, write_records_parquet, write_sentence_parquet
 from paths import PATHS
 from language import ALL_LANGS, LANG_TO_GROUP, canonical_lang
-from refilter_shared import collect_rejected_english_sentences_from_parquet
+from refilter_shared import refilter_cached_sentence_parquets
 from source_config import (
     FT,
 )
@@ -471,23 +471,13 @@ def refilter_cached_finetranslations_sentences(
     lang_to_group: dict[str, str] = LANG_TO_GROUP,
     sentences_dir: str = PATHS["finetrans"]["cache_dir"],
 ) -> dict[str, int]:
-    updated_counts: dict[str, int] = {}
-    os.makedirs(sentences_dir, exist_ok=True)
-    for raw_lang in langs:
-        lang = canonical_lang(raw_lang)
-        if lang == "en":
-            continue
-        if lang not in lang_to_group:
-            continue
-        path = os.path.join(sentences_dir, f"{lang}.parquet")
-        if not os.path.exists(path):
-            continue
-        frame = pd.read_parquet(path)
-        if "sentence" not in frame.columns:
-            continue
-        sentences = [
+    def _should_skip(lang: str, lang_to_group: dict[str, str]) -> bool:
+        return lang == "en" or lang not in lang_to_group
+
+    def _transform(lang: str, cached: list[str], lang_to_group: dict[str, str]) -> list[str]:
+        return [
             sentence
-            for sentence in frame["sentence"].astype(str).tolist()
+            for sentence in cached
             if not _looks_like_english_text(
                 sentence,
                 lang,
@@ -495,9 +485,14 @@ def refilter_cached_finetranslations_sentences(
                 use_nltk_secondary=lang_to_group.get(lang) not in LATIN_GROUPS,
             )
         ]
-        write_sentence_parquet(path, sentences)
-        updated_counts[lang] = len(sentences)
-    return updated_counts
+
+    return refilter_cached_sentence_parquets(
+        langs,
+        path_for_lang=lambda lang: os.path.join(sentences_dir, f"{lang}.parquet"),
+        lang_to_group=lang_to_group,
+        should_skip_lang=_should_skip,
+        transform_sentences=_transform,
+    )
 
 
 def _dedupe_sentence_list(sentences: list[str]) -> tuple[list[str], int]:
