@@ -218,6 +218,19 @@ def temp_meta_path(lang: str) -> str:
     return os.path.join(PATHS["wiki"]["temp_dir"], f"{lang}.meta.json")
 
 
+def _cached_wiki_parquet_paths(sentences_dir: str) -> dict[str, str]:
+    if not os.path.isdir(sentences_dir):
+        return {}
+    paths: dict[str, str] = {}
+    for name in os.listdir(sentences_dir):
+        if not name.endswith(".parquet"):
+            continue
+        lang = canonical_lang(name[:-8])
+        if lang in LANG_TO_GROUP:
+            paths[lang] = os.path.join(sentences_dir, name)
+    return paths
+
+
 def _wiki_cap_multiplier(source_langs: tuple[str, ...]) -> float:
     return sum(WIKI_CAP_MULTIPLIERS.get(canonical_lang(source_lang), 1.0) for source_lang in source_langs)
 
@@ -592,23 +605,8 @@ def load_or_extract(
                 and meta.get("source_langs") == source_langs
             )
         if meta_valid:
-            cached = pd.read_parquet(path)["sentence"].tolist()
-            cleaned = post_clean_sentences(
-                cached,
-                lang,
-                lang_to_group,
-                use_nltk_secondary=_wiki_use_nltk_secondary(lang, lang_to_group),
-            )
-            if cleaned != cached:
-                _write_sentence_parquet(path, cleaned)
-            if meta_missing and not os.path.exists(cache_meta_path):
-                _write_wiki_cache_meta(cache_meta_path, lang, source_langs)
+            _load_cached_wiki_sentences(path)
             return lang, path
-        stale_temp_path = temp_parquet_path(lang)
-        stale_meta_path = temp_meta_path(lang)
-        for stale_path in (path, cache_meta_path, stale_temp_path, stale_meta_path):
-            if os.path.exists(stale_path):
-                os.remove(stale_path)
     extracted_path = extract_sentences_from_wiki(
         lang,
         n_articles=articles_per_lang,
@@ -619,6 +617,10 @@ def load_or_extract(
     if not extracted_path:
         return lang, None
     return lang, extracted_path
+
+
+def _load_cached_wiki_sentences(path: str) -> list[str]:
+    return pd.read_parquet(path)["sentence"].tolist()
 
 
 def load_wiki_sentences(
@@ -634,26 +636,36 @@ def load_wiki_sentences(
     result: dict[str, list[str]] = {}
     print(f"Extracting sentences -> cached under '{sentences_dir}/'")
     print(f"(Workers: {max_workers} processes | cached languages skip extraction)\n")
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
-        futures = {
-            pool.submit(
-                load_or_extract,
-                lang,
-                lang_to_group=lang_to_group,
-                seed=seed,
-                sentences_dir=sentences_dir,
-                articles_per_lang=articles_per_lang,
-            ): lang
-            for lang in langs
-        }
-        for future in tqdm(as_completed(futures), total=len(langs), desc="Languages"):
-            lang, cache_path = future.result()
-            if not cache_path:
-                tqdm.write(f"  {lang}: skipped (Wikipedia config missing)")
-                continue
-            sentences = pd.read_parquet(cache_path)["sentence"].tolist()
-            result[lang] = sentences
-            tqdm.write(f"  {lang}: {len(sentences)} sentences -> {cache_path}")
+    cached_paths = _cached_wiki_parquet_paths(sentences_dir)
+    cached_langs = [canonical_lang(lang) for lang in langs if canonical_lang(lang) in cached_paths]
+    pending_langs = [canonical_lang(lang) for lang in langs if canonical_lang(lang) not in cached_paths]
+
+    for lang in tqdm(cached_langs, desc="Cached", leave=False):
+        cache_path = cached_paths[lang]
+        result[lang] = _load_cached_wiki_sentences(cache_path)
+        tqdm.write(f"  {lang}: cached -> {cache_path}")
+
+    if pending_langs:
+        with ProcessPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(
+                    load_or_extract,
+                    lang,
+                    lang_to_group=lang_to_group,
+                    seed=seed,
+                    sentences_dir=sentences_dir,
+                    articles_per_lang=articles_per_lang,
+                ): lang
+                for lang in pending_langs
+            }
+            for future in tqdm(as_completed(futures), total=len(pending_langs), desc="Extracting"):
+                lang, cache_path = future.result()
+                if not cache_path:
+                    tqdm.write(f"  {lang}: skipped (Wikipedia config missing)")
+                    continue
+                sentences = pd.read_parquet(cache_path)["sentence"].tolist()
+                result[lang] = sentences
+                tqdm.write(f"  {lang}: extracted -> {cache_path}")
     return result
 
 
