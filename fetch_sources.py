@@ -23,7 +23,7 @@ _maybe_login()
 #%%
 def refresh_sources() -> None:
     #%%
-    workers = max(1, mp.cpu_count() // 2)
+    workers = max(1, mp.cpu_count() - 1)
     #%%
     print("Refreshing wiki caches ...")
     _ = load_wiki_sentences(
