@@ -74,7 +74,6 @@ ENGLISH_MINOR_LATIN_GROUPS = {
     "AdriaticLatin",
     "BalticLatin",
     "CelticLatin",
-    "KurdishLatin",
     "PeripheralLatin",
     "WesternLatin",
 }
@@ -294,11 +293,11 @@ _assign_group_bounds((24, 600), "English")
 _assign_group_bounds((35, 650), "Russian", "EastSlavicCyrillic", "BalkanCyrillic", "CentralAsianCaucusCyrillic")
 _assign_group_bounds((40, 600), "German")
 _assign_group_bounds((30, 600), "Spanish", "French", "Portuguese", "Italian", "Dutch", "Polish")
-_assign_group_bounds((20, 450), "Turkish", "WesternLatin", "CelticLatin", "Scots", "AdriaticLatin", "BalticLatin", "CentralEuropeanLatin", "Norwegian", "NordicCore", "KurdishLatin")
+_assign_group_bounds((20, 450), "Turkish", "WesternLatin", "CelticLatin", "Scots", "AdriaticLatin", "BalticLatin", "CentralEuropeanLatin", "Norwegian", "NordicCore")
 _assign_group_bounds((10, 180), "Japanese")
 _assign_group_bounds((8, 180), "Chinese")
 _assign_group_bounds((15, 220), "Korean")
-_assign_group_bounds((25, 450), "Arabic", "ArabicOther", "KurdishArabic", "OtherScriptsWest")
+_assign_group_bounds((25, 450), "Arabic", "ArabicOther", "OtherScriptsWest")
 _assign_group_bounds((30, 500), "Hindi", "IndicOther")
 _assign_group_bounds((15, 300), "SoutheastAsianLatin", "AfricanLatin", "PeripheralLatin")
 _assign_group_bounds((15, 250), "OtherScriptsEast")

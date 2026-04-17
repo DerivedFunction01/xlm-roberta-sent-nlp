@@ -181,7 +181,7 @@ LANGUAGE_BUCKETS = {
     },
     # fas ~0.20% of CC (ignore the one anomalous crawl spike)
     "ArabicOther": {
-        "langs": ["fa", "ps", "sd", "ug", "ur"],
+        "langs": ["fa", "ps", "sd", "ug", "ur", "ckb"],
         "weight": 0.95,
         "min_chars": 2_000,
         "script": Script.ARABIC,
@@ -223,21 +223,6 @@ LANGUAGE_BUCKETS = {
         "min_chars": 2_000,
         "script": Script.CYRILLIC,
     },
-    # Kurdish is split by script/source:
-    # - ku: Wikipedia / Latin-script Kurdish
-    # - ckb: FineTranslations / Arabic-script Kurdish
-    "KurdishLatin": {
-        "langs": ["ku"],
-        "weight": 0.45,
-        "min_chars": 1_500,
-        "script": Script.LATIN,
-    },
-    "KurdishArabic": {
-        "langs": ["ckb"],
-        "weight": 0.45,
-        "min_chars": 2_000,
-        "script": Script.ARABIC,
-    },
     "AfricanLatin": {
         "langs": ["sw", "yo", "zu", "ny", "xh"],
         "weight": 1.0,
@@ -245,7 +230,7 @@ LANGUAGE_BUCKETS = {
         "script": Script.LATIN,
     },
     "PeripheralLatin": {
-        "langs": ["eo", "jv", "lb", "mg", "mt", "om", "rm", "so", "su", "uz"],
+        "langs": ["eo", "jv", "lb", "mg", "mt", "om", "rm", "so", "su", "uz", "ku"],
         "weight": 1.0,
         "min_chars": 1_500,
         "script": Script.LATIN,
@@ -312,7 +297,6 @@ WIKI = {
         "AdriaticLatin",
         "BalticLatin",
         "CelticLatin",
-        "KurdishLatin",
         "PeripheralLatin",
         "WesternLatin",
     },
