@@ -21,8 +21,9 @@ QUOTE_WRAPPER_PAIRS = (
     ("«", "»"),
     ("‹", "›"),
 )
-LEADING_QUOTE_NOISE_RE = re.compile(r'^\s*(?:["“”‘’«»‹›]+\s*)+')
-TRAILING_QUOTE_NOISE_RE = re.compile(r'(?:\s*["“”‘’«»‹›]+)+\s*$')
+LEADING_QUOTE_NOISE_RE = re.compile(r'^\s*(?:["“”‘’\'«»‹›]+\s*)+')
+TRAILING_QUOTE_NOISE_RE = re.compile(r'(?:\s*["“”‘’\'«»‹›]+)+\s*$')
+AFRIKAANS_LEADING_ARTICLE_RE = re.compile(r"^(['’])n(?=\s|$)", re.IGNORECASE)
 
 
 def _strip_outer_quote_wrappers(text: str) -> str:
@@ -46,13 +47,19 @@ def _strip_outer_quote_wrappers(text: str) -> str:
     return stripped
 
 
-def _strip_edge_quote_noise(text: str) -> str:
+def _strip_edge_quote_noise(text: str, *, lang: str = "") -> str:
     stripped = text.strip()
     if not stripped:
         return stripped
+    protected_prefix = ""
+    if canonical_lang(lang) == "af":
+        match = AFRIKAANS_LEADING_ARTICLE_RE.match(stripped)
+        if match:
+            protected_prefix = match.group(0)
+            stripped = stripped[len(protected_prefix) :]
     stripped = LEADING_QUOTE_NOISE_RE.sub("", stripped)
     stripped = TRAILING_QUOTE_NOISE_RE.sub("", stripped)
-    return stripped.strip()
+    return f"{protected_prefix}{stripped}".strip()
 
 
 def _merge_sentence_fragments(fragments: list[str]) -> list[str]:
@@ -110,7 +117,7 @@ def expand_wrapped_sentence_fragments(sentence: str, *, lang: str = "", segmente
 
     expanded: list[str] = []
     for block in blocks:
-        inner = _strip_edge_quote_noise(_strip_outer_quote_wrappers(block))
+        inner = _strip_edge_quote_noise(_strip_outer_quote_wrappers(block), lang=lang)
         sentence_chunks = _segment_wrapped_text(inner, lang=lang, segmenter=segmenter)
         if not sentence_chunks:
             sentence_chunks = [inner]

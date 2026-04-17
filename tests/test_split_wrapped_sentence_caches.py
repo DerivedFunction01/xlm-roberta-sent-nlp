@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from split_wrapped_sentence_caches import expand_wrapped_sentence_fragments
+from split_wrapped_sentence_caches import _strip_edge_quote_noise, expand_wrapped_sentence_fragments
 
 
 class DummySegmenter:
@@ -69,6 +69,10 @@ class WrappedSentenceSplitTests(unittest.TestCase):
             expand_wrapped_sentence_fragments(text, lang="fr", segmenter=DummySegmenter()),
             ["One", "Two", "Three"],
         )
+
+    def test_preserves_afrikaans_leading_article(self) -> None:
+        self.assertEqual(_strip_edge_quote_noise("'n huis is mooi.", lang="af"), "'n huis is mooi.")
+        self.assertEqual(_strip_edge_quote_noise("'quoted text'", lang="fr"), "quoted text")
 
 
 if __name__ == "__main__":
