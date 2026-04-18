@@ -11,7 +11,7 @@ import pandas as pd
 import requests
 from tqdm.auto import tqdm
 
-from datasets import Dataset
+from datasets import Dataset, DatasetDict
 from io_utils import write_json_atomic
 import text_utils
 from language import ALL_LANGS, LANG_TO_GROUP, canonical_lang
@@ -420,12 +420,17 @@ def _load_or_build_word_dict(input_parquet: Path) -> tuple[pd.DataFrame, int]:
     return df, contaminated_total
 
 
-def _write_split_dataset(split_dir: Path, frame: pd.DataFrame) -> None:
-    if split_dir.exists():
-        shutil.rmtree(split_dir)
-    split_dir.mkdir(parents=True, exist_ok=True)
-    dataset = Dataset.from_pandas(frame, preserve_index=False)
-    dataset.save_to_disk(str(split_dir))
+def _write_dataset_dict(output_dir: Path, train_frame: pd.DataFrame, eval_frame: pd.DataFrame) -> None:
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dataset = DatasetDict(
+        {
+            "train": Dataset.from_pandas(train_frame, preserve_index=False),
+            "eval": Dataset.from_pandas(eval_frame, preserve_index=False),
+        }
+    )
+    dataset.save_to_disk(str(output_dir))
 
 
 def _parse_args() -> argparse.Namespace:
@@ -472,8 +477,7 @@ def main() -> None:
         train_fraction=args.train_fraction,
     )
 
-    _write_split_dataset(args.output_dir / "train", train_df)
-    _write_split_dataset(args.output_dir / "eval", eval_df)
+    _write_dataset_dict(args.output_dir, train_df, eval_df)
     write_json_atomic(args.output_dir / "manifest.json", manifest)
 
     print(

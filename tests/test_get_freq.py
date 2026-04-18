@@ -166,10 +166,10 @@ class GetFreqParsingTests(unittest.TestCase):
         self.assertEqual(get_freq._repeat_count(0.10, 0), 1)
         self.assertEqual(get_freq._repeat_count(0.10, 2), 2)
 
-    def test_write_split_dataset_round_trips(self) -> None:
+    def test_write_dataset_dict_round_trips(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "train"
-            frame = pd.DataFrame(
+            path = Path(tmpdir) / "freq_short_dataset"
+            train_frame = pd.DataFrame(
                 [
                     {
                         "word": "bonjour",
@@ -188,13 +188,34 @@ class GetFreqParsingTests(unittest.TestCase):
                     }
                 ]
             )
+            eval_frame = pd.DataFrame(
+                [
+                    {
+                        "word": "salut",
+                        "lang": "fr",
+                        "freq": 90,
+                        "rank": 2,
+                        "relative_rank": 0.5,
+                        "overlaps": "",
+                        "overlap_count": 0,
+                        "is_overlap": False,
+                        "sample_weight": 1.0,
+                        "source_type": "unigram",
+                        "tokens": ["salut"],
+                        "ner_tags": [get_freq.LABEL2ID["B-FR"]],
+                        "original_text": "salut",
+                    }
+                ]
+            )
 
-            get_freq._write_split_dataset(path, frame)
+            get_freq._write_dataset_dict(path, train_frame, eval_frame)
             loaded = load_from_disk(str(path))
 
-            self.assertEqual(len(loaded), 1)
-            self.assertEqual(loaded[0]["word"], "bonjour")
-            self.assertEqual(loaded[0]["tokens"], ["bonjour"])
+            self.assertEqual(set(loaded.keys()), {"train", "eval"})
+            self.assertEqual(len(loaded["train"]), 1)
+            self.assertEqual(len(loaded["eval"]), 1)
+            self.assertEqual(loaded["train"][0]["word"], "bonjour")
+            self.assertEqual(loaded["train"][0]["tokens"], ["bonjour"])
 
 
 if __name__ == "__main__":
