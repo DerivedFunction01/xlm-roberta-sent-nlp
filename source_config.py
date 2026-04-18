@@ -157,18 +157,12 @@ LANGUAGE_BUCKETS = {
         "min_chars": 2_000,
         "script": Script.ARABIC,
     },
-    "Norwegian": {
-        "langs": ["no"],
-        "weight": 1.0,
-        "min_chars": 2_000,
-        "script": Script.LATIN,
-    },
     # sv ~0.7%, dan ~0.51%, fin ~0.37%, isl ~0.04%, afr ~0.01%
     # combined ~2.0% of CC — was drastically overweighted at 6.0
     # note: Swedish Wikipedia is heavily bot-generated stubs, don't rely on article count
     "NordicCore": {
-        "langs": ["sv", "da", "is", "af", "fi"],
-        "weight": 2.1,
+        "langs": ["sv", "da", "is", "af", "fi", "no"],
+        "weight": 2.8,
         "min_chars": 2_000,
         "script": Script.LATIN,
     },
@@ -421,8 +415,7 @@ FT = {
     "include_en": True, # Langs are those that will create an english parquet. Do not add any more to this list.
     "langs": {"es", "fr", "pt", "it", "de"},
     "cap_multipliers": {
-        "no": 1.5,
-        "sco": 0.5,
+        "sv": 1.5,
     },
 }
 FT["every"] = len(FT["langs"])
