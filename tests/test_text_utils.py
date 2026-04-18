@@ -128,6 +128,12 @@ class EnglishLeakFilterTests(unittest.TestCase):
             text_utils._has_script_contamination("bonjour한", "fr", self._lang_to_group)
         )
 
+    def test_is_valid_word_rejects_punctuation_and_numbers(self) -> None:
+        self.assertTrue(text_utils._is_valid_word("bonjour"))
+        self.assertFalse(text_utils._is_valid_word("!!!"))
+        self.assertFalse(text_utils._is_valid_word("12345"))
+        self.assertFalse(text_utils._is_valid_word("bonjour-123"))
+
     def test_post_clean_sentences_strips_non_target_script_and_keeps_valid_sentence(self) -> None:
         sentence = "यह एक кириллица मिश्रित उदाहरण वाक्य है जिसमें पर्याप्त शब्द बचे रहते हैं"
 

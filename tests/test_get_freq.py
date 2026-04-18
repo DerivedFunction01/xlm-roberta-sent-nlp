@@ -43,6 +43,23 @@ class GetFreqParsingTests(unittest.TestCase):
         self.assertEqual([row["word"] for row in rows], ["bonjour", "salut", "merci", "monde"])
         self.assertEqual([row["freq"] for row in rows], [100, 90, 80, 60])
 
+    def test_fetch_wordlist_skips_non_words(self) -> None:
+        response_text = "\n".join(
+            [
+                "100 bonjour",
+                "90 !!!",
+                "80 12345",
+                "70 monde",
+            ]
+        )
+
+        with patch("get_freq.requests.get", return_value=_FakeResponse(response_text)):
+            rows, contaminated_count = get_freq.fetch_wordlist("fr", cutoff=10, min_freq=5)
+
+        self.assertEqual(contaminated_count, 0)
+        self.assertEqual([row["word"] for row in rows], ["bonjour", "monde"])
+        self.assertEqual([row["freq"] for row in rows], [100, 70])
+
 
 if __name__ == "__main__":
     unittest.main()

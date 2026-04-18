@@ -556,6 +556,18 @@ def _valid_non_digit_non_symbol_token_count(s: str) -> int:
     return count
 
 
+def _is_valid_word(text: str) -> bool:
+    text = text.strip()
+    if not text:
+        return False
+    if _digit_count(text) > 0:
+        return False
+    words = [word for word in WIKI_WORDS.findall(text) if word.isalpha()]
+    if len(words) != 1:
+        return False
+    return _valid_non_digit_non_symbol_token_count(text) == 1
+
+
 def _valid_sentence_token_count(s: str, lang: str, lang_to_group: dict[str, str]) -> int:
     lang = canonical_lang(lang)
     group = lang_to_group.get(lang)

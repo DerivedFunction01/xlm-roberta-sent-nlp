@@ -101,6 +101,8 @@ def fetch_wordlist(lang: str, cutoff: int, min_freq: int) -> tuple[list[dict], i
         if has_mid_apos and STRIP_MID_APOSTROPHE:
             continue
         word = word.lower()
+        if not text_utils._is_valid_word(word):
+            continue
         if text_utils._has_script_contamination(word, lang, LANG_TO_GROUP):
             contaminated_count += 1
             continue
