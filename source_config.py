@@ -291,7 +291,6 @@ WIKI = {
     "rolling_stats_window": 250,
     "length_priority_scan_limit": 66_666,
     "length_priority_sentence_cap_by_lang": {
-        "vi": 50_000,
         "lo": 20_000,
         "sd": 20_000,
         "am": 20_000,
