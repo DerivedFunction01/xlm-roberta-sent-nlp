@@ -302,7 +302,7 @@ WIKI = {
 }
 
 TATOEBA = {
-    "max_sentences": 100_000,
+    "max_sentences": 150_000,
     "cap_multipliers": {
         "en": 1.50,
         "de": 1.25,
@@ -459,7 +459,7 @@ POOL = {
 
 RUN = {
     "len": 512,
-    "target": 5_000_000, 
+    "target": 5_500_000, 
     "syn_cache": True,
     "syn_rebuild": False,
     "tok_cache": True,
