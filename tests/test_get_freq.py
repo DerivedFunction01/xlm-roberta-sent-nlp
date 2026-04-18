@@ -6,7 +6,6 @@ import tempfile
 from unittest.mock import patch
 
 import pandas as pd
-from datasets import load_from_disk
 
 import get_freq
 
@@ -235,65 +234,43 @@ class GetFreqParsingTests(unittest.TestCase):
         self.assertEqual(get_freq._repeat_count(0.10, 0), 1)
         self.assertEqual(get_freq._repeat_count(0.10, 2), 2)
 
-    def test_write_dataset_dict_round_trips(self) -> None:
+    def test_write_source_pool_dir_round_trips(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "freq_short_dataset"
-            train_frame = pd.DataFrame(
+            path = Path(tmpdir) / "freq_word_pools"
+            source_df = pd.DataFrame(
                 [
                     {
                         "word": "bonjour",
                         "lang": "fr",
                         "freq": 100,
                         "rank": 1,
-                        "relative_rank": 1.0,
                         "overlaps": "",
-                        "overlap_count": 0,
                         "is_overlap": False,
-                        "sample_weight": 1.5,
-                        "source_type": "unigram",
-                        "tokens": ["bonjour"],
-                        "ner_tags": [get_freq.LABEL2ID["B-FR"]],
-                        "original_text": "bonjour",
-                        "input_ids": [101, 1000, 102],
-                        "attention_mask": [1, 1, 1],
-                        "labels": [-100, get_freq.LABEL2ID["B-FR"], -100],
-                    }
-                ]
-            )
-            eval_frame = pd.DataFrame(
-                [
+                    },
                     {
-                        "word": "salut",
-                        "lang": "fr",
+                        "word": "hello",
+                        "lang": "en",
                         "freq": 90,
                         "rank": 2,
-                        "relative_rank": 0.5,
                         "overlaps": "",
-                        "overlap_count": 0,
                         "is_overlap": False,
-                        "sample_weight": 1.0,
-                        "source_type": "unigram",
-                        "tokens": ["salut"],
-                        "ner_tags": [get_freq.LABEL2ID["B-FR"]],
-                        "original_text": "salut",
-                        "input_ids": [101, 1001, 102],
-                        "attention_mask": [1, 1, 1],
-                        "labels": [-100, get_freq.LABEL2ID["B-FR"], -100],
                     }
                 ]
             )
 
-            get_freq._write_dataset_dict(path, train_frame, eval_frame)
-            loaded = load_from_disk(str(path))
+            language_frames, manifest = get_freq.build_short_text_source_pools(source_df, seed=11)
+            get_freq._write_source_pool_dir(path, language_frames, manifest)
 
-            self.assertEqual(set(loaded.keys()), {"train", "eval"})
-            self.assertEqual(len(loaded["train"]), 1)
-            self.assertEqual(len(loaded["eval"]), 1)
-            self.assertEqual(loaded["train"][0]["word"], "bonjour")
-            self.assertEqual(loaded["train"][0]["tokens"], ["bonjour"])
-            self.assertIn("input_ids", loaded["train"][0])
-            self.assertIn("attention_mask", loaded["train"][0])
-            self.assertIn("labels", loaded["train"][0])
+            self.assertTrue((path / "fr.parquet").exists())
+            self.assertTrue((path / "en.parquet").exists())
+            self.assertTrue((path / "manifest.json").exists())
+            fr_frame = pd.read_parquet(path / "fr.parquet")
+            en_frame = pd.read_parquet(path / "en.parquet")
+            self.assertIn("sentence", fr_frame.columns)
+            self.assertIn("sentence", en_frame.columns)
+            self.assertEqual(fr_frame.iloc[0]["sentence"], "bonjour")
+            self.assertEqual(en_frame.iloc[0]["sentence"], "hello")
+            self.assertEqual(manifest["cache_version"], get_freq.SOURCE_POOL_CACHE_VERSION)
 
 
 if __name__ == "__main__":

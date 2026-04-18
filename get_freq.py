@@ -11,19 +11,17 @@ import pandas as pd
 import requests
 from tqdm.auto import tqdm
 
-from datasets import Dataset, DatasetDict
 from io_utils import write_json_atomic
 import text_utils
 from language import ALL_LANGS, LANG_TO_GROUP, canonical_lang
 from paths import PATHS
-from transformers import AutoTokenizer
 
 BASE = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018"
 DEFAULT_INPUT_PARQUET = Path("word_dict.parquet")
-DEFAULT_OUTPUT_DIR = Path(PATHS["sentences_dir"]) / "freq_short_dataset"
+DEFAULT_OUTPUT_DIR = Path(PATHS["freq"]["cache_dir"])
 DEFAULT_TRAIN_FRACTION = 0.9
 DEFAULT_SEED = 42
-TOKENIZER_CHECKPOINT = "xlm-roberta-base"
+SOURCE_POOL_CACHE_VERSION = 1
 
 MAJOR_LATIN_LANGS = {"en", "es", "fr", "de", "it", "pt"}
 MINOR_LATIN_GAP_LANGS = {"vi", "id"}
@@ -131,10 +129,6 @@ def build_label_maps(all_langs: list[str]) -> tuple[dict[str, int], dict[int, st
 
 
 LABEL2ID, ID2LABEL = build_label_maps(ALL_LANGS)
-
-
-def _get_tokenizer():
-    return AutoTokenizer.from_pretrained(TOKENIZER_CHECKPOINT, local_files_only=True)
 
 
 def fetch_wordlist(lang: str, cutoff: int, min_freq: int) -> tuple[list[dict], int]:
@@ -335,6 +329,34 @@ def _build_example(
     }
 
 
+def _build_language_examples(
+    lang: str,
+    lang_df: pd.DataFrame,
+    *,
+    seed: int,
+    tokenizer=None,
+) -> list[dict[str, Any]]:
+    lang_pool = lang_df.to_dict("records")
+    lang_rng = random.Random(_stable_seed(str(seed), lang))
+    lang_examples: list[dict[str, Any]] = []
+
+    for row in tqdm(lang_pool, desc=f"{lang} rows", leave=False):
+        repeat_count = _repeat_count(float(row["relative_rank"]), int(row["overlap_count"]))
+        for repeat_idx in range(repeat_count):
+            ngram_size = min(3, repeat_idx + 1)
+            example = _build_example(
+                row,
+                lang_pool=lang_pool,
+                ngram_size=ngram_size,
+                rng=lang_rng,
+            )
+            if tokenizer is not None:
+                example = _finalize_example(example, tokenizer)
+            lang_examples.append(example)
+
+    return lang_examples
+
+
 def _continuation_label_id(label_id: int) -> int:
     """Map a beginning label to its continuation label for split wordpieces."""
     label_name = ID2LABEL.get(label_id)
@@ -403,28 +425,12 @@ def build_short_text_dataset(
 
     grouped = list(kept.sort_values(["lang", "freq", "rank"], ascending=[True, False, True]).groupby("lang", sort=False))
     for lang, lang_df in tqdm(grouped, desc="Building short-text dataset"):
-        lang_pool = lang_df.to_dict("records")
+        finalized_examples = _build_language_examples(lang, lang_df, seed=seed, tokenizer=tokenizer)
         lang_rng = random.Random(_stable_seed(str(seed), lang))
-        lang_examples: list[dict[str, Any]] = []
-
-        for row in tqdm(lang_pool, desc=f"{lang} rows", leave=False):
-            repeat_count = _repeat_count(float(row["relative_rank"]), int(row["overlap_count"]))
-            for repeat_idx in range(repeat_count):
-                ngram_size = min(3, repeat_idx + 1)
-                lang_examples.append(
-                    _build_example(
-                        row,
-                        lang_pool=lang_pool,
-                        ngram_size=ngram_size,
-                        rng=lang_rng,
-                    )
-                )
-
-        finalized_examples = [_finalize_example(example, tokenizer) for example in lang_examples]
         train_split, eval_split = _split_examples(finalized_examples, train_fraction=train_fraction, rng=lang_rng)
         train_rows.extend(train_split)
         eval_rows.extend(eval_split)
-        lang_counts[lang] = {"train": len(train_split), "eval": len(eval_split), "examples": len(lang_examples)}
+        lang_counts[lang] = {"train": len(train_split), "eval": len(eval_split), "examples": len(finalized_examples)}
 
     train_df = pd.DataFrame(train_rows)
     eval_df = pd.DataFrame(eval_rows)
@@ -440,6 +446,52 @@ def build_short_text_dataset(
         "relative_rank_definition": "1.0 for top-ranked word in a language list, down to 0.0 for the last ranked word",
     }
     return train_df, eval_df, manifest
+
+
+def build_short_text_source_pools(
+    df: pd.DataFrame,
+    *,
+    seed: int = DEFAULT_SEED,
+) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
+    normalized = _normalize_word_dict(df)
+    kept = normalized[normalized.apply(_should_keep_word, axis=1)].copy()
+    kept["sample_weight"] = kept.apply(_row_weight, axis=1)
+
+    language_frames: dict[str, pd.DataFrame] = {}
+    lang_counts: dict[str, dict[str, int]] = {}
+
+    grouped = list(kept.sort_values(["lang", "freq", "rank"], ascending=[True, False, True]).groupby("lang", sort=False))
+    for lang, lang_df in tqdm(grouped, desc="Building short-text source pools"):
+        lang_examples = _build_language_examples(lang, lang_df, seed=seed, tokenizer=None)
+        rows = [
+            {
+                "lang": example["lang"],
+                "sentence": example["original_text"],
+                "word": example["word"],
+                "freq": example["freq"],
+                "rank": example["rank"],
+                "relative_rank": example["relative_rank"],
+                "overlaps": example["overlaps"],
+                "overlap_count": example["overlap_count"],
+                "is_overlap": example["is_overlap"],
+                "sample_weight": example["sample_weight"],
+                "source_type": example["source_type"],
+            }
+            for example in lang_examples
+        ]
+        language_frames[lang] = pd.DataFrame(rows)
+        lang_counts[lang] = {"sentences": len(rows)}
+
+    manifest = {
+        "seed": seed,
+        "languages": sorted(lang_counts),
+        "counts": lang_counts,
+        "cache_version": SOURCE_POOL_CACHE_VERSION,
+        "source_format": "parquet language shards with sentence column",
+        "row_definition": "one generated frequency example per row, repeated according to relative rank and overlap count",
+        "source_pool_ready": True,
+    }
+    return language_frames, manifest
 
 
 def _load_or_build_word_dict(input_parquet: Path) -> tuple[pd.DataFrame, int]:
@@ -467,22 +519,34 @@ def _load_or_build_word_dict(input_parquet: Path) -> tuple[pd.DataFrame, int]:
     return df, contaminated_total
 
 
-def _write_dataset_dict(output_dir: Path, train_frame: pd.DataFrame, eval_frame: pd.DataFrame) -> None:
+def _write_source_pool_dir(output_dir: Path, language_frames: dict[str, pd.DataFrame], manifest: dict[str, Any]) -> None:
     if output_dir.exists():
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    dataset = DatasetDict(
-        {
-            "train": Dataset.from_pandas(train_frame, preserve_index=False),
-            "eval": Dataset.from_pandas(eval_frame, preserve_index=False),
-        }
+    for lang, frame in language_frames.items():
+        frame.to_parquet(output_dir / f"{lang}.parquet", index=False)
+    write_json_atomic(output_dir / "manifest.json", manifest)
+
+
+def build_freq_source_pool(
+    *,
+    input_parquet: Path = DEFAULT_INPUT_PARQUET,
+    output_dir: Path = DEFAULT_OUTPUT_DIR,
+    seed: int = DEFAULT_SEED,
+) -> tuple[int, int]:
+    df, contaminated_total = _load_or_build_word_dict(input_parquet)
+    language_frames, manifest = build_short_text_source_pools(
+        df,
+        seed=seed,
     )
-    dataset.save_to_disk(str(output_dir))
+    _write_source_pool_dir(output_dir, language_frames, manifest)
+    total_examples = sum(len(frame) for frame in language_frames.values())
+    return total_examples, contaminated_total
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a clean frequency-word training set for short token-classification fine-tuning."
+        description="Build a parquet-backed frequency-word source pool for synthetic sampling."
     )
     parser.add_argument(
         "--input-parquet",
@@ -494,44 +558,26 @@ def _parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
-        help="Directory where train/test parquet files will be written.",
-    )
-    parser.add_argument(
-        "--train-fraction",
-        type=float,
-        default=DEFAULT_TRAIN_FRACTION,
-        help="Fraction of examples to place in the training split.",
+        help="Directory where language parquet shards will be written.",
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=DEFAULT_SEED,
-        help="Random seed for short-text generation and splitting.",
+        help="Random seed for short-text generation.",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
-    if args.output_dir.exists():
-        shutil.rmtree(args.output_dir)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    df, contaminated_total = _load_or_build_word_dict(args.input_parquet)
-    train_df, eval_df, manifest = build_short_text_dataset(
-        df,
+    total_examples, contaminated_total = build_freq_source_pool(
+        input_parquet=args.input_parquet,
+        output_dir=args.output_dir,
         seed=args.seed,
-        train_fraction=args.train_fraction,
-        tokenizer=_get_tokenizer(),
     )
 
-    _write_dataset_dict(args.output_dir, train_df, eval_df)
-    write_json_atomic(args.output_dir / "manifest.json", manifest)
-
-    print(
-        f"Done — {len(train_df):,} train / {len(eval_df):,} eval examples "
-        f"written to {args.output_dir}"
-    )
+    print(f"Done — wrote {total_examples:,} examples across language shards to {args.output_dir}")
     if contaminated_total:
         print(f"Skipped {contaminated_total:,} contaminated raw rows during frequency parsing")
 

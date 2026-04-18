@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import multiprocessing as mp
 from convert_tatoeba_sentences import convert_tatoeba_sentences
+from get_freq import build_freq_source_pool
 from finetranslations_sources import load_finetranslations_sentences
 from wiki_sources import load_wiki_sentences
 from smol_sources import load_smol_sentences
 from huggingface_hub import login
 from pathlib import Path
+from source_config import FREQ
 #%%
 def _maybe_login() -> None:
     token_path = Path("hf_token")
@@ -39,6 +41,10 @@ def refresh_sources() -> None:
     _ = convert_tatoeba_sentences()
     #%%
     _ = load_smol_sentences()
+    #%%
+    if FREQ["use"]:
+        print("Refreshing frequency word source pool ...")
+        _ = build_freq_source_pool()
 
 #%%
 def main() -> None:

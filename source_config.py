@@ -421,6 +421,11 @@ FT["every"] = len(FT["langs"])
 
 PURE_DOC_FRACTION = DOC_MIX["pure"]["fraction"]
 
+FREQ = {
+    "use": True,
+    "rebuild": False,
+}
+
 POOL = {
     "wiki": {
         "reserve": PURE_DOC_FRACTION,
@@ -433,6 +438,11 @@ POOL = {
         "max": 1_000,
     },
     "ft": {
+        "reserve": PURE_DOC_FRACTION,
+        "min": 1,
+        "max": int(FT["max_row"] * PURE_DOC_FRACTION),
+    },
+    "freq": {
         "reserve": PURE_DOC_FRACTION,
         "min": 1,
         "max": int(FT["max_row"] * PURE_DOC_FRACTION),

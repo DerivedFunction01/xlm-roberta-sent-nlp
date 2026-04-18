@@ -20,7 +20,7 @@ from tqdm.auto import tqdm
 from io_utils import write_json_atomic
 from paths import PATHS
 from script_types import Script
-from source_config import DOC_MIX, FT, POOL, RUN, SMOL
+from source_config import DOC_MIX, FT, FREQ, POOL, RUN, SMOL
 from language import (
     ALL_LANGS,
     LANG_TO_GROUP,
@@ -51,9 +51,13 @@ SMOL_MAX_RESERVED_SENTENCES = POOL["smol"]["max"]
 FT_RESERVE_FRACTION = POOL["ft"]["reserve"]
 FT_MIN_RESERVED_SENTENCES = POOL["ft"]["min"]
 FT_MAX_RESERVED_SENTENCES = POOL["ft"]["max"]
+FREQ_RESERVE_FRACTION = POOL["freq"]["reserve"]
+FREQ_MIN_RESERVED_SENTENCES = POOL["freq"]["min"]
+FREQ_MAX_RESERVED_SENTENCES = POOL["freq"]["max"]
 
 USE_SMOL_AUGMENTATION = SMOL["use"]
 USE_FINETRANS_AUGMENTATION = FT["use"]
+USE_FREQ_AUGMENTATION = FREQ["use"]
 PURE_DOC_MIX = DOC_MIX["pure"]
 HOMOGENEOUS_DOC_MIX = DOC_MIX["homogeneous"]
 MIXED_DOC_MIX = DOC_MIX["mixed"]
@@ -1454,6 +1458,16 @@ def build_synthetic_dataset(
                     "reserve_fraction": FT_RESERVE_FRACTION,
                     "min_reserved": FT_MIN_RESERVED_SENTENCES,
                     "max_reserved": FT_MAX_RESERVED_SENTENCES,
+                }
+            )
+        if USE_FREQ_AUGMENTATION and os.path.isdir(PATHS["freq"]["cache_dir"]):
+            source_specs.append(
+                {
+                    "name": "freq_words",
+                    "cache_dir": PATHS["freq"]["cache_dir"],
+                    "reserve_fraction": FREQ_RESERVE_FRACTION,
+                    "min_reserved": FREQ_MIN_RESERVED_SENTENCES,
+                    "max_reserved": FREQ_MAX_RESERVED_SENTENCES,
                 }
             )
         if os.path.isdir(PATHS["tatoeba"]["cache_dir"]):

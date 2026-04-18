@@ -32,6 +32,10 @@ PATHS["finetrans"] = {
     "temp_dir": os.path.join(PATHS["sentences_dir"], "_finetrans_tmp"),
     "temp_file": os.path.join(PATHS["sentences_dir"], "_finetrans_tmp", "finetranslations_sentences.parquet"),
 }
+PATHS["freq"] = {
+    "cache_dir": os.path.join(PATHS["sentences_dir"], "freq_word_pools"),
+    "cache_meta": os.path.join(PATHS["sentences_dir"], "freq_word_pools", "manifest.json"),
+}
 PATHS["tatoeba"] = {
     "cache_dir": os.path.join(PATHS["sentences_dir"], "tatoeba"),
     "cache_meta": os.path.join(PATHS["sentences_dir"], "tatoeba", "tatoeba.meta.json"),
@@ -72,6 +76,7 @@ for path in [
     PATHS["smol"]["cache_dir"],
     PATHS["finetrans"]["temp_dir"],
     PATHS["finetrans"]["cache_dir"],
+    PATHS["freq"]["cache_dir"],
     PATHS["tatoeba"]["temp_dir"],
     PATHS["tatoeba"]["cache_dir"],
     PATHS["synthetic"]["cache_dir"],
