@@ -120,6 +120,14 @@ class EnglishLeakFilterTests(unittest.TestCase):
 
         self.assertEqual(text_utils.clean_sentence(sentence, "hi", self._lang_to_group), "")
 
+    def test_has_script_contamination_detects_mixed_script_words(self) -> None:
+        self.assertFalse(
+            text_utils._has_script_contamination("bonjour", "fr", self._lang_to_group)
+        )
+        self.assertTrue(
+            text_utils._has_script_contamination("bonjour한", "fr", self._lang_to_group)
+        )
+
     def test_post_clean_sentences_strips_non_target_script_and_keeps_valid_sentence(self) -> None:
         sentence = "यह एक кириллица मिश्रित उदाहरण वाक्य है जिसमें पर्याप्त शब्द बचे रहते हैं"
 
