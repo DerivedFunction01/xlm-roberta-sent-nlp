@@ -244,14 +244,8 @@ LANGUAGE_BUCKETS = {
         "script": Script.MIXED_WEST,
     },
     "Hebrew": {
-        "langs": ["he"],
+        "langs": ["he", "yi"],
         "weight": 0.95,
-        "min_chars": 2_000,
-        "script": Script.HEBREW,
-    },
-    "Yiddish": {
-        "langs": ["yi"],
-        "weight": 0.85,
         "min_chars": 2_000,
         "script": Script.HEBREW,
     },

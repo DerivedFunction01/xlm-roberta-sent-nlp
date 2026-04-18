@@ -37,8 +37,6 @@ class AccentStrippingTests(unittest.TestCase):
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Yiddish"], Script.HEBREW)
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Russian"], Script.CYRILLIC)
 
-    def test_yiddish_is_its_own_bucket(self) -> None:
-        self.assertEqual(LANG_TO_GROUP["yi"], "Yiddish")
 
     def test_strip_latin_accents_removes_diacritics(self) -> None:
         self.assertEqual(
