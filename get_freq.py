@@ -15,7 +15,7 @@ from io_utils import write_json_atomic
 import text_utils
 from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, canonical_lang
 from paths import PATHS
-from source_config import MAJOR_LATIN_BUCKETS
+from source_config import FREQ, MAJOR_LATIN_BUCKETS
 
 BASE = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018"
 DEFAULT_INPUT_PARQUET = Path("word_dict.parquet")
@@ -478,9 +478,13 @@ def build_freq_source_pool(
     *,
     input_parquet: Path = DEFAULT_INPUT_PARQUET,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
-    seed: int = DEFAULT_SEED,
-    force_rebuild: bool = False,
+    seed: int = FREQ["seed"],
+    force_rebuild: bool = FREQ["rebuild"],
+    use: bool = FREQ["use"],
 ) -> tuple[int, int]:
+    if not use:
+        return 0, 0
+
     manifest_path = output_dir / "manifest.json"
     if not force_rebuild and output_dir.exists() and manifest_path.exists():
         try:

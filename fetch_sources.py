@@ -42,9 +42,8 @@ def refresh_sources() -> None:
     #%%
     _ = load_smol_sentences()
     #%%
-    if FREQ["use"]:
-        print("Refreshing frequency word source pool ...")
-        _ = build_freq_source_pool(force_rebuild=FREQ["rebuild"])
+    print("Refreshing frequency word source pool ...")
+    _ = build_freq_source_pool()
 
 #%%
 def main() -> None:

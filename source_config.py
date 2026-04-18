@@ -426,6 +426,7 @@ MAJOR_LATIN_BUCKETS = ("English", "German", "French", "Spanish", "Portuguese", "
 FREQ = {
     "use": True,
     "rebuild": False,
+    "seed": 42,
 }
 
 POOL = {
