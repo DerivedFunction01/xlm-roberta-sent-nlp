@@ -6,7 +6,7 @@ import tempfile
 from unittest.mock import patch
 
 import pandas as pd
-from datasets import Dataset
+from datasets import load_from_disk
 
 import get_freq
 
@@ -166,9 +166,9 @@ class GetFreqParsingTests(unittest.TestCase):
         self.assertEqual(get_freq._repeat_count(0.10, 0), 1)
         self.assertEqual(get_freq._repeat_count(0.10, 2), 2)
 
-    def test_write_arrow_file_round_trips(self) -> None:
+    def test_write_split_dataset_round_trips(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "train.arrow"
+            path = Path(tmpdir) / "train"
             frame = pd.DataFrame(
                 [
                     {
@@ -189,8 +189,8 @@ class GetFreqParsingTests(unittest.TestCase):
                 ]
             )
 
-            get_freq._write_arrow_file(path, frame)
-            loaded = Dataset.from_file(str(path))
+            get_freq._write_split_dataset(path, frame)
+            loaded = load_from_disk(str(path))
 
             self.assertEqual(len(loaded), 1)
             self.assertEqual(loaded[0]["word"], "bonjour")

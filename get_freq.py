@@ -3,14 +3,15 @@ from __future__ import annotations
 import argparse
 import math
 import random
+import shutil
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import pyarrow as pa
 import requests
 from tqdm.auto import tqdm
 
+from datasets import Dataset
 from io_utils import write_json_atomic
 import text_utils
 from language import ALL_LANGS, LANG_TO_GROUP, canonical_lang
@@ -351,7 +352,7 @@ def build_short_text_dataset(
     kept["sample_weight"] = kept.apply(_row_weight, axis=1)
 
     train_rows: list[dict[str, Any]] = []
-    test_rows: list[dict[str, Any]] = []
+    eval_rows: list[dict[str, Any]] = []
     lang_counts: dict[str, dict[str, int]] = {}
 
     grouped = list(kept.sort_values(["lang", "freq", "rank"], ascending=[True, False, True]).groupby("lang", sort=False))
@@ -373,13 +374,13 @@ def build_short_text_dataset(
                     )
                 )
 
-        train_split, test_split = _split_examples(lang_examples, train_fraction=train_fraction, rng=lang_rng)
+        train_split, eval_split = _split_examples(lang_examples, train_fraction=train_fraction, rng=lang_rng)
         train_rows.extend(train_split)
-        test_rows.extend(test_split)
-        lang_counts[lang] = {"train": len(train_split), "test": len(test_split), "examples": len(lang_examples)}
+        eval_rows.extend(eval_split)
+        lang_counts[lang] = {"train": len(train_split), "eval": len(eval_split), "examples": len(lang_examples)}
 
     train_df = pd.DataFrame(train_rows)
-    test_df = pd.DataFrame(test_rows)
+    eval_df = pd.DataFrame(eval_rows)
     manifest = {
         "seed": seed,
         "train_fraction": train_fraction,
@@ -391,7 +392,7 @@ def build_short_text_dataset(
         "ru_uk_langs": sorted(RU_UK_LANGS),
         "relative_rank_definition": "1.0 for top-ranked word in a language list, down to 0.0 for the last ranked word",
     }
-    return train_df, test_df, manifest
+    return train_df, eval_df, manifest
 
 
 def _load_or_build_word_dict(input_parquet: Path) -> tuple[pd.DataFrame, int]:
@@ -419,11 +420,12 @@ def _load_or_build_word_dict(input_parquet: Path) -> tuple[pd.DataFrame, int]:
     return df, contaminated_total
 
 
-def _write_arrow_file(path: Path, frame: pd.DataFrame) -> None:
-    table = pa.Table.from_pandas(frame, preserve_index=False)
-    with pa.OSFile(str(path), "wb") as sink:
-        with pa.ipc.new_stream(sink, table.schema) as writer:
-            writer.write_table(table)
+def _write_split_dataset(split_dir: Path, frame: pd.DataFrame) -> None:
+    if split_dir.exists():
+        shutil.rmtree(split_dir)
+    split_dir.mkdir(parents=True, exist_ok=True)
+    dataset = Dataset.from_pandas(frame, preserve_index=False)
+    dataset.save_to_disk(str(split_dir))
 
 
 def _parse_args() -> argparse.Namespace:
@@ -459,23 +461,23 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
+    if args.output_dir.exists():
+        shutil.rmtree(args.output_dir)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     df, contaminated_total = _load_or_build_word_dict(args.input_parquet)
-    train_df, test_df, manifest = build_short_text_dataset(
+    train_df, eval_df, manifest = build_short_text_dataset(
         df,
         seed=args.seed,
         train_fraction=args.train_fraction,
     )
 
-    train_path = args.output_dir / "train.arrow"
-    test_path = args.output_dir / "test.arrow"
-    _write_arrow_file(train_path, train_df)
-    _write_arrow_file(test_path, test_df)
+    _write_split_dataset(args.output_dir / "train", train_df)
+    _write_split_dataset(args.output_dir / "eval", eval_df)
     write_json_atomic(args.output_dir / "manifest.json", manifest)
 
     print(
-        f"Done — {len(train_df):,} train / {len(test_df):,} test examples "
+        f"Done — {len(train_df):,} train / {len(eval_df):,} eval examples "
         f"written to {args.output_dir}"
     )
     if contaminated_total:
