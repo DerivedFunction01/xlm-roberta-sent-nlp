@@ -23,13 +23,14 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from tqdm.auto import tqdm
 
-from language import ALL_LANGS, canonical_lang
+from language import ALL_LANGS, LANG_TO_GROUP, canonical_lang
 from source_config import TATOEBA
 from paths import PATHS
+from text_utils import _strip_non_target_script_letters
 
 
 PARQUET_SCHEMA = pa.schema([("sentence", pa.string())])
-TATOEBA_CACHE_VERSION = 2
+TATOEBA_CACHE_VERSION = 3
 
 
 def parse_remap(specs: list[str]) -> dict[str, str]:
@@ -123,13 +124,18 @@ def convert_tatoeba_sentences(
                     continue
 
                 lang_code = row[1].strip()
+                lang = normalize_lang(lang_code, remaps)
+                if not lang:
+                    skipped_rows += 1
+                    continue
+
                 sentence = row[2].strip()
                 if not sentence:
                     skipped_rows += 1
                     continue
 
-                lang = normalize_lang(lang_code, remaps)
-                if not lang:
+                sentence = _strip_non_target_script_letters(sentence, lang, LANG_TO_GROUP)
+                if not sentence.strip():
                     skipped_rows += 1
                     continue
 
