@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pyarrow as pa
 import requests
 from tqdm.auto import tqdm
 
@@ -418,6 +419,13 @@ def _load_or_build_word_dict(input_parquet: Path) -> tuple[pd.DataFrame, int]:
     return df, contaminated_total
 
 
+def _write_arrow_file(path: Path, frame: pd.DataFrame) -> None:
+    table = pa.Table.from_pandas(frame, preserve_index=False)
+    with pa.OSFile(str(path), "wb") as sink:
+        with pa.ipc.new_stream(sink, table.schema) as writer:
+            writer.write_table(table)
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build a clean frequency-word training set for short token-classification fine-tuning."
@@ -460,10 +468,10 @@ def main() -> None:
         train_fraction=args.train_fraction,
     )
 
-    train_path = args.output_dir / "train.parquet"
-    test_path = args.output_dir / "test.parquet"
-    train_df.to_parquet(train_path, index=False)
-    test_df.to_parquet(test_path, index=False)
+    train_path = args.output_dir / "train.arrow"
+    test_path = args.output_dir / "test.arrow"
+    _write_arrow_file(train_path, train_df)
+    _write_arrow_file(test_path, test_df)
     write_json_atomic(args.output_dir / "manifest.json", manifest)
 
     print(

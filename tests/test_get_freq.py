@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+import tempfile
 from unittest.mock import patch
 
 import pandas as pd
+from datasets import Dataset
 
 import get_freq
 
@@ -162,6 +165,36 @@ class GetFreqParsingTests(unittest.TestCase):
         self.assertEqual(get_freq._repeat_count(0.60, 0), 2)
         self.assertEqual(get_freq._repeat_count(0.10, 0), 1)
         self.assertEqual(get_freq._repeat_count(0.10, 2), 2)
+
+    def test_write_arrow_file_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "train.arrow"
+            frame = pd.DataFrame(
+                [
+                    {
+                        "word": "bonjour",
+                        "lang": "fr",
+                        "freq": 100,
+                        "rank": 1,
+                        "relative_rank": 1.0,
+                        "overlaps": "",
+                        "overlap_count": 0,
+                        "is_overlap": False,
+                        "sample_weight": 1.5,
+                        "source_type": "unigram",
+                        "tokens": ["bonjour"],
+                        "ner_tags": [get_freq.LABEL2ID["B-FR"]],
+                        "original_text": "bonjour",
+                    }
+                ]
+            )
+
+            get_freq._write_arrow_file(path, frame)
+            loaded = Dataset.from_file(str(path))
+
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(loaded[0]["word"], "bonjour")
+            self.assertEqual(loaded[0]["tokens"], ["bonjour"])
 
 
 if __name__ == "__main__":
