@@ -335,7 +335,16 @@ def _build_example(
     }
 
 
+def _continuation_label_id(label_id: int) -> int:
+    """Map a beginning label to its continuation label for split wordpieces."""
+    label_name = ID2LABEL.get(label_id)
+    if isinstance(label_name, str) and label_name.startswith("B-"):
+        return LABEL2ID[f"I-{label_name.removeprefix('B-')}"]
+    return label_id
+
+
 def _finalize_example(example: dict[str, Any], tokenizer) -> dict[str, Any]:
+    """Tokenize the example and expand labels across split wordpieces."""
     tokens = example["tokens"]
     labels = example["ner_tags"]
     encoding = tokenizer(
@@ -353,7 +362,7 @@ def _finalize_example(example: dict[str, Any], tokenizer) -> dict[str, Any]:
         elif word_id != previous_word_id:
             aligned_labels.append(labels[word_id])
         else:
-            aligned_labels.append(-100)
+            aligned_labels.append(_continuation_label_id(labels[word_id]))
         previous_word_id = word_id
 
     finalized = dict(example)

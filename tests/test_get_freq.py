@@ -42,6 +42,28 @@ class _FakeTokenizer:
         return _Encoding(input_ids, attention_mask, word_ids)
 
 
+class _SplitTokenizer:
+    def __call__(self, tokens, *, is_split_into_words, truncation, add_special_tokens):
+        assert is_split_into_words
+        assert truncation
+        assert add_special_tokens
+
+        # Simulate XLM-R splitting an Arabic word into three wordpieces.
+        input_ids = [101, 2001, 2002, 2003, 102]
+        attention_mask = [1] * len(input_ids)
+        word_ids = [None, 0, 0, 0, None]
+
+        class _Encoding(dict):
+            def __init__(self, input_ids, attention_mask, word_ids):
+                super().__init__(input_ids=input_ids, attention_mask=attention_mask)
+                self._word_ids = word_ids
+
+            def word_ids(self):
+                return self._word_ids
+
+        return _Encoding(input_ids, attention_mask, word_ids)
+
+
 class GetFreqParsingTests(unittest.TestCase):
     def test_infer_frequency_column_prefers_majority_sample_format(self) -> None:
         sample_rows = [
@@ -139,6 +161,27 @@ class GetFreqParsingTests(unittest.TestCase):
 
         self.assertEqual(manifest["seed"], 7)
         self.assertIn("fr", manifest["counts"])
+
+    def test_finalize_example_marks_split_wordpieces_with_bio_labels(self) -> None:
+        example = {
+            "tokens": ["دەق"],
+            "ner_tags": [get_freq.LABEL2ID["B-CKB"]],
+            "original_text": "دەق",
+        }
+
+        finalized = get_freq._finalize_example(example, _SplitTokenizer())
+
+        self.assertEqual(
+            finalized["labels"],
+            [
+                -100,
+                get_freq.LABEL2ID["B-CKB"],
+                get_freq.LABEL2ID["I-CKB"],
+                get_freq.LABEL2ID["I-CKB"],
+                -100,
+            ],
+        )
+        self.assertEqual(finalized["input_ids"], [101, 2001, 2002, 2003, 102])
 
     def test_relative_rank_is_per_language_not_absolute_frequency(self) -> None:
         df = pd.DataFrame(
