@@ -446,9 +446,9 @@ POOL = {
         "max": int(FT["max_row"] * PURE_DOC_FRACTION),
     },
     "freq": {
-        "reserve": PURE_DOC_FRACTION,
+        "reserve": 1.0, # Majority in reserve, since it is short texts
         "min": 1,
-        "max": int(FT["max_row"] * PURE_DOC_FRACTION),
+        "max": WIKI["max_wiki_sentences"],
     },
     "tatoeba": {
         "reserve": PURE_DOC_FRACTION,
