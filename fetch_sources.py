@@ -44,7 +44,7 @@ def refresh_sources() -> None:
     #%%
     if FREQ["use"]:
         print("Refreshing frequency word source pool ...")
-        _ = build_freq_source_pool()
+        _ = build_freq_source_pool(force_rebuild=FREQ["rebuild"])
 
 #%%
 def main() -> None:

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -120,7 +120,7 @@ class GetFreqParsingTests(unittest.TestCase):
         self.assertEqual([row["word"] for row in rows], ["bonjour", "monde"])
         self.assertEqual([row["freq"] for row in rows], [100, 70])
 
-    def test_build_short_text_dataset_drops_minor_latin_major_overlaps(self) -> None:
+    def test_should_keep_word_drops_minor_latin_gap_overlaps(self) -> None:
         df = pd.DataFrame(
             [
                 {"word": "bonjour", "lang": "fr", "freq": 120, "rank": 1, "overlaps": "es", "is_overlap": True},
@@ -131,35 +131,13 @@ class GetFreqParsingTests(unittest.TestCase):
             ]
         )
 
-        train_df, test_df, manifest = get_freq.build_short_text_dataset(
-            df,
-            seed=7,
-            train_fraction=0.8,
-            tokenizer=_FakeTokenizer(),
-        )
+        normalized = get_freq._normalize_word_dict(df)
+        kept = normalized[normalized.apply(get_freq._should_keep_word, axis=1)].copy()
 
-        combined = pd.concat([train_df, test_df], ignore_index=True)
-        langs = set(combined["lang"].tolist())
-
-        self.assertIn("fr", langs)
-        self.assertIn("en", langs)
-        self.assertIn("vi", langs)
-        self.assertNotIn("vi", set(train_df.loc[train_df["word"] == "xin", "lang"].tolist()))
-        self.assertNotIn("vi", set(test_df.loc[test_df["word"] == "xin", "lang"].tolist()))
-
-        fr_rows = combined[combined["lang"] == "fr"]
-        self.assertTrue({"unigram", "bigram"}.issubset(set(fr_rows["source_type"].tolist())))
-        for _, row in combined.iterrows():
-            self.assertEqual(len(row["tokens"]), len(row["ner_tags"]))
-            self.assertIn("input_ids", row)
-            self.assertIn("attention_mask", row)
-            self.assertIn("labels", row)
-            self.assertEqual(len(row["input_ids"]), len(row["attention_mask"]))
-            self.assertEqual(len(row["input_ids"]), len(row["labels"]))
-            self.assertTrue(all(tag == row["ner_tags"][0] or tag == row["ner_tags"][-1] for tag in row["ner_tags"]))
-
-        self.assertEqual(manifest["seed"], 7)
-        self.assertIn("fr", manifest["counts"])
+        self.assertIn("fr", set(kept["lang"].tolist()))
+        self.assertIn("en", set(kept["lang"].tolist()))
+        self.assertIn("vi", set(kept["lang"].tolist()))
+        self.assertNotIn("xin", set(kept.loc[kept["lang"] == "vi", "word"].tolist()))
 
     def test_finalize_example_marks_split_wordpieces_with_bio_labels(self) -> None:
         example = {

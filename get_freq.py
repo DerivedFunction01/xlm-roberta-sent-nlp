@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import math
+import json
 import random
 import shutil
 from pathlib import Path
@@ -13,21 +13,21 @@ from tqdm.auto import tqdm
 
 from io_utils import write_json_atomic
 import text_utils
-from language import ALL_LANGS, LANG_TO_GROUP, canonical_lang
+from language import ALL_LANGS, LANG_TO_GROUP, LANGUAGE_GROUPS, canonical_lang
 from paths import PATHS
+from source_config import MAJOR_LATIN_BUCKETS
 
 BASE = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018"
 DEFAULT_INPUT_PARQUET = Path("word_dict.parquet")
 DEFAULT_OUTPUT_DIR = Path(PATHS["freq"]["cache_dir"])
-DEFAULT_TRAIN_FRACTION = 0.9
 DEFAULT_SEED = 42
 SOURCE_POOL_CACHE_VERSION = 1
 
-MAJOR_LATIN_LANGS = {"en", "es", "fr", "de", "it", "pt"}
-MINOR_LATIN_GAP_LANGS = {"vi", "id"}
-NORDIC_LANGS = {"da", "no", "sv", "fi"}
-RU_UK_LANGS = {"ru", "uk"}
-
+MAJOR_LATIN_LANGS = frozenset(
+    lang for bucket in MAJOR_LATIN_BUCKETS for lang in LANGUAGE_GROUPS.get(bucket, ())
+)
+NORDIC_LANGS = frozenset(LANGUAGE_GROUPS.get("NordicCore", ()))
+MINOR_LATIN_GAP_GROUPS = text_utils.ENGLISH_MINOR_LATIN_GROUPS
 
 LANG_CONFIG = {
     "en": {"cutoff": 5650, "min_freq": 5},
@@ -211,7 +211,7 @@ def _normalize_word_dict(df: pd.DataFrame) -> pd.DataFrame:
 def _should_keep_word(row: pd.Series) -> bool:
     lang = canonical_lang(str(row["lang"]))
     overlap_langs = row["overlap_langs"]
-    if lang in MINOR_LATIN_GAP_LANGS and overlap_langs & MAJOR_LATIN_LANGS:
+    if LANG_TO_GROUP.get(lang, "") in MINOR_LATIN_GAP_GROUPS and overlap_langs & MAJOR_LATIN_LANGS:
         return False
     return True
 
@@ -394,60 +394,6 @@ def _finalize_example(example: dict[str, Any], tokenizer) -> dict[str, Any]:
     return finalized
 
 
-def _split_examples(examples: list[dict[str, Any]], *, train_fraction: float, rng: random.Random) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    if not examples:
-        return [], []
-    shuffled = examples[:]
-    rng.shuffle(shuffled)
-    if len(shuffled) == 1:
-        return shuffled, []
-    train_size = int(round(len(shuffled) * train_fraction))
-    train_size = max(1, min(len(shuffled) - 1, train_size))
-    return shuffled[:train_size], shuffled[train_size:]
-
-
-def build_short_text_dataset(
-    df: pd.DataFrame,
-    *,
-    seed: int = DEFAULT_SEED,
-    train_fraction: float = DEFAULT_TRAIN_FRACTION,
-    tokenizer=None,
-) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
-    if tokenizer is None:
-        tokenizer = _get_tokenizer()
-    normalized = _normalize_word_dict(df)
-    kept = normalized[normalized.apply(_should_keep_word, axis=1)].copy()
-    kept["sample_weight"] = kept.apply(_row_weight, axis=1)
-
-    train_rows: list[dict[str, Any]] = []
-    eval_rows: list[dict[str, Any]] = []
-    lang_counts: dict[str, dict[str, int]] = {}
-
-    grouped = list(kept.sort_values(["lang", "freq", "rank"], ascending=[True, False, True]).groupby("lang", sort=False))
-    for lang, lang_df in tqdm(grouped, desc="Building short-text dataset"):
-        finalized_examples = _build_language_examples(lang, lang_df, seed=seed, tokenizer=tokenizer)
-        lang_rng = random.Random(_stable_seed(str(seed), lang))
-        train_split, eval_split = _split_examples(finalized_examples, train_fraction=train_fraction, rng=lang_rng)
-        train_rows.extend(train_split)
-        eval_rows.extend(eval_split)
-        lang_counts[lang] = {"train": len(train_split), "eval": len(eval_split), "examples": len(finalized_examples)}
-
-    train_df = pd.DataFrame(train_rows)
-    eval_df = pd.DataFrame(eval_rows)
-    manifest = {
-        "seed": seed,
-        "train_fraction": train_fraction,
-        "languages": sorted(lang_counts),
-        "counts": lang_counts,
-        "major_latin_langs": sorted(MAJOR_LATIN_LANGS),
-        "minor_latin_gap_langs": sorted(MINOR_LATIN_GAP_LANGS),
-        "nordic_langs": sorted(NORDIC_LANGS),
-        "ru_uk_langs": sorted(RU_UK_LANGS),
-        "relative_rank_definition": "1.0 for top-ranked word in a language list, down to 0.0 for the last ranked word",
-    }
-    return train_df, eval_df, manifest
-
-
 def build_short_text_source_pools(
     df: pd.DataFrame,
     *,
@@ -533,7 +479,18 @@ def build_freq_source_pool(
     input_parquet: Path = DEFAULT_INPUT_PARQUET,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     seed: int = DEFAULT_SEED,
+    force_rebuild: bool = False,
 ) -> tuple[int, int]:
+    manifest_path = output_dir / "manifest.json"
+    if not force_rebuild and output_dir.exists() and manifest_path.exists():
+        try:
+            with manifest_path.open(encoding="utf-8") as f:
+                manifest = json.load(f)
+            total_examples = sum(int(stats.get("sentences", 0)) for stats in manifest.get("counts", {}).values())
+            return total_examples, 0
+        except Exception:
+            pass
+
     df, contaminated_total = _load_or_build_word_dict(input_parquet)
     language_frames, manifest = build_short_text_source_pools(
         df,
@@ -575,6 +532,7 @@ def main() -> None:
         input_parquet=args.input_parquet,
         output_dir=args.output_dir,
         seed=args.seed,
+        force_rebuild=True,
     )
 
     print(f"Done — wrote {total_examples:,} examples across language shards to {args.output_dir}")

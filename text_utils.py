@@ -75,6 +75,7 @@ ENGLISH_MINOR_LATIN_GROUPS = {
     "BalticLatin",
     "CelticLatin",
     "PeripheralLatin",
+    "SoutheastAsianLatin",
     "WesternLatin",
 }
 TITLECASE_ENTITY_CHECK_GROUPS = ENGLISH_MINOR_LATIN_GROUPS

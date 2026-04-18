@@ -421,6 +421,8 @@ FT["every"] = len(FT["langs"])
 
 PURE_DOC_FRACTION = DOC_MIX["pure"]["fraction"]
 
+MAJOR_LATIN_BUCKETS = ("English", "German", "French", "Spanish", "Portuguese", "Italian")
+
 FREQ = {
     "use": True,
     "rebuild": False,
