@@ -22,6 +22,26 @@ class _FakeResponse:
             raise get_freq.requests.HTTPError(response=self)
 
 
+class _FakeTokenizer:
+    def __call__(self, tokens, *, is_split_into_words, truncation, add_special_tokens):
+        assert is_split_into_words
+        assert truncation
+        assert add_special_tokens
+        input_ids = [101, *[1000 + idx for idx, _ in enumerate(tokens)], 102]
+        attention_mask = [1] * len(input_ids)
+        word_ids = [None, *range(len(tokens)), None]
+
+        class _Encoding(dict):
+            def __init__(self, input_ids, attention_mask, word_ids):
+                super().__init__(input_ids=input_ids, attention_mask=attention_mask)
+                self._word_ids = word_ids
+
+            def word_ids(self):
+                return self._word_ids
+
+        return _Encoding(input_ids, attention_mask, word_ids)
+
+
 class GetFreqParsingTests(unittest.TestCase):
     def test_infer_frequency_column_prefers_majority_sample_format(self) -> None:
         sample_rows = [
@@ -94,6 +114,7 @@ class GetFreqParsingTests(unittest.TestCase):
             df,
             seed=7,
             train_fraction=0.8,
+            tokenizer=_FakeTokenizer(),
         )
 
         combined = pd.concat([train_df, test_df], ignore_index=True)
@@ -109,6 +130,11 @@ class GetFreqParsingTests(unittest.TestCase):
         self.assertTrue({"unigram", "bigram"}.issubset(set(fr_rows["source_type"].tolist())))
         for _, row in combined.iterrows():
             self.assertEqual(len(row["tokens"]), len(row["ner_tags"]))
+            self.assertIn("input_ids", row)
+            self.assertIn("attention_mask", row)
+            self.assertIn("labels", row)
+            self.assertEqual(len(row["input_ids"]), len(row["attention_mask"]))
+            self.assertEqual(len(row["input_ids"]), len(row["labels"]))
             self.assertTrue(all(tag == row["ner_tags"][0] or tag == row["ner_tags"][-1] for tag in row["ner_tags"]))
 
         self.assertEqual(manifest["seed"], 7)
@@ -185,6 +211,9 @@ class GetFreqParsingTests(unittest.TestCase):
                         "tokens": ["bonjour"],
                         "ner_tags": [get_freq.LABEL2ID["B-FR"]],
                         "original_text": "bonjour",
+                        "input_ids": [101, 1000, 102],
+                        "attention_mask": [1, 1, 1],
+                        "labels": [-100, get_freq.LABEL2ID["B-FR"], -100],
                     }
                 ]
             )
@@ -204,6 +233,9 @@ class GetFreqParsingTests(unittest.TestCase):
                         "tokens": ["salut"],
                         "ner_tags": [get_freq.LABEL2ID["B-FR"]],
                         "original_text": "salut",
+                        "input_ids": [101, 1001, 102],
+                        "attention_mask": [1, 1, 1],
+                        "labels": [-100, get_freq.LABEL2ID["B-FR"], -100],
                     }
                 ]
             )
@@ -216,6 +248,9 @@ class GetFreqParsingTests(unittest.TestCase):
             self.assertEqual(len(loaded["eval"]), 1)
             self.assertEqual(loaded["train"][0]["word"], "bonjour")
             self.assertEqual(loaded["train"][0]["tokens"], ["bonjour"])
+            self.assertIn("input_ids", loaded["train"][0])
+            self.assertIn("attention_mask", loaded["train"][0])
+            self.assertIn("labels", loaded["train"][0])
 
 
 if __name__ == "__main__":

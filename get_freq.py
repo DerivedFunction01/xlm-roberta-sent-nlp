@@ -16,12 +16,14 @@ from io_utils import write_json_atomic
 import text_utils
 from language import ALL_LANGS, LANG_TO_GROUP, canonical_lang
 from paths import PATHS
+from transformers import AutoTokenizer
 
 BASE = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018"
 DEFAULT_INPUT_PARQUET = Path("word_dict.parquet")
 DEFAULT_OUTPUT_DIR = Path(PATHS["sentences_dir"]) / "freq_short_dataset"
 DEFAULT_TRAIN_FRACTION = 0.9
 DEFAULT_SEED = 42
+TOKENIZER_CHECKPOINT = "xlm-roberta-base"
 
 MAJOR_LATIN_LANGS = {"en", "es", "fr", "de", "it", "pt"}
 MINOR_LATIN_GAP_LANGS = {"vi", "id"}
@@ -129,6 +131,10 @@ def build_label_maps(all_langs: list[str]) -> tuple[dict[str, int], dict[int, st
 
 
 LABEL2ID, ID2LABEL = build_label_maps(ALL_LANGS)
+
+
+def _get_tokenizer():
+    return AutoTokenizer.from_pretrained(TOKENIZER_CHECKPOINT, local_files_only=True)
 
 
 def fetch_wordlist(lang: str, cutoff: int, min_freq: int) -> tuple[list[dict], int]:
@@ -329,6 +335,34 @@ def _build_example(
     }
 
 
+def _finalize_example(example: dict[str, Any], tokenizer) -> dict[str, Any]:
+    tokens = example["tokens"]
+    labels = example["ner_tags"]
+    encoding = tokenizer(
+        tokens,
+        is_split_into_words=True,
+        truncation=True,
+        add_special_tokens=True,
+    )
+    word_ids = encoding.word_ids()
+    aligned_labels: list[int] = []
+    previous_word_id: int | None = None
+    for word_id in word_ids:
+        if word_id is None:
+            aligned_labels.append(-100)
+        elif word_id != previous_word_id:
+            aligned_labels.append(labels[word_id])
+        else:
+            aligned_labels.append(-100)
+        previous_word_id = word_id
+
+    finalized = dict(example)
+    finalized["input_ids"] = encoding["input_ids"]
+    finalized["attention_mask"] = encoding["attention_mask"]
+    finalized["labels"] = aligned_labels
+    return finalized
+
+
 def _split_examples(examples: list[dict[str, Any]], *, train_fraction: float, rng: random.Random) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if not examples:
         return [], []
@@ -346,7 +380,10 @@ def build_short_text_dataset(
     *,
     seed: int = DEFAULT_SEED,
     train_fraction: float = DEFAULT_TRAIN_FRACTION,
+    tokenizer=None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    if tokenizer is None:
+        tokenizer = _get_tokenizer()
     normalized = _normalize_word_dict(df)
     kept = normalized[normalized.apply(_should_keep_word, axis=1)].copy()
     kept["sample_weight"] = kept.apply(_row_weight, axis=1)
@@ -374,7 +411,8 @@ def build_short_text_dataset(
                     )
                 )
 
-        train_split, eval_split = _split_examples(lang_examples, train_fraction=train_fraction, rng=lang_rng)
+        finalized_examples = [_finalize_example(example, tokenizer) for example in lang_examples]
+        train_split, eval_split = _split_examples(finalized_examples, train_fraction=train_fraction, rng=lang_rng)
         train_rows.extend(train_split)
         eval_rows.extend(eval_split)
         lang_counts[lang] = {"train": len(train_split), "eval": len(eval_split), "examples": len(lang_examples)}
@@ -475,6 +513,7 @@ def main() -> None:
         df,
         seed=args.seed,
         train_fraction=args.train_fraction,
+        tokenizer=_get_tokenizer(),
     )
 
     _write_dataset_dict(args.output_dir, train_df, eval_df)
