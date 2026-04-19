@@ -33,7 +33,7 @@ from evaluation_prediction_utils import (
 )
 from evaluation_run_config import load_or_create_run_config, resolve_output_path
 
-CONFIG_PATH = Path(project_root) / "evaluation_config.json"
+CONFIG_PATH = Path(project_root) / ".evaluation_config.json"
 TOKENIZER_MODEL = "xlm-roberta-base"
 
 def _parse_args() -> argparse.Namespace:

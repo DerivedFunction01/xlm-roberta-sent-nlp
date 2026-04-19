@@ -213,3 +213,7 @@ hf_token
 sentences_cache/*
 
 *.csv
+
+.*.*
+
+evaluation_results
