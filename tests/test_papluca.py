@@ -29,6 +29,7 @@ from evaluation_prediction_utils import (
 from evaluation_run_config import load_or_create_run_config, resolve_output_path
 
 CONFIG_PATH = Path(project_root) / "evaluation_config.json"
+TOKENIZER_MODEL = "xlm-roberta-base"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -66,9 +67,9 @@ def main() -> None:
         model = AutoModelForTokenClassification.from_pretrained(model_name)
     else:
         model = AutoModelForSequenceClassification.from_pretrained(model_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_MODEL)
     print(f"   ✓ Model loaded: {model_name}")
-    print(f"   ✓ Tokenizer loaded: {model_name}")
+    print(f"   ✓ Tokenizer loaded: {TOKENIZER_MODEL}")
 
     print("\n2. Loading papluca/language-identification dataset...")
     try:
