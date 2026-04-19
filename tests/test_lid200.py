@@ -25,7 +25,7 @@ from transformers import AutoModelForTokenClassification, AutoTokenizer, pipelin
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.insert(0, project_root)
-from language import ALL_LANGS, canonical_lang
+from language import ALL_LANGS, canonical_lang, is_dataset_label_script_compatible
 from evaluation_language_utils import dominant_language_from_entities
 
 MODEL_CHECKPOINT = "DerivedFunction/lang-ner-xlmr"
@@ -138,6 +138,16 @@ def main() -> None:
         in keep_langs
     )
     print(f"   ✓ Filtered dataset size: {len(filtered_test)}")
+
+    compatible_test = filtered_test.filter(
+        lambda ex: is_dataset_label_script_compatible(
+            _dataset_label_to_canonical(_label_name_from_example(ex, filtered_test, lang_column)),
+            _label_name_from_example(ex, filtered_test, lang_column),
+        )
+    )
+    dropped_incompatible = len(filtered_test) - len(compatible_test)
+    filtered_test = compatible_test
+    print(f"   ✓ Dropped {dropped_incompatible} Latin-script rows for non-Latin languages")
 
     if len(filtered_test) == 0:
         raise RuntimeError(

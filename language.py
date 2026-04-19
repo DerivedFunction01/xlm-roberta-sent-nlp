@@ -69,6 +69,30 @@ def preferred_source_lang(lang: str) -> str:
     return aliases[0] if aliases else canonical_lang(lang)
 
 
+def dataset_label_script(label: str) -> Script | None:
+    """Return the script suffix encoded in a dataset label like `arb_Latn`."""
+    label = (label or "").strip()
+    if "_" not in label:
+        return None
+    suffix = label.rsplit("_", 1)[1].strip()
+    if not suffix:
+        return None
+    try:
+        return Script(suffix)
+    except ValueError:
+        return None
+
+
+def is_dataset_label_script_compatible(lang: str, label: str) -> bool:
+    """Return False for Latin-script labels on non-Latin language groups."""
+    label_script = dataset_label_script(label)
+    if label_script is None:
+        return True
+    if label_script != Script.LATIN:
+        return True
+    return LANG_TO_GROUP.get(canonical_lang(lang)) in LATIN_GROUPS
+
+
 ENGLISH_STOP_WORDS = [
     "able",
     "about",
