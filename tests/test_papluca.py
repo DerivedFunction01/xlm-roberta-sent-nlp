@@ -118,7 +118,7 @@ def main() -> None:
     print(f"Processing {sample_size} examples...\n")
 
     sample_data = test_data.select(range(sample_size))
-    texts = [example["text"][:512] for example in sample_data]
+    texts = [example["text"][:512] for example in sample_data] # type: ignore
     if task_type == "token-classification":
         predictions = predict_token_classification_texts(
             texts,
@@ -139,14 +139,14 @@ def main() -> None:
         total=sample_size,
         desc="Running inference",
     ):
-        text = example["text"]
-        true_lang_name = example["labels"]
+        text = example["text"] # type: ignore
+        true_lang_name = example["labels"] # type: ignore
         true_lang = papluca_to_iso.get(true_lang_name.lower(), true_lang_name.lower())
         ranked_langs: list[tuple[str, dict[str, float | int]]] = []
         accepted_runner_up = False
 
         if task_type == "token-classification":
-            pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(prediction)
+            pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(prediction) # type: ignore
             ranked_langs = sorted(
                 lang_stats.items(),
                 key=lambda item: item[1]["rank_score"],

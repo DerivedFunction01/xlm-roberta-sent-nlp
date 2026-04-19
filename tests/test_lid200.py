@@ -167,7 +167,7 @@ def main() -> None:
     results_by_lang = defaultdict(list)
     mismatches: list[dict[str, object]] = []
 
-    texts_for_inference = [example[text_column] for example in filtered_test]
+    texts_for_inference = [example[text_column] for example in filtered_test] # type: ignore
     if task_type == "token-classification":
         all_predictions = predict_token_classification_texts(
             texts_for_inference,
@@ -190,8 +190,8 @@ def main() -> None:
         total=len(filtered_test),
         desc="Processing predictions",
     )):
-        text = example[text_column]
-        true_lang_name = _label_name_from_example(example, filtered_test, lang_column)
+        text = example[text_column] # type: ignore
+        true_lang_name = _label_name_from_example(example, filtered_test, lang_column) # type: ignore
         true_lang = _dataset_label_to_canonical(true_lang_name)
         if true_lang not in ALL_LANGS:
             continue
@@ -199,7 +199,7 @@ def main() -> None:
         accepted_runner_up = False
 
         if task_type == "token-classification":
-            pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(predictions)
+            pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(predictions) # type: ignore
             ranked_langs = sorted(
                 lang_stats.items(),
                 key=lambda item: item[1]["rank_score"],
