@@ -36,7 +36,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Evaluate the model on papluca/language-identification."
     )
-    parser.add_argument("--config", type=Path, default=CONFIG_PATH, help="Path to the evaluation JSON config.")
+    parser.add_argument("--config", type=Path, default=CONFIG_PATH, help="Path to the shared evaluation manifest JSON.")
     return parser.parse_args()
 
 
@@ -48,6 +48,7 @@ def main() -> None:
     print("=" * 80)
 
     config = load_or_create_run_config(config_path=args.config, run_name="papluca")
+    config_id = str(config["id"])
     model_name = str(config["model_name"])
     task_type = str(config["task_type"])
     sample_size = int(config.get("sample_size", 2000))
@@ -63,6 +64,7 @@ def main() -> None:
     results_output = results_dir / "results.json"
 
     print("\n1. Loading model and tokenizer...")
+    print(f"   ✓ Config id: {config_id}")
     if task_type == "token-classification":
         model = AutoModelForTokenClassification.from_pretrained(model_name)
     else:
