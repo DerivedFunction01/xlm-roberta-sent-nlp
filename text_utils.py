@@ -357,7 +357,7 @@ def _script_marker_for_char(ch: str) -> str | None:
         Script.KANNADA,
         Script.MALAYALAM,
         Script.GURMUKHI,
-        "ORIYA",
+        Script.ORIYA,
         "ODIA",
     ):
         if marker in name:
