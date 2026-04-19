@@ -37,6 +37,7 @@ def _parse_args() -> argparse.Namespace:
         description="Evaluate the model on papluca/language-identification."
     )
     parser.add_argument("--config", type=Path, default=CONFIG_PATH, help="Path to the shared evaluation manifest JSON.")
+    parser.add_argument("--config-id", type=str, default=None, help="Optional config id to select from the manifest.")
     return parser.parse_args()
 
 
@@ -47,7 +48,7 @@ def main() -> None:
     print("TESTING ON PAPLUCA LANGUAGE-IDENTIFICATION DATASET")
     print("=" * 80)
 
-    config = load_or_create_run_config(config_path=args.config, run_name="papluca")
+    config = load_or_create_run_config(config_path=args.config, run_name="papluca", config_id=args.config_id)
     config_id = str(config["id"])
     model_name = str(config["model_name"])
     task_type = str(config["task_type"])

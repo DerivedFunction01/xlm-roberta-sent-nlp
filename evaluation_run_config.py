@@ -74,8 +74,8 @@ def _normalize_manifest(config_path: Path, raw: Any) -> dict[str, Any]:
     }
 
 
-def load_or_create_run_config(*, config_path: Path, run_name: str) -> dict[str, Any]:
-    """Load the active config for one benchmark from a shared manifest."""
+def load_shared_manifest(*, config_path: Path) -> dict[str, Any]:
+    """Load the shared evaluation manifest or create a default one and exit."""
     if not config_path.exists():
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with config_path.open("w", encoding="utf-8") as f:
@@ -85,43 +85,75 @@ def load_or_create_run_config(*, config_path: Path, run_name: str) -> dict[str, 
         raise SystemExit(0)
 
     with config_path.open(encoding="utf-8") as f:
-        manifest = _normalize_manifest(config_path, json.load(f))
+        return _normalize_manifest(config_path, json.load(f))
 
+
+def get_active_config(
+    *,
+    manifest: dict[str, Any],
+    config_path: Path,
+    run_name: str,
+    config_id: str | None = None,
+) -> dict[str, Any]:
+    """Select a single active config from a manifest."""
     active_configs = {
         config["id"]: config
         for config in manifest["configs"]
         if config["id"] in manifest["runs"]
     }
-    matches = [config for config in active_configs.values() if config["run"] == run_name]
-    if not matches:
-        print(f"No active config for '{run_name}' in {config_path}; skipping.")
-        raise SystemExit(0)
-    if len(matches) > 1:
-        raise ValueError(
-            f"Multiple active configs found for '{run_name}' in {config_path}: "
-            f"{[config['id'] for config in matches]}"
-        )
+    if config_id is not None:
+        selected = active_configs.get(config_id)
+        if selected is None:
+            raise ValueError(
+                f"Config id '{config_id}' is not active in {config_path}. "
+                f"Available ids: {sorted(active_configs)}"
+            )
+        if selected["run"] != run_name:
+            print(f"Config id '{config_id}' is for run '{selected['run']}', skipping {run_name}.")
+            raise SystemExit(0)
+        config = selected
+    else:
+        matches = [config for config in active_configs.values() if config["run"] == run_name]
+        if not matches:
+            print(f"No active config for '{run_name}' in {config_path}; skipping.")
+            raise SystemExit(0)
+        if len(matches) > 1:
+            raise ValueError(
+                f"Multiple active configs found for '{run_name}' in {config_path}: "
+                f"{[config['id'] for config in matches]}"
+            )
+        config = matches[0]
 
-    config = matches[0]
-    config_id = str(config["id"])
+    config_id_value = str(config["id"])
     model_name = str(config.get("model_name", "")).strip()
     if not model_name:
-        raise ValueError(f"Missing 'model_name' in config '{config_id}' from {config_path}")
+        raise ValueError(f"Missing 'model_name' in config '{config_id_value}' from {config_path}")
 
     task_type = str(config.get("task_type", "")).strip()
     if task_type not in VALID_TASK_TYPES:
         raise ValueError(
-            f"Invalid or missing 'task_type' in config '{config_id}' from {config_path}: "
+            f"Invalid or missing 'task_type' in config '{config_id_value}' from {config_path}: "
             f"expected one of {sorted(VALID_TASK_TYPES)}"
         )
 
-    merged = _default_config(config_id=config_id, run_name=run_name)
+    merged = _default_config(config_id=config_id_value, run_name=run_name)
     merged.update(config)
-    merged["id"] = config_id
+    merged["id"] = config_id_value
     merged["run"] = run_name
     merged["model_name"] = model_name
     merged["task_type"] = task_type
     return merged
+
+
+def load_or_create_run_config(
+    *,
+    config_path: Path,
+    run_name: str,
+    config_id: str | None = None,
+) -> dict[str, Any]:
+    """Load the active config for one benchmark from a shared manifest."""
+    manifest = load_shared_manifest(config_path=config_path)
+    return get_active_config(manifest=manifest, config_path=config_path, run_name=run_name, config_id=config_id)
 
 
 def resolve_output_path(*, results_dir: Path, value: Any, default_name: str) -> Path:
