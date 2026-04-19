@@ -21,46 +21,21 @@ project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.insert(0, project_root)
 
 from evaluation_language_utils import dominant_language_from_entities
-from evaluation_prediction_utils import predict_multilabel_texts, predict_token_classification_texts
+from evaluation_prediction_utils import (
+    predict_multilabel_texts,
+    predict_token_classification_texts,
+    select_multilabel_prediction,
+)
+from evaluation_run_config import load_or_create_run_config, resolve_output_path
 
-MODEL_CHECKPOINT = "DerivedFunction/lang-ner-xlmr"
-TOKENIZER_MODEL = "xlm-roberta-base"
+CONFIG_PATH = Path(project_root) / "evaluation_config.json"
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Evaluate the model on papluca/language-identification."
     )
-    parser.add_argument(
-        "--sample-size",
-        type=int,
-        default=2000,
-        help="Maximum number of examples to evaluate.",
-    )
-    parser.add_argument(
-        "--mismatch-output",
-        type=Path,
-        default=Path("papluca_mismatches.jsonl"),
-        help="Path to write mismatched examples as JSONL.",
-    )
-    parser.add_argument(
-        "--model-type",
-        choices=["token-classification", "multi-label-classification"],
-        default="token-classification",
-        help="Choose the inference head to evaluate. Multilabel mode expects a sequence-classification checkpoint.",
-    )
-    parser.add_argument(
-        "--model-checkpoint",
-        type=str,
-        default=MODEL_CHECKPOINT,
-        help="Model checkpoint to load for evaluation.",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=32,
-        help="Batch size used for batched inference.",
-    )
+    parser.add_argument("--config", type=Path, default=CONFIG_PATH, help="Path to the evaluation JSON config.")
     return parser.parse_args()
 
 
@@ -71,14 +46,29 @@ def main() -> None:
     print("TESTING ON PAPLUCA LANGUAGE-IDENTIFICATION DATASET")
     print("=" * 80)
 
+    config = load_or_create_run_config(config_path=args.config, run_name="papluca")
+    model_name = str(config["model_name"])
+    task_type = str(config["task_type"])
+    sample_size = int(config.get("sample_size", 2000))
+    batch_size = int(config.get("batch_size", 32))
+    runner_up_ratio = float(config.get("multilabel_runner_up_ratio", 0.9))
+    results_dir = Path(str(config.get("results_dir", "evaluation_results/papluca")))
+    results_dir.mkdir(parents=True, exist_ok=True)
+    mismatch_output = resolve_output_path(
+        results_dir=results_dir,
+        value=config.get("mismatch_output"),
+        default_name="mismatches.jsonl",
+    )
+    results_output = results_dir / "results.json"
+
     print("\n1. Loading model and tokenizer...")
-    if args.model_type == "token-classification":
-        model = AutoModelForTokenClassification.from_pretrained(args.model_checkpoint)
+    if task_type == "token-classification":
+        model = AutoModelForTokenClassification.from_pretrained(model_name)
     else:
-        model = AutoModelForSequenceClassification.from_pretrained(args.model_checkpoint)
-    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_MODEL)
-    print(f"   ✓ Model loaded: {args.model_checkpoint}")
-    print(f"   ✓ Tokenizer loaded: {TOKENIZER_MODEL}")
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    print(f"   ✓ Model loaded: {model_name}")
+    print(f"   ✓ Tokenizer loaded: {model_name}")
 
     print("\n2. Loading papluca/language-identification dataset...")
     try:
@@ -93,7 +83,7 @@ def main() -> None:
         print(f"   ✗ Error loading dataset: {e}")
         raise SystemExit(1) from e
 
-    print(f"\n3. Running inference on dataset using {args.model_type}...")
+    print(f"\n3. Running inference on dataset using {task_type}...")
     print("-" * 80)
 
     papluca_to_iso = {
@@ -120,24 +110,24 @@ def main() -> None:
     results_by_lang = defaultdict(list)
     mismatches: list[dict[str, object]] = []
 
-    sample_size = min(args.sample_size, len(test_data))
+    sample_size = min(sample_size, len(test_data))
     print(f"Processing {sample_size} examples...\n")
 
     sample_data = test_data.select(range(sample_size))
     texts = [example["text"][:512] for example in sample_data]
-    if args.model_type == "token-classification":
+    if task_type == "token-classification":
         predictions = predict_token_classification_texts(
             texts,
             model=model,
             tokenizer=tokenizer,
-            batch_size=args.batch_size,
+            batch_size=batch_size,
         )
     else:
         predictions = predict_multilabel_texts(
             texts,
             model=model,
             tokenizer=tokenizer,
-            batch_size=args.batch_size,
+            batch_size=batch_size,
         )
 
     for example, prediction in tqdm(
@@ -148,11 +138,23 @@ def main() -> None:
         text = example["text"]
         true_lang_name = example["labels"]
         true_lang = papluca_to_iso.get(true_lang_name.lower(), true_lang_name.lower())
+        ranked_langs: list[tuple[str, dict[str, float | int]]] = []
+        accepted_runner_up = False
 
-        if args.model_type == "token-classification":
+        if task_type == "token-classification":
             pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(prediction)
+            ranked_langs = sorted(
+                lang_stats.items(),
+                key=lambda item: item[1]["rank_score"],
+                reverse=True,
+            )
         else:
             pred_lang, lang_stats, ignored_artifacts = prediction
+            pred_lang, accepted_runner_up, ranked_langs = select_multilabel_prediction(
+                lang_stats,
+                runner_up_ratio=runner_up_ratio,
+                true_lang=true_lang,
+            )
         if not pred_lang:
             continue
 
@@ -177,6 +179,7 @@ def main() -> None:
                 "correct": is_correct,
                 "score": lang_stats.get(pred_lang, {}).get("rank_score", 0.0),
                 "ignored_artifacts": ignored_artifacts,
+                "accepted_runner_up": accepted_runner_up,
                 "ranked_langs": [lang for lang, _ in ranked_langs],
             }
         )
@@ -258,14 +261,12 @@ def main() -> None:
         f"{max((l for l in per_lang_stats if per_lang_stats[l]['total'] > 5), key=lambda l: per_lang_stats[l]['correct']/max(per_lang_stats[l]['total'], 1)) if any(per_lang_stats[l]['total'] > 5 for l in per_lang_stats) else 'N/A'}"
     )
 
-    if args.mismatch_output:
-        args.mismatch_output.parent.mkdir(parents=True, exist_ok=True)
-        with args.mismatch_output.open("w", encoding="utf-8") as f:
-            for item in mismatches:
-                f.write(json.dumps(item, ensure_ascii=False) + "\n")
-        print(f"\n✓ Mismatches saved to {args.mismatch_output} ({len(mismatches)} rows)")
+    with mismatch_output.open("w", encoding="utf-8") as f:
+        for item in mismatches:
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    print(f"\n✓ Mismatches saved to {mismatch_output} ({len(mismatches)} rows)")
 
-    with open("papluca_results.json", "w", encoding="utf-8") as f:
+    with results_output.open("w", encoding="utf-8") as f:
         json.dump(
             {
                 "overall_accuracy": overall_accuracy,
@@ -284,7 +285,7 @@ def main() -> None:
             indent=2,
         )
 
-    print(f"\n✓ Detailed results saved to papluca_results.json")
+    print(f"\n✓ Detailed results saved to {results_output}")
 
 
 if __name__ == "__main__":

@@ -108,3 +108,36 @@ def predict_multilabel_texts(
             predictions.append((pred_lang, lang_stats, 0))
 
     return predictions
+
+
+def select_multilabel_prediction(
+    lang_stats: dict[str, dict[str, float | int]],
+    *,
+    runner_up_ratio: float = 0.9,
+    true_lang: str | None = None,
+) -> tuple[str, bool, list[tuple[str, dict[str, float | int]]]]:
+    """Select the winning language, optionally accepting a close runner-up.
+
+    If `true_lang` is provided and the second-ranked language matches it while
+    its score is at least `runner_up_ratio` times the top score, the runner-up
+    is accepted instead of the top prediction.
+    """
+    ranked_langs = sorted(
+        lang_stats.items(),
+        key=lambda item: item[1]["rank_score"],
+        reverse=True,
+    )
+    if not ranked_langs:
+        return "", False, []
+
+    pred_lang = ranked_langs[0][0]
+    accepted_runner_up = False
+    if true_lang and len(ranked_langs) > 1:
+        top_score = float(ranked_langs[0][1]["rank_score"])
+        second_lang, second_stats = ranked_langs[1]
+        second_score = float(second_stats["rank_score"])
+        if second_lang == true_lang and second_score >= top_score * runner_up_ratio:
+            pred_lang = second_lang
+            accepted_runner_up = True
+
+    return pred_lang, accepted_runner_up, ranked_langs

@@ -26,53 +26,20 @@ project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.insert(0, project_root)
 from language import ALL_LANGS, canonical_lang, is_dataset_label_script_compatible
 from evaluation_language_utils import dominant_language_from_entities
-from evaluation_prediction_utils import predict_multilabel_texts, predict_token_classification_texts
+from evaluation_prediction_utils import (
+    predict_multilabel_texts,
+    predict_token_classification_texts,
+    select_multilabel_prediction,
+)
+from evaluation_run_config import load_or_create_run_config, resolve_output_path
 
-MODEL_CHECKPOINT = "DerivedFunction/lang-ner-xlmr"
+CONFIG_PATH = Path(project_root) / "evaluation_config.json"
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Evaluate the model on mikaberidze/lid200."
     )
-    parser.add_argument(
-        "--langs",
-        nargs="*",
-        default=None,
-        help=(
-            "Optional canonical languages to keep, e.g. --langs en es fr. "
-            "Defaults to all supported model languages."
-        ),
-    )
-    parser.add_argument(
-        "--split",
-        type=str,
-        default="test",
-        help="Dataset split to evaluate, falling back to the first available split.",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=32,
-        help="Batch size for inference on GPU.",
-    )
-    parser.add_argument(
-        "--mismatch-output",
-        type=Path,
-        default=Path("lid200_mismatches.jsonl"),
-        help="Path to write mismatched examples as JSONL.",
-    )
-    parser.add_argument(
-        "--model-type",
-        choices=["token-classification", "multi-label-classification"],
-        default="token-classification",
-        help="Choose the inference head to evaluate. Multilabel mode expects a sequence-classification checkpoint.",
-    )
-    parser.add_argument(
-        "--model-checkpoint",
-        type=str,
-        default=MODEL_CHECKPOINT,
-        help="Model checkpoint to load for evaluation.",
-    )
+    parser.add_argument("--config", type=Path, default=CONFIG_PATH, help="Path to the evaluation JSON config.")
     return parser.parse_args()
 
 
@@ -115,14 +82,30 @@ def main() -> None:
     print("TESTING ON MIKABERIDZE/LID200 DATASET")
     print("=" * 80)
 
+    config = load_or_create_run_config(config_path=args.config, run_name="lid200")
+    model_name = str(config["model_name"])
+    task_type = str(config["task_type"])
+    langs = [str(lang).lower() for lang in config.get("langs", [])] or None
+    split_name = str(config.get("split", "test"))
+    batch_size = int(config.get("batch_size", 32))
+    runner_up_ratio = float(config.get("multilabel_runner_up_ratio", 0.9))
+    results_dir = Path(str(config.get("results_dir", "evaluation_results/lid200")))
+    results_dir.mkdir(parents=True, exist_ok=True)
+    mismatch_output = resolve_output_path(
+        results_dir=results_dir,
+        value=config.get("mismatch_output"),
+        default_name="mismatches.jsonl",
+    )
+    results_output = results_dir / "results.json"
+
     # ===== LOAD MODEL & TOKENIZER =====
     print("\n1. Loading model and tokenizer...")
-    if args.model_type == "token-classification":
-        model = AutoModelForTokenClassification.from_pretrained(args.model_checkpoint)
+    if task_type == "token-classification":
+        model = AutoModelForTokenClassification.from_pretrained(model_name)
     else:
-        model = AutoModelForSequenceClassification.from_pretrained(args.model_checkpoint)
-    tokenizer = AutoTokenizer.from_pretrained("xlm-roberta-base")
-    print(f"   ✓ Model loaded: {args.model_checkpoint}")
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    print(f"   ✓ Model loaded: {model_name}")
     print(f"   ✓ Tokenizer loaded")
 
     # ===== LOAD DATASET =====
@@ -131,7 +114,7 @@ def main() -> None:
     print(f"   ✓ Dataset loaded")
     print(f"   ✓ Splits available: {list(dataset.keys())}")
 
-    split_to_use = args.split if args.split in dataset else list(dataset.keys())[0]
+    split_to_use = split_name if split_name in dataset else list(dataset.keys())[0]
     test_data = dataset[split_to_use]
     print(f"   ✓ Using '{split_to_use}' split with {len(test_data)} examples")
 
@@ -139,8 +122,8 @@ def main() -> None:
     text_column = _resolve_text_column(test_data)
 
     # ===== DETERMINE FILTER =====
-    if args.langs:
-        keep_langs = [lang.lower() for lang in args.langs]
+    if langs:
+        keep_langs = langs
     else:
         keep_langs = ALL_LANGS[:]
 
@@ -171,7 +154,7 @@ def main() -> None:
         )
 
     # ===== RUN INFERENCE =====
-    print(f"\n4. Running inference on filtered dataset using {args.model_type}...")
+    print(f"\n4. Running inference on filtered dataset using {task_type}...")
     print("-" * 80)
 
     correct_count = 0
@@ -181,19 +164,19 @@ def main() -> None:
     mismatches: list[dict[str, object]] = []
 
     texts_for_inference = [example[text_column] for example in filtered_test]
-    if args.model_type == "token-classification":
+    if task_type == "token-classification":
         all_predictions = predict_token_classification_texts(
             texts_for_inference,
             model=model,
             tokenizer=tokenizer,
-            batch_size=args.batch_size,
+            batch_size=batch_size,
         )
     else:
         all_predictions = predict_multilabel_texts(
             texts_for_inference,
             model=model,
             tokenizer=tokenizer,
-            batch_size=args.batch_size,
+            batch_size=batch_size,
         )
 
     print(f"Processing {len(filtered_test)} examples and their predictions...\n")
@@ -208,11 +191,23 @@ def main() -> None:
         true_lang = _dataset_label_to_canonical(true_lang_name)
         if true_lang not in ALL_LANGS:
             continue
+        ranked_langs: list[tuple[str, dict[str, float | int]]] = []
+        accepted_runner_up = False
 
-        if args.model_type == "token-classification":
+        if task_type == "token-classification":
             pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(predictions)
+            ranked_langs = sorted(
+                lang_stats.items(),
+                key=lambda item: item[1]["rank_score"],
+                reverse=True,
+            )
         else:
             pred_lang, lang_stats, ignored_artifacts = predictions
+            pred_lang, accepted_runner_up, ranked_langs = select_multilabel_prediction(
+                lang_stats,
+                runner_up_ratio=runner_up_ratio,
+                true_lang=true_lang,
+            )
         if not pred_lang:
             continue
 
@@ -234,7 +229,8 @@ def main() -> None:
                 "true_lang": true_lang,
                 "dataset_label": true_lang_name,
                 "ignored_artifacts": ignored_artifacts,
-                "ranked_langs": [lang for lang, _ in sorted(lang_stats.items(), key=lambda item: item[1]["rank_score"], reverse=True)],
+                "accepted_runner_up": accepted_runner_up,
+                "ranked_langs": [lang for lang, _ in ranked_langs],
             }
         )
         if not is_correct:
@@ -255,7 +251,7 @@ def main() -> None:
                             "avg_confidence": float(stat["avg_confidence"]),
                             "entity_count": int(stat["entity_count"]),
                         }
-                        for lang, stat in sorted(lang_stats.items(), key=lambda item: item[1]["rank_score"], reverse=True)
+                        for lang, stat in ranked_langs
                     ],
                 }
             )
@@ -312,12 +308,10 @@ def main() -> None:
     print(f"  Total languages in model: {len(ALL_LANGS)}")
     print(f"  Filtered languages: {len(per_lang_stats)}")
 
-    if args.mismatch_output:
-        args.mismatch_output.parent.mkdir(parents=True, exist_ok=True)
-        with args.mismatch_output.open("w", encoding="utf-8") as f:
-            for item in mismatches:
-                f.write(json.dumps(item, ensure_ascii=False) + "\n")
-        print(f"\n✓ Mismatches saved to {args.mismatch_output} ({len(mismatches)} rows)")
+    with mismatch_output.open("w", encoding="utf-8") as f:
+        for item in mismatches:
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    print(f"\n✓ Mismatches saved to {mismatch_output} ({len(mismatches)} rows)")
 
     if any(per_lang_stats[l]["total"] > 5 for l in per_lang_stats):
         best_lang = max(
@@ -328,7 +322,7 @@ def main() -> None:
         best_lang = "N/A"
     print(f"  Best performing: {best_lang}")
 
-    with open("lid200_results.json", "w", encoding="utf-8") as f:
+    with results_output.open("w", encoding="utf-8") as f:
         json.dump(
             {
                 "overall_accuracy": overall_accuracy,
@@ -349,7 +343,7 @@ def main() -> None:
             ensure_ascii=False,
         )
 
-    print(f"\n✓ Detailed results saved to lid200_results.json")
+    print(f"\n✓ Detailed results saved to {results_output}")
 
 
 if __name__ == "__main__":
