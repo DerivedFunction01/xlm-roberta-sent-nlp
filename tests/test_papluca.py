@@ -3,15 +3,22 @@
 Test the model on the papluca/language-identification dataset from Hugging Face.
 """
 
-from transformers import (
-    AutoModelForTokenClassification,
-    AutoTokenizer,
-    pipeline,
-)
-from datasets import load_dataset
+from __future__ import annotations
+
 import json
+import os
+import sys
 from collections import defaultdict
+
+from datasets import load_dataset
 from tqdm import tqdm
+from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
+sys.path.insert(0, project_root)
+
+from evaluation_language_utils import dominant_language_from_entities
 
 print("="*80)
 print("TESTING ON PAPLUCA LANGUAGE-IDENTIFICATION DATASET")
@@ -101,18 +108,9 @@ for idx, example in enumerate(tqdm(test_data.select(range(sample_size)), total=s
     
     # Run inference
     result = nlp(text[:512])  # Limit text length
-    
-    if result and len(result) > 0:
-        pred = result[0]
-        pred_entity = pred.get('entity_group', pred.get('entity', 'O'))
-        
-        # Extract language code
-        if pred_entity.startswith(('B-', 'I-')):
-            pred_lang = pred_entity[2:].lower()
-        else:
-            pred_lang = pred_entity.lower()
-        
-        # Check if correct
+
+    pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(result)
+    if pred_lang:
         is_correct = pred_lang == true_lang
         if is_correct:
             correct_count += 1
@@ -126,7 +124,9 @@ for idx, example in enumerate(tqdm(test_data.select(range(sample_size)), total=s
             "text": text[:100],
             "predicted": pred_lang,
             "correct": is_correct,
-            "score": pred.get('score', 0.0)
+            "score": lang_stats.get(pred_lang, {}).get("rank_score", 0.0),
+            "ignored_artifacts": ignored_artifacts,
+            "ranked_langs": [lang for lang, _ in sorted(lang_stats.items(), key=lambda item: item[1]["rank_score"], reverse=True)],
         })
 
 # ===== RESULTS =====

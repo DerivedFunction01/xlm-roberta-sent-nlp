@@ -14,7 +14,7 @@ import json
 import os
 from collections import defaultdict
 import sys
-import torch # Added for GPU detection
+import torch  # Added for GPU detection
 
 from datasets import load_dataset
 from tqdm import tqdm
@@ -25,6 +25,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.insert(0, project_root)
 from language import ALL_LANGS, canonical_lang
+from evaluation_language_utils import dominant_language_from_entities
 
 MODEL_CHECKPOINT = "DerivedFunction/lang-ner-xlmr"
 
@@ -180,15 +181,9 @@ def main() -> None:
         if true_lang not in ALL_LANGS:
             continue
 
-        if not predictions:
+        pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(predictions)
+        if not pred_lang:
             continue
-
-        pred = predictions[0]
-        pred_entity = pred.get("entity_group", pred.get("entity", "O"))
-        if pred_entity.startswith(("B-", "I-")):
-            pred_lang = pred_entity[2:].lower()
-        else:
-            pred_lang = pred_entity.lower()
 
         is_correct = pred_lang == true_lang
         if is_correct:
@@ -204,9 +199,11 @@ def main() -> None:
                 "text": text[:100],
                 "predicted": pred_lang,
                 "correct": is_correct,
-                "score": pred.get("score", 0.0),
+                "score": lang_stats.get(pred_lang, {}).get("rank_score", 0.0),
                 "true_lang": true_lang,
                 "dataset_label": true_lang_name,
+                "ignored_artifacts": ignored_artifacts,
+                "ranked_langs": [lang for lang, _ in sorted(lang_stats.items(), key=lambda item: item[1]["rank_score"], reverse=True)],
             }
         )
 
