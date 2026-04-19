@@ -25,6 +25,7 @@ BASE_DIR = Path(".")
 LANGUAGE_ALIASES_PATH = BASE_DIR / "language_aliases.json"
 TOKENIZED_CACHE_DIR = BASE_DIR / "sentences_cache" / "tokenized_dataset"
 MULTILABEL_CACHE_DIR = BASE_DIR / "sentences_cache" / "multilabel_dataset"
+MULTILABEL_COMPACT_CACHE_DIR = BASE_DIR / "sentences_cache" / "multilabel_dataset_compact"
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -55,6 +56,8 @@ def load_tokenized_dataset_cache():
 
 
 def load_multilabel_dataset_cache():
+    if MULTILABEL_COMPACT_CACHE_DIR.exists():
+        return load_dataset_cache(MULTILABEL_COMPACT_CACHE_DIR)
     if not MULTILABEL_CACHE_DIR.exists():
         return None
     return load_dataset_cache(MULTILABEL_CACHE_DIR)
