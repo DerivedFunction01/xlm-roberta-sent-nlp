@@ -18,7 +18,7 @@ from language import (
 )
 import nltk as nltk_module
 from nltk.corpus import words as nltk_words
-from script_types import Script
+from script_types import LANGUAGE_SCRIPT_MARKER_OVERRIDES, SCRIPT_NAME_MARKERS, Script
 from wiki_lexicon_sources import load_wiki_major_latin_lexicon
 
 WIKI_MARKUP = re.compile(r"\[\[.*?\]\]|\{\{.*?\}\}|==.*?==", flags=re.DOTALL)
@@ -81,38 +81,6 @@ ENGLISH_MINOR_LATIN_GROUPS = {
 TITLECASE_ENTITY_CHECK_GROUPS = ENGLISH_MINOR_LATIN_GROUPS
 LATIN_MIXED_SCRIPT_ALLOWLIST = {
     "uz",
-}
-SCRIPT_NAME_MARKERS: dict[Script, tuple[str, ...]] = {
-    Script.LATIN: ("LATIN",),
-    Script.CYRILLIC: ("CYRILLIC",),
-    Script.ARABIC: ("ARABIC",),
-    Script.HEBREW: ("HEBREW",),
-    Script.DEVANAGARI: ("DEVANAGARI",),
-    Script.BENGALI: ("BENGALI",),
-    Script.JAPANESE: ("HIRAGANA", "KATAKANA", "CJK UNIFIED IDEOGRAPH", "CJK COMPATIBILITY IDEOGRAPH"),
-    Script.HAN: ("CJK UNIFIED IDEOGRAPH", "CJK COMPATIBILITY IDEOGRAPH"),
-    Script.HANGUL: ("HANGUL",),
-}
-LANGUAGE_SCRIPT_MARKER_OVERRIDES: dict[str, frozenset[str]] = {
-    "el": frozenset({"GREEK"}),
-    "hy": frozenset({"ARMENIAN"}),
-    "ka": frozenset({"GEORGIAN"}),
-    "am": frozenset({"ETHIOPIC"}),
-    "ti": frozenset({"ETHIOPIC"}),
-    "dv": frozenset({"THAANA"}),
-    "km": frozenset({"KHMER"}),
-    "lo": frozenset({"LAO"}),
-    "my": frozenset({"MYANMAR"}),
-    "th": frozenset({"THAI"}),
-    "si": frozenset({"SINHALA"}),
-    "bo": frozenset({"TIBETAN"}),
-    "ta": frozenset({"TAMIL"}),
-    "te": frozenset({"TELUGU"}),
-    "gu": frozenset({"GUJARATI"}),
-    "kn": frozenset({"KANNADA"}),
-    "ml": frozenset({"MALAYALAM"}),
-    "pa": frozenset({"GURMUKHI"}),
-    "or": frozenset({"ORIYA", "ODIA"}),
 }
 LATIN_MAJOR_LEAK_CHECK_GROUPS = {
     "AfricanLatin",
@@ -361,34 +329,34 @@ def _script_marker_for_char(ch: str) -> str | None:
         return None
     name = unicodedata.name(ch, "")
     for marker in (
-        "LATIN",
-        "CYRILLIC",
-        "ARABIC",
-        "HEBREW",
-        "DEVANAGARI",
-        "BENGALI",
-        "HIRAGANA",
-        "KATAKANA",
+        Script.LATIN,
+        Script.CYRILLIC,
+        Script.ARABIC,
+        Script.HEBREW,
+        Script.DEVANAGARI,
+        Script.BENGALI,
+        Script.HIRAGANA,
+        Script.KATAKANA,
         "CJK UNIFIED IDEOGRAPH",
         "CJK COMPATIBILITY IDEOGRAPH",
-        "HANGUL",
-        "GREEK",
-        "ARMENIAN",
-        "GEORGIAN",
-        "ETHIOPIC",
-        "THAANA",
-        "KHMER",
-        "LAO",
-        "MYANMAR",
-        "THAI",
-        "SINHALA",
-        "TIBETAN",
-        "TAMIL",
-        "TELUGU",
-        "GUJARATI",
-        "KANNADA",
-        "MALAYALAM",
-        "GURMUKHI",
+        Script.HANGUL,
+        Script.GREEK,
+        Script.ARMENIAN,
+        Script.GEORGIAN,
+        Script.ETHIOPIC,
+        Script.THAANA,
+        Script.KHMER,
+        Script.LAO,
+        Script.MYANMAR,
+        Script.THAI,
+        Script.SINHALA,
+        Script.TIBETAN,
+        Script.TAMIL,
+        Script.TELUGU,
+        Script.GUJARATI,
+        Script.KANNADA,
+        Script.MALAYALAM,
+        Script.GURMUKHI,
         "ORIYA",
         "ODIA",
     ):

@@ -25,6 +25,37 @@ class FinalizeTokenizer:
 
 
 class AccentStrippingTests(unittest.TestCase):
+    def test_script_enum_matches_iso_script_endings(self) -> None:
+        self.assertEqual(Script.LATIN, "Latn")
+        self.assertEqual(Script.CYRILLIC, "Cyrl")
+        self.assertEqual(Script.ARABIC, "Arab")
+        self.assertEqual(Script.HEBREW, "Hebr")
+        self.assertEqual(Script.DEVANAGARI, "Deva")
+        self.assertEqual(Script.BENGALI, "Beng")
+        self.assertEqual(Script.GREEK, "Grek")
+        self.assertEqual(Script.ARMENIAN, "Armn")
+        self.assertEqual(Script.GEORGIAN, "Geor")
+        self.assertEqual(Script.ETHIOPIC, "Ethi")
+        self.assertEqual(Script.THAANA, "Thaa")
+        self.assertEqual(Script.HIRAGANA, "Hira")
+        self.assertEqual(Script.KATAKANA, "Kana")
+        self.assertEqual(Script.JAPANESE, "Jpan")
+        self.assertEqual(Script.HAN, "Hani")
+        self.assertEqual(Script.HANGUL, "Hang")
+        self.assertEqual(Script.KHMER, "Khmr")
+        self.assertEqual(Script.LAO, "Laoo")
+        self.assertEqual(Script.MYANMAR, "Mymr")
+        self.assertEqual(Script.THAI, "Thai")
+        self.assertEqual(Script.SINHALA, "Sinh")
+        self.assertEqual(Script.TIBETAN, "Tibt")
+        self.assertEqual(Script.TAMIL, "Taml")
+        self.assertEqual(Script.TELUGU, "Telu")
+        self.assertEqual(Script.GUJARATI, "Gujr")
+        self.assertEqual(Script.KANNADA, "Knda")
+        self.assertEqual(Script.MALAYALAM, "Mlym")
+        self.assertEqual(Script.GURMUKHI, "Guru")
+        self.assertEqual(Script.ORIYA, "Orya")
+
     def test_hindi_is_its_own_bucket(self) -> None:
         self.assertEqual(LANG_TO_GROUP["hi"], "Hindi")
 
@@ -34,7 +65,8 @@ class AccentStrippingTests(unittest.TestCase):
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Bengali"], Script.BENGALI)
         self.assertEqual(LANG_TO_GROUP["xh"], "AfricanLatin")
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Hebrew"], Script.HEBREW)
-        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Yiddish"], Script.HEBREW)
+        self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Hebrew"], Script.HEBREW)
+        self.assertIn("yi", synthetic_build.LANGUAGE_GROUPS["Hebrew"])
         self.assertEqual(LANGUAGE_GROUP_SCRIPTS["Russian"], Script.CYRILLIC)
 
 
