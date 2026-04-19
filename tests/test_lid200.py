@@ -15,11 +15,10 @@ import os
 from collections import defaultdict
 import sys
 from pathlib import Path
-import torch  # Added for GPU detection
 
 from datasets import load_dataset
 from tqdm import tqdm
-from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
+from transformers import AutoModelForSequenceClassification, AutoModelForTokenClassification, AutoTokenizer
 
 # Attach the current directory (project root) to sys.path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +26,7 @@ project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.insert(0, project_root)
 from language import ALL_LANGS, canonical_lang, is_dataset_label_script_compatible
 from evaluation_language_utils import dominant_language_from_entities
+from evaluation_prediction_utils import predict_multilabel_texts, predict_token_classification_texts
 
 MODEL_CHECKPOINT = "DerivedFunction/lang-ner-xlmr"
 
@@ -60,6 +60,18 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("lid200_mismatches.jsonl"),
         help="Path to write mismatched examples as JSONL.",
+    )
+    parser.add_argument(
+        "--model-type",
+        choices=["token-classification", "multi-label-classification"],
+        default="token-classification",
+        help="Choose the inference head to evaluate. Multilabel mode expects a sequence-classification checkpoint.",
+    )
+    parser.add_argument(
+        "--model-checkpoint",
+        type=str,
+        default=MODEL_CHECKPOINT,
+        help="Model checkpoint to load for evaluation.",
     )
     return parser.parse_args()
 
@@ -105,9 +117,12 @@ def main() -> None:
 
     # ===== LOAD MODEL & TOKENIZER =====
     print("\n1. Loading model and tokenizer...")
-    model = AutoModelForTokenClassification.from_pretrained(MODEL_CHECKPOINT)
+    if args.model_type == "token-classification":
+        model = AutoModelForTokenClassification.from_pretrained(args.model_checkpoint)
+    else:
+        model = AutoModelForSequenceClassification.from_pretrained(args.model_checkpoint)
     tokenizer = AutoTokenizer.from_pretrained("xlm-roberta-base")
-    print(f"   ✓ Model loaded: {MODEL_CHECKPOINT}")
+    print(f"   ✓ Model loaded: {args.model_checkpoint}")
     print(f"   ✓ Tokenizer loaded")
 
     # ===== LOAD DATASET =====
@@ -155,19 +170,8 @@ def main() -> None:
             "Check the --langs values against the supported language list."
         )
 
-    # ===== SETUP PIPELINE =====
-    print("\n4. Setting up inference pipeline...")
-    nlp = pipeline(
-        "token-classification",
-        model=model,
-        tokenizer=tokenizer,
-        aggregation_strategy="simple",
-        device=0 if torch.cuda.is_available() else -1, # Use GPU if available
-    )
-    print("   ✓ Pipeline ready")
-
     # ===== RUN INFERENCE =====
-    print("\n5. Running inference on filtered dataset...")
+    print(f"\n4. Running inference on filtered dataset using {args.model_type}...")
     print("-" * 80)
 
     correct_count = 0
@@ -176,15 +180,21 @@ def main() -> None:
     results_by_lang = defaultdict(list)
     mismatches: list[dict[str, object]] = []
 
-    # Prepare texts for batch inference, replicating the original text[:512] truncation
     texts_for_inference = [example[text_column] for example in filtered_test]
-
-    # Run inference on all texts at once using the pipeline
-    # The pipeline will handle batching internally for efficiency on GPU
-    all_predictions = nlp(
-        texts_for_inference,
-        batch_size=args.batch_size,
-    )
+    if args.model_type == "token-classification":
+        all_predictions = predict_token_classification_texts(
+            texts_for_inference,
+            model=model,
+            tokenizer=tokenizer,
+            batch_size=args.batch_size,
+        )
+    else:
+        all_predictions = predict_multilabel_texts(
+            texts_for_inference,
+            model=model,
+            tokenizer=tokenizer,
+            batch_size=args.batch_size,
+        )
 
     print(f"Processing {len(filtered_test)} examples and their predictions...\n")
 
@@ -199,7 +209,10 @@ def main() -> None:
         if true_lang not in ALL_LANGS:
             continue
 
-        pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(predictions)
+        if args.model_type == "token-classification":
+            pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(predictions)
+        else:
+            pred_lang, lang_stats, ignored_artifacts = predictions
         if not pred_lang:
             continue
 

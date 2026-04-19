@@ -14,13 +14,14 @@ from pathlib import Path
 
 from datasets import load_dataset
 from tqdm import tqdm
-from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
+from transformers import AutoModelForSequenceClassification, AutoModelForTokenClassification, AutoTokenizer
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.insert(0, project_root)
 
 from evaluation_language_utils import dominant_language_from_entities
+from evaluation_prediction_utils import predict_multilabel_texts, predict_token_classification_texts
 
 MODEL_CHECKPOINT = "DerivedFunction/lang-ner-xlmr"
 TOKENIZER_MODEL = "xlm-roberta-base"
@@ -42,6 +43,24 @@ def _parse_args() -> argparse.Namespace:
         default=Path("papluca_mismatches.jsonl"),
         help="Path to write mismatched examples as JSONL.",
     )
+    parser.add_argument(
+        "--model-type",
+        choices=["token-classification", "multi-label-classification"],
+        default="token-classification",
+        help="Choose the inference head to evaluate. Multilabel mode expects a sequence-classification checkpoint.",
+    )
+    parser.add_argument(
+        "--model-checkpoint",
+        type=str,
+        default=MODEL_CHECKPOINT,
+        help="Model checkpoint to load for evaluation.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Batch size used for batched inference.",
+    )
     return parser.parse_args()
 
 
@@ -53,9 +72,12 @@ def main() -> None:
     print("=" * 80)
 
     print("\n1. Loading model and tokenizer...")
-    model = AutoModelForTokenClassification.from_pretrained(MODEL_CHECKPOINT)
+    if args.model_type == "token-classification":
+        model = AutoModelForTokenClassification.from_pretrained(args.model_checkpoint)
+    else:
+        model = AutoModelForSequenceClassification.from_pretrained(args.model_checkpoint)
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_MODEL)
-    print(f"   ✓ Model loaded: {MODEL_CHECKPOINT}")
+    print(f"   ✓ Model loaded: {args.model_checkpoint}")
     print(f"   ✓ Tokenizer loaded: {TOKENIZER_MODEL}")
 
     print("\n2. Loading papluca/language-identification dataset...")
@@ -71,16 +93,7 @@ def main() -> None:
         print(f"   ✗ Error loading dataset: {e}")
         raise SystemExit(1) from e
 
-    print("\n3. Setting up inference pipeline...")
-    nlp = pipeline(
-        "token-classification",
-        model=model,
-        tokenizer=tokenizer,
-        aggregation_strategy="simple",
-    )
-    print("   ✓ Pipeline ready")
-
-    print("\n4. Running inference on dataset...")
+    print(f"\n3. Running inference on dataset using {args.model_type}...")
     print("-" * 80)
 
     papluca_to_iso = {
@@ -110,8 +123,25 @@ def main() -> None:
     sample_size = min(args.sample_size, len(test_data))
     print(f"Processing {sample_size} examples...\n")
 
-    for example in tqdm(
-        test_data.select(range(sample_size)),
+    sample_data = test_data.select(range(sample_size))
+    texts = [example["text"][:512] for example in sample_data]
+    if args.model_type == "token-classification":
+        predictions = predict_token_classification_texts(
+            texts,
+            model=model,
+            tokenizer=tokenizer,
+            batch_size=args.batch_size,
+        )
+    else:
+        predictions = predict_multilabel_texts(
+            texts,
+            model=model,
+            tokenizer=tokenizer,
+            batch_size=args.batch_size,
+        )
+
+    for example, prediction in tqdm(
+        zip(sample_data, predictions),
         total=sample_size,
         desc="Running inference",
     ):
@@ -119,9 +149,10 @@ def main() -> None:
         true_lang_name = example["labels"]
         true_lang = papluca_to_iso.get(true_lang_name.lower(), true_lang_name.lower())
 
-        result = nlp(text[:512])
-
-        pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(result)
+        if args.model_type == "token-classification":
+            pred_lang, lang_stats, ignored_artifacts = dominant_language_from_entities(prediction)
+        else:
+            pred_lang, lang_stats, ignored_artifacts = prediction
         if not pred_lang:
             continue
 
