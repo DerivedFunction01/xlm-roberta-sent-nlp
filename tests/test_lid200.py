@@ -14,6 +14,7 @@ import json
 import os
 from collections import defaultdict
 import sys
+from pathlib import Path
 import torch  # Added for GPU detection
 
 from datasets import load_dataset
@@ -53,6 +54,12 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=32,
         help="Batch size for inference on GPU.",
+    )
+    parser.add_argument(
+        "--mismatch-output",
+        type=Path,
+        default=Path("lid200_mismatches.jsonl"),
+        help="Path to write mismatched examples as JSONL.",
     )
     return parser.parse_args()
 
@@ -157,6 +164,7 @@ def main() -> None:
     total_count = 0
     per_lang_stats = defaultdict(lambda: {"correct": 0, "total": 0})
     results_by_lang = defaultdict(list)
+    mismatches: list[dict[str, object]] = []
 
     # Prepare texts for batch inference, replicating the original text[:512] truncation
     texts_for_inference = [example[text_column] for example in filtered_test]
@@ -206,6 +214,28 @@ def main() -> None:
                 "ranked_langs": [lang for lang, _ in sorted(lang_stats.items(), key=lambda item: item[1]["rank_score"], reverse=True)],
             }
         )
+        if not is_correct:
+            mismatches.append(
+                {
+                    "text": text,
+                    "text_preview": text[:200],
+                    "predicted": pred_lang,
+                    "true_lang": true_lang,
+                    "dataset_label": true_lang_name,
+                    "score": lang_stats.get(pred_lang, {}).get("rank_score", 0.0),
+                    "ignored_artifacts": ignored_artifacts,
+                    "ranked_langs": [
+                        {
+                            "lang": lang,
+                            "rank_score": float(stat["rank_score"]),
+                            "coverage_pct": float(stat["coverage_pct"]),
+                            "avg_confidence": float(stat["avg_confidence"]),
+                            "entity_count": int(stat["entity_count"]),
+                        }
+                        for lang, stat in sorted(lang_stats.items(), key=lambda item: item[1]["rank_score"], reverse=True)
+                    ],
+                }
+            )
 
     # ===== RESULTS =====
     print("\n" + "=" * 80)
@@ -258,6 +288,13 @@ def main() -> None:
     print(f"\nLanguages covered:")
     print(f"  Total languages in model: {len(ALL_LANGS)}")
     print(f"  Filtered languages: {len(per_lang_stats)}")
+
+    if args.mismatch_output:
+        args.mismatch_output.parent.mkdir(parents=True, exist_ok=True)
+        with args.mismatch_output.open("w", encoding="utf-8") as f:
+            for item in mismatches:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        print(f"\n✓ Mismatches saved to {args.mismatch_output} ({len(mismatches)} rows)")
 
     if any(per_lang_stats[l]["total"] > 5 for l in per_lang_stats):
         best_lang = max(
