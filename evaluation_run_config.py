@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_MODEL_NAME = "DerivedFunction/lang-ner-xlmr"
+DEFAULT_MODEL_NAME = "model-name"
 DEFAULT_TASK_TYPE = "token-classification"
 VALID_TASK_TYPES = {"token-classification", "multi-label-classification"}
 
@@ -22,7 +22,7 @@ def _default_config(*, config_id: str, run_name: str) -> dict[str, Any]:
     if run_name == "papluca":
         base.update(
             {
-                "sample_size": 2000,
+                "sample_size": 10000,
                 "batch_size": 32,
             }
         )
